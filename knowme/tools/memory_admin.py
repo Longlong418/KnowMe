@@ -1,9 +1,14 @@
 """Tools that let the agent manage its OWN memory — so it feels like a personal
-assistant that learns, not a black box. Three tools:
+assistant that learns, not a black box. Four tools:
 
   manage_memory  — search / update / delete facts and episodes (the CRUD)
   update_soul    — append a durable behaviour rule to SOUL.md (its persona)
-  create_skill   — write a new SKILL.md, so the agent builds its own procedures
+  skill          — READ procedural memory: list skills, or load one by name
+  create_skill   — WRITE procedural memory: author a new SKILL.md
+
+skill and create_skill are the two halves of one thing — procedures the agent
+keeps for itself. `skill` is how a stored procedure comes back; nothing is
+pushed into the prompt on the agent's behalf.
 
 Everything writes to the same local files the dashboard shows; nothing leaves
 the machine. update_soul is append-only (the agent can't delete its own honesty
@@ -115,6 +120,48 @@ def make_update_soul_tool(settings) -> Tool:
     )
 
 
+def make_skill_tool(memory) -> Tool:
+    """Read side of procedural memory: list skills, or load one by name.
+
+    Two levels in ONE tool on purpose. Every extra tool widens the tool block,
+    and that block is the front of the cacheable prefix — one optional-argument
+    tool costs a fraction of two, and `list_events` already reads this way.
+
+    The model drives this. Nothing is injected unless it asks, so an installed
+    skill costs nothing until it is used (see the loader's docstring for why the
+    keyword matcher this replaced was removed)."""
+
+    def skill(name: str = "") -> str:
+        if not name.strip():
+            return memory.skills.catalog()
+        found = memory.skills.find(name)
+        if found is None:
+            # Answer with the menu rather than only a refusal — a wrong guess is
+            # usually a near miss, and this saves the follow-up round trip.
+            return f"No skill named '{name}'. Available:\n{memory.skills.catalog()}"
+        return f"# {found.name}\n\n{found.body}"
+
+    return Tool(
+        name="skill",
+        description=(
+            "Your saved skills: instructions for tasks you've been taught to do a "
+            "particular way. Call with no arguments to list them (name + what each "
+            "is for); call with a name to load that skill's full instructions. Check "
+            "the list BEFORE starting anything structured or repeatable — a weekly "
+            "review, a report format, a recurring lookup — rather than improvising a "
+            "workflow you may have already written down."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "skill to load; omit to list every skill"},
+            },
+        },
+        fn=skill,
+    )
+
+
 def make_create_skill_tool(settings, memory) -> Tool:
     def create_skill(name: str, description: str, body: str) -> str:
         name = (name or "").strip().lower().replace(" ", "-")
@@ -130,7 +177,10 @@ def make_create_skill_tool(settings, memory) -> Tool:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text, encoding="utf-8")
         memory.skills.refresh()  # live this session
-        return f"Created skill '{name}'. It will trigger on: {description.strip()}"
+        # "It will trigger on ..." described the keyword matcher, which is gone.
+        # A skill no longer fires by itself — the model loads it on purpose.
+        return (f"Created skill '{name}'. It's in your skill list now — load it "
+                f"with the `skill` tool when: {description.strip()}")
 
     return Tool(
         name="create_skill",

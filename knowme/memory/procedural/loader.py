@@ -4,10 +4,22 @@ Official Anthropic Agent Skills format: YAML frontmatter with `name` and
 `description` (the description doubles as the trigger — no custom `triggers:`
 field, which launch-agent-skills used before the spec settled).
 
-Progressive disclosure, the part that matters:
-  1. frontmatter of every skill is always scanned (cheap)
-  2. a skill's BODY is loaded into the prompt only when it matches the message
-  3. files a skill references are only read if the model asks
+Progressive disclosure, the part that matters — four levels, and the MODEL
+drives the bottom three:
+  1. the system prompt only says that skills EXIST (constant size, so it never
+     grows with the number of skills installed and never disturbs the cache
+     prefix)
+  2. catalog() — name + description of every skill, and only when the model
+     asks for them through the `skill` tool
+  3. find() — one skill's BODY, loaded only when the model names it
+  4. files a skill references are only read if the model asks for those
+
+This used to stop at level 1.5: a keyword-overlap matcher picked the "top 2"
+skills and their full bodies were injected into every turn that scored a hit.
+It fired reliably but understood nothing (two shared words of 3+ letters was the
+whole test), and it paid full price for a skill the model never used. The
+harness now only says "there are skills"; which one matters is a judgment the
+model is better at than a word-overlap count.
 """
 
 from __future__ import annotations
@@ -74,18 +86,31 @@ class SkillLoader:
                     self.skills.append(skill)
         self._sig = self._scan_sig()
 
-    def match(self, message: str, max_skills: int = 2) -> list[Skill]:
-        """Transparent trigger: keyword overlap between the message and each
-        skill's name+description. No embeddings, no magic — you can compute
-        the score in your head."""
-        if self._scan_sig() != self._sig:   # a skill was added/edited — reload
+    def _reload_if_changed(self) -> None:
+        """A skill added or edited on disk becomes live without a restart. This
+        used to be buried in match(); every reader has to do it now, so it gets
+        one home instead of three chances to forget."""
+        if self._scan_sig() != self._sig:
             self.refresh()
-        msg_words = set(re.findall(r"[a-z0-9]{3,}", message.lower()))
-        scored = []
+
+    def catalog(self) -> str:
+        """Every skill as one `name: description` line — level 1 of progressive
+        disclosure, and the ONLY part a skill costs until it is used.
+
+        The model asks for this; the harness no longer pushes it. Nothing here
+        is injected automatically, so an installed-but-unused skill costs zero
+        tokens. Sorted by path (see refresh), so repeated calls return identical
+        bytes — which keeps the result harmless to leave in the history."""
+        self._reload_if_changed()
+        if not self.skills:
+            return "No skills are installed."
+        return "\n".join(f"- {s.name}: {s.description}" for s in self.skills)
+
+    def find(self, name: str) -> Skill | None:
+        """One skill by name — level 2, the body the model explicitly asked for."""
+        self._reload_if_changed()
+        wanted = (name or "").strip().lower()
         for skill in self.skills:
-            skill_words = set(re.findall(r"[a-z0-9]{3,}", (skill.name + " " + skill.description).lower()))
-            overlap = len(msg_words & skill_words)
-            if overlap >= 2:
-                scored.append((overlap, skill))
-        scored.sort(key=lambda pair: -pair[0])
-        return [skill for _, skill in scored[:max_skills]]
+            if skill.name.lower() == wanted:
+                return skill
+        return None

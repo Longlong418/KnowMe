@@ -37,6 +37,10 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
     if memory is not None:
         registry.register(memory_admin.make_manage_memory_tool(memory))
         registry.register(memory_admin.make_update_soul_tool(settings))
+        # Procedural memory, both halves: `skill` lists/loads (the model pulls),
+        # `create_skill` authors (the model writes). Registered here rather than
+        # injected into the prompt, so an unused skill costs nothing.
+        registry.register(memory_admin.make_skill_tool(memory))
         registry.register(memory_admin.make_create_skill_tool(settings, memory))
 
     # Experimental tools — off by default; opt in with KNOWME_EXPERIMENTAL=1.

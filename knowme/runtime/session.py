@@ -11,6 +11,8 @@ away. What persists lives in knowme/memory. Working memory =
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from knowme.config import Settings
 
 DEFAULT_SOUL = """\
@@ -19,15 +21,14 @@ You are concise, warm, and proactive. You remember what your user tells you.
 
 Rules:
 - When the user wants to schedule something, use create_event. Resolve relative
-  dates and times ("next Tuesday", "in 30 minutes") to ISO timestamps yourself;
-  the current date and time are given below — trust them, never ask the user
-  what time it is.
+  dates and times ("next Tuesday", "in 30 minutes") to ISO timestamps yourself.
 - When the user asks what's on their calendar (a day, a week, "yesterday"), use
   list_events — you CAN read the calendar, not just write to it.
 - When the user shares something durable about a person, project, or preference,
   use save_note to remember it.
 - When asked to message someone, use send_message (it drafts to a local outbox).
-- If memory context is provided below, trust it — it came from your own store.
+- If memory context is provided with the message, trust it — it came from your
+  own store.
 - Call each tool at most once per request. Your history shows [tools used: ...]
   lines for past turns — if a tool already ran, do NOT run it again; answer
   from that record instead.
@@ -35,6 +36,11 @@ Rules:
   its artifact landed (local calendar file, Apple Calendar, memory database at
   .knowme/state.db) — relay that truthfully, and never claim something synced
   anywhere the tool output doesn't say.
+- You have SKILLS — instructions you've been taught for doing particular tasks
+  a particular way. The `skill` tool lists them; call it with no arguments
+  before starting anything structured or repeatable (a weekly review, a report
+  in a set format, a recurring lookup), then load the one you need by name.
+  Don't improvise a workflow you may already have written down.
 - You can manage your own memory: use manage_memory to correct or forget facts,
   update_soul to save a standing preference the user gives you, and create_skill
   to save a repeatable workflow the user teaches you (only after they say yes).
@@ -60,19 +66,44 @@ class Session:
         self.session_id = session_id
         self.history: list[dict] = []
 
-    def build_system(self, user_message: str, notify=None) -> str:
-        from datetime import datetime
+    def build_system(self) -> str:
+        """The STABLE half of the prompt — byte-identical for every turn.
 
-        # The agent runs on your laptop, so it should know your laptop's clock.
-        # Local time WITH the timezone name — enough to resolve "in 30 minutes".
+        Nothing per-turn belongs here. Prompt caching is a PREFIX match: a
+        clock interpolated into this string changes every minute, and every
+        byte after it is re-billed at full price on every single turn. It fails
+        silently, too — the request still succeeds, the bill is just larger.
+
+        So this holds only what a session cannot change underneath you: the
+        persona, and the model's own identity. The model id can change, but only
+        by switching model — which invalidates the cache anyway, because caches
+        are model-scoped. Stating it here therefore costs nothing.
+
+        Everything that moves turn to turn lives in build_turn_context().
+        """
+        return "\n".join([
+            load_soul(self.settings),
+            # the agent should know its own brain — "what model are you?"
+            # is the first question every curious user asks
+            (f"\nYour model: you are running on '{self.settings.model}' via the "
+             f"'{self.settings.provider}' provider, inside KnowMe, a local-first "
+             "open-source agent harness."),
+        ])
+
+    def build_turn_context(self, user_message: str, notify=None) -> str:
+        """The VOLATILE half — everything that changes from turn to turn: the
+        clock, the gated retrieval, the matched skills.
+
+        Returned as text for the caller to prepend to the user's message rather
+        than append to the system prompt. Where it sits decides what it breaks:
+        a message at turn 5 invalidates nothing before turn 5, while a system
+        prompt that changes every turn invalidates everything.
+
+        The agent runs on your laptop, so it should know your laptop's clock —
+        local time WITH the timezone name, enough to resolve "in 30 minutes".
+        """
         now = datetime.now().astimezone()
-        parts = [load_soul(self.settings),
-                 f"\nRight now it is {now:%A, %Y-%m-%d %H:%M} ({now:%Z}, UTC{now:%z}).",
-                 # the agent should know its own brain — "what model are you?"
-                 # is the first question every curious user asks
-                 (f"Your model: you are running on '{self.settings.model}' via the "
-                 f"'{self.settings.provider}' provider, inside KnowMe, a local-first "
-                 "open-source agent harness.")]
+        parts = [f"Right now it is {now:%A, %Y-%m-%d %H:%M} ({now:%Z}, UTC{now:%z})."]
 
         if self.memory is not None:
             # Hero moment #1: a cheap judge decides IF we retrieve at all —
@@ -81,11 +112,13 @@ class Session:
             retrieved = self.memory.gated_retrieve(user_message, notify=notify)
             if retrieved:
                 parts.append("\nRelevant memory:\n" + retrieved)
-            skills = self.memory.matching_skills(user_message)
-            if skills:
-                parts.append("\nRelevant skill instructions:\n" + skills)
+            # Skills are NOT injected here any more. The model pulls what it
+            # needs through the `skill` tool; the system prompt only tells it
+            # that skills exist. Pushing skill bodies in on every turn meant
+            # paying for a skill the model never used — and guessing which one
+            # matters from word overlap is a judgment the model does better.
 
-        return "\n".join(parts)
+        return "[context]\n" + "\n".join(parts)
 
     def add_exchange(self, user_message: str, reply: str, tool_calls: list | None = None,
                      source: str = "cli", meta: dict | None = None) -> None:

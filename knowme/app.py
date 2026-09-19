@@ -115,13 +115,23 @@ class KnowMe:
         """The classic turn: assemble working memory, run THE loop. Extracted
         verbatim so the graph's full_agent node calls the SAME code as the
         flag-off default — loop-as-a-node can never drift from loop-as-default."""
-        system = self.session.build_system(user_message, notify=notify)
+        system = self.session.build_system()
+        # Everything per-turn rides WITH the user's message, never in the system
+        # prompt: the clock, the gated retrieval, the matched skills. The system
+        # prompt therefore stays byte-identical turn over turn, so a provider's
+        # prefix cache can hold onto it — prompt caching is a prefix match, and
+        # a per-turn change anywhere in the prefix re-bills everything after it.
+        #
+        # Only the PROMPT gets the context block; `history` keeps the bare
+        # message (see add_exchange), so context never accumulates across turns.
+        context = self.session.build_turn_context(user_message, notify=notify)
+        prompt = f"{context}\n\n{user_message}"
         # Working memory is a bounded window: only the last N turns (2 rows
         # each) enter the prompt, so context/cost/latency stay flat no matter
         # how long the conversation runs. Older turns live in state.db and
         # come back via the retrieval gate + episodic memory when relevant.
         window = self.settings.history_turns * 2
-        messages = self.session.history[-window:] + [{"role": "user", "content": user_message}]
+        messages = self.session.history[-window:] + [{"role": "user", "content": prompt}]
 
         return run_loop(
             client=self.client,

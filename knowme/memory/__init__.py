@@ -100,9 +100,10 @@ class Memory:
         return "\n".join(found)
 
     # ---- procedural
-    def matching_skills(self, message: str) -> str:
-        matched = self.skills.match(message)
-        return "\n\n".join(f"### {s.name}\n{s.body}" for s in matched)
+    # No matching_skills() any more. The harness used to push the "top 2"
+    # keyword-overlapping skill BODIES into every turn; the model now pulls what
+    # it wants through the `skill` tool instead (see tools/memory_admin.py).
+    # Skills are reached via memory.skills.catalog() / .find(name).
 
     # ---- write paths
     def log_chat(self, user_message: str, reply: str, session_id: str = "default",
