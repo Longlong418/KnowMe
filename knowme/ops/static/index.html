@@ -1,0 +1,62 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KnowMe</title>
+<link rel="stylesheet" href="/static/style.css"></head><body>
+<nav id="nav">
+  <div class="brand">KnowMe<small id="model" style="cursor:pointer" title="点击切换模型" onclick="location.hash='#models'"></small>
+    <button id="nav-toggle" title="隐藏侧栏">&#10094;</button></div>
+  <div class="grp">系统</div>
+  <a href="#overview" data-v="overview">总览</a>
+  <a href="#gateway" data-v="gateway">网关 <span class="n" id="n-gw"></span></a>
+  <a href="#loop" data-v="loop">循环 <span class="n" id="n-loop"></span></a>
+  <a href="#graph" data-v="graph">图工作流 <span class="n" id="n-graph"></span></a>
+  <a href="#memory" data-v="memory">记忆 <span class="n" id="n-mem"></span></a>
+  <a href="#tools" data-v="tools">工具 <span class="n" id="n-tools"></span></a>
+  <a href="#database" data-v="database">数据库 <span class="n" id="n-db"></span></a>
+  <a href="#ops" data-v="ops">运维 <span class="n" id="n-ops"></span></a>
+  <div class="grp">设置</div>
+  <a href="#models" data-v="models">模型</a>
+  <a href="#connections" data-v="connections">连接</a>
+  <a href="#settings" data-v="settings">行为</a>
+</nav>
+<div class="resizer" id="nav-resizer" title="拖动调整侧栏宽度"></div>
+<main>
+  <header class="pagehead">
+    <h1 id="title">总览</h1>
+    <div class="sub" id="sub"></div>
+  </header>
+  <div id="view"></div>
+</main>
+<div class="resizer" id="dock-resizer" title="拖动调整聊天区宽度"></div>
+<aside id="dock">
+  <div class="dockhead">
+    <span class="dt">聊天</span>
+    <span class="arch-status"></span>
+    <button id="dock-close" title="收起聊天区">&rsaquo;</button>
+  </div>
+  <div class="sesshead" style="padding:8px 2px 0">
+    <button class="sessbtn" onclick="newChat()">+ 新建对话</button>
+    <button class="sessbtn" onclick="toggleSessMenu(event)">历史记录 &#9662;</button>
+    <button class="sessbtn teletoggle" id="teletoggle" onclick="toggleTele()" title="显示或隐藏每轮统计：门控决策、耗时、迭代和工具">统计</button>
+    <button class="modelchip" id="modelchip" onclick="toggleModelMenu(event)" title="切换当前对话使用的模型">&hellip;</button>
+  </div>
+  <div class="chatlog" id="docklog"></div>
+  <div class="chatbar">
+    <input id="dmsg" placeholder="给 KnowMe 发消息…" autocomplete="off">
+    <button id="dsend">发送</button>
+  </div>
+</aside>
+<button id="nav-reopen" title="显示侧栏">&#9776;</button>
+<button id="dock-reopen" title="打开聊天区">&lsaquo; 聊天</button>
+<!-- Frontend is split into focused classic scripts sharing one global scope
+     (no build step, no modules). Order matters only in that main.js runs the
+     bootstrap and must load LAST. See static/README.md for the file map. -->
+<script src="/static/js/util.js"></script>
+<script src="/static/js/memory.js"></script>
+<script src="/static/js/models.js"></script>
+<script src="/static/js/render.js"></script>
+<script src="/static/js/diagram.js"></script>
+<script src="/static/js/graph.js"></script>
+<script src="/static/js/views.js"></script>
+<script src="/static/js/dock.js"></script>
+<script src="/static/js/main.js"></script></body></html>

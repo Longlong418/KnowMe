@@ -1,0 +1,41 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+state.db
+traces/
+*.ics
+.DS_Store
+dist/
+.pytest_cache/
+.ruff_cache/
+.knowme/
+.knowme.bak-*/
+.knowme.prerename-bak/
+# Any alternate agent home, not just the default one. KNOWME_HOME can point anywhere.
+# Without this glob only `.knowme/` was covered, so a second home's SOUL.md,
+# usage.jsonl and outbox/ were tracked — the exact files you least want pushed.
+.knowme-*/
+.env.prerename-bak
+
+# Delegated coding deliverables (dated run folders + auto-run logs)
+knowme_workspace/
+
+# Google OAuth: the client file you download from Cloud Console, and any token
+# it produces. Nothing here should ever be committed — belt and braces, because
+# the docs used to tell people to drop credentials.json in the repo root.
+credentials.json
+client_secret*.json
+*token*.json
+.gcp/
+docs/*
+
+.knowme
+.knowme-arena
+
+sql
+
+scripts
+read.md
+examples/*
+evals/*
