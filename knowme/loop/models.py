@@ -231,6 +231,17 @@ def _belongs_elsewhere(model: str, provider_name: str) -> bool:
     family = model.split("-")[0].lower()
     if "/" in model or not family:
         return False
+    # A provider that ships models in this family ITSELF is never "another
+    # provider" for them. Aggregators break the owner map: opencode_zen/go
+    # resell `deepseek-v4-flash*`, so they declare the family "deepseek" and —
+    # sitting later in PROVIDERS — OVERWRITE deepseek's own claim to it (the
+    # dict comprehension below keeps the last writer, not the true owner).
+    # Without this line `_belongs_elsewhere("deepseek-flash", "deepseek")` was
+    # True, so get_client dropped the user's KNOWME_MODEL and silently fell back
+    # to the provider default — the env override looked broken, not overridden.
+    current = PROVIDERS.get(provider_name)
+    if current is not None and family in _families(current):
+        return False
     owner = {f: name for name, p in PROVIDERS.items() if "/" not in (p.model or "x")
              for f in _families(p)}.get(family)
     return bool(owner) and owner != provider_name
