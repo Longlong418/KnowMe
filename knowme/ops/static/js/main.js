@@ -10,7 +10,7 @@ let activeView = null, activeSub = null;
 // which is a behaviour, not a setting.
 const TITLES = {chat:"聊天与观察", overview:"总览", gateway:"网关", loop:"循环",
                 memory:"记忆", tools:"工具", models:"模型", connections:"连接",
-                ops:"LLM 运维",
+                ops:"LLM 运维", reader:"阅读器",
                 graph:"图工作流——为循环提供结构",
                 settings:"行为——每轮对话如何运行",
                 database:"数据库——KnowMe 在 state.db 中保存的一切"};
@@ -117,3 +117,37 @@ window.__hold = (v)=>{ animating = v; };   // test hook: freeze the diagram
 wireDock(); wireChrome();
 refresh(); setInterval(refresh, 5000); setInterval(tickLive, 1000);
 pollEvents(); setInterval(pollEvents, 450);   // live harness animation
+
+// Reader App helpers
+let currentDoc = null;
+
+function readerLoad(){
+  const input = document.getElementById("rc-file-input");
+  if (!input.files || !input.files[0]) { alert("请选择一个文件"); return; }
+  const file = input.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    currentDoc = { name: file.name, content: e.target.result };
+    document.getElementById("rc-content").innerHTML = "<pre>" + esc(e.target.result) + "</pre>";
+    document.getElementById("rc-content").dataset.path = file.name;
+  };
+  reader.readAsText(file);
+}
+
+function rcSend(){
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.toString().trim()) { alert("请先在文档中选中文字"); return; }
+  const text = sel.toString();
+  fetch("/api/extras", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "selection", text: text, source: currentDoc?.name || "(unknown)", session_id: D?.current_session || "default" })
+  }).then(r => r.json()).then(res => {
+    if (res.ok) {
+      document.getElementById("dmsg").value = "[选中文本] " + text.substring(0, 200) + (text.length > 200 ? "..." : "");
+      document.getElementById("rc-selection").style.display = "none";
+    } else {
+      alert("注入失败：" + (res.error || "未知错误"));
+    }
+  }).catch(err => alert("网络错误：" + err));
+}

@@ -572,6 +572,13 @@ const VIEWS = {
     if (sub==="consolidation") return h + memConsolidation(d);
     return h + memOverview(d);
   },
+  reader(d){
+    let h = `<div class="meta" style="margin-bottom:12px"><b>阅读器</b> — 从左侧文件输入或拖拽文档进入读取状态。选中文本会自动注入到聊天上下文。</div>`;
+    h += `<div style="margin-bottom:16px"><input type="file" id="rc-file-input" accept=".md,.txt,.py,.json,.csv,.html" style="margin-bottom:8px"><button class="save" onclick="readerLoad()">加载选中文件</button></div>`;
+    h += `<div id="rc-content" style="min-height:200px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:16px;"><p style="color:var(--ink2)">从输入框选择文件或拖拽文档进入阅读...</p></div>`;
+    h += `<div id="rc-selection" style="margin-top:16px;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;display:none"><div style="font-size:13px;color:var(--ink2);margin-bottom:8px"><b>选中文本：</b>已捕获</div><div id="rc-text" style="background:var(--accent-soft);padding:8px;border-radius:6px;color:var(--accent);margin-bottom:8px"></div><button class="save" onclick="rcSend()">注入到聊天</button></div>`;
+    return h;
+  },
   settings(d){
     const st = d.settings || {providers:[]};
     return `<h2>实验性工具</h2><div class="card">

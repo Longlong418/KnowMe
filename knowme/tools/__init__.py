@@ -87,4 +87,10 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
         except ImportError:
             print("mcp.json found but the 'mcp' package is missing — pip install 'knowme-agent[mcp]'")
 
+    # Reader tools — read local documents, get selection, add notes, highlight text.
+    # Always available for the default agent.
+    from knowme.tools.reader import make_reader_tools
+    for tool in make_reader_tools().values():
+        registry.register(tool)
+
     return registry

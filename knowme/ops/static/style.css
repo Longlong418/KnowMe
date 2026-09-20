@@ -592,6 +592,16 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
   .connmodal-message{flex-basis:100%}
 }
 
+/* Modern enhancements: subtle hover lifts and smooth transitions */
+.card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.tile:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+
+/* Smooth scrolling for the entire app */
+html { scroll-behavior: smooth; }
+
+/* Better focus indicators for accessibility */
+*:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* --- Memory arena: the fixture, readable before any of it has been run --- */
 .ma-seed{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);line-height:1.7}
 .ma-seed li{margin:1px 0}

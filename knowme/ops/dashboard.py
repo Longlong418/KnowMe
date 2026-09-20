@@ -637,9 +637,6 @@ def tools_info() -> dict:
 
 
 def run_query(payload: dict) -> dict:
-    """A tiny read-only SQL console (the Supabase-editor idea, scoped down).
-    Opens state.db in read-only mode so a write can't slip through, and only
-    accepts a single SELECT/WITH statement. Caps at 200 rows."""
     sql = (payload.get("sql") or "").strip().rstrip(";").strip()
     if not sql:
         return {"error": "Type a SELECT query."}
@@ -813,6 +810,30 @@ def memory_action(payload: dict) -> dict:
     return {"error": f"unknown action {action}"}
 
 
+# Application Context Bridge — stores extra context (selections, doc state)
+# that gets injected into the turn's prompt via extra_context.
+_app_context = {}  # module-level store, keyed by session_id
+
+
+def extras_action(payload: dict) -> dict:
+    """Store context from Reader Application for injection into agent turn.
+
+    POST with {'type': 'selection', 'text': '...', 'source': 'doc.md'}
+    Stores the context keyed by the current session_id for the next chat turn.
+    """
+    ctx_type = payload.get("type")
+    if ctx_type != "selection":
+        return {"error": f"unknown context type: {ctx_type}"}
+
+    text = payload.get("text", "")
+    source = payload.get("source", "")
+    session_id = payload.get("session_id", "default")
+
+    key = f"{session_id}:{ctx_type}"
+    _app_context[key] = {"type": ctx_type, "text": text, "source": source}
+    return {"ok": True, "key": key, "type": ctx_type, "text": text[:100] + "..." if len(text) > 100 else text}
+
+
 
 
 def events_since(cursor):
@@ -931,7 +952,7 @@ class Handler(BaseHTTPRequestHandler):
         routes = {"/api/chat": None, "/api/memory": memory_action, "/api/settings": apply_settings,
                   "/api/query": run_query, "/api/session": session_action, "/api/pin": pin_action,
                   "/api/connections": None, "/api/connections/test": None,
-                  "/api/providers": None}
+                  "/api/providers": None, "/api/extras": extras_action}
         if self.path not in routes:
             self.send_response(404)
             self.end_headers()
@@ -941,6 +962,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/chat":
                 message = (payload.get("message") or "").strip()
                 out = chat(message) if message else {"error": "empty message"}
+            elif self.path == "/api/extras":
+                out = extras_action(payload)
             elif self.path == "/api/connections":
                 result = apply_integration(payload.get("key", ""), payload.get("values") or {},
                                            tuple(payload.get("clear") or ()), force=bool(payload.get("force")))
