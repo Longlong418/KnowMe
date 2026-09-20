@@ -85,6 +85,18 @@ CREATE TABLE IF NOT EXISTS history_snips (
     archive_path TEXT NOT NULL DEFAULT '',
     updated_at TEXT DEFAULT (datetime('now'))
 );
+
+-- state_summary's record (runtime/state_summary.py): when a conversation was
+-- replaced by a summary of itself. `covered` is how many messages that summary
+-- accounts for — a COUNT, not an index, so reopening a session yields the
+-- summary plus whatever arrived after it.
+CREATE TABLE IF NOT EXISTS history_summaries (
+    session_id TEXT PRIMARY KEY,
+    covered INTEGER NOT NULL DEFAULT 0,
+    archive_path TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 

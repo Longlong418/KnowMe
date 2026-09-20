@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from knowme.config import Settings
-from knowme.runtime import snip_compact
+from knowme.runtime import snip_compact, state_summary
 from knowme.runtime import tool_entries as te
 
 DEFAULT_SOUL = """\
@@ -184,6 +184,11 @@ class Session:
         flat = [{"role": role, "content": text}
                 for user_msg, reply in self.memory.session_history(session_id)
                 for role, text in (("user", user_msg), ("assistant", reply))]
+        # A summarised conversation comes back AS the summary plus whatever
+        # arrived after it — not as the whole thread, and not as nothing.
+        # Without this the summary would undo itself the moment the user
+        # switched away and back. See runtime/state_summary.py.
+        flat = state_summary.rebuild(flat, self.settings.home, self.conn, session_id)
         self.history = snip_compact.rebuild(
             flat, self.settings.home, self.conn, session_id,
             self.settings.snip_head, self.settings.snip_tail)

@@ -12,7 +12,7 @@ from knowme.loop.agent import LoopResult, Observer, run_loop
 from knowme.loop.models import get_client
 from knowme.ops.pricing import context_for
 from knowme.ops.tracing import Tracer, compose
-from knowme.runtime import micro_compact, tool_budget
+from knowme.runtime import micro_compact, state_summary, tool_budget
 from knowme.runtime.session import Session
 from knowme.tools import build_registry
 
@@ -139,15 +139,17 @@ class KnowMe:
         # record, because that is what the person reading the dashboard is owed;
         # these rewrites exist only so the request fits.
         sent = self.session.history
+
+        # 1. the per-turn budget: a turn whose tool output is oversized keeps a
+        #    pointer plus an excerpt (runtime/tool_budget.py).
         sent = tool_budget.fit_history(
             sent, self.settings.home,
             self.settings.tool_result_budget, self.settings.tool_result_cap)
 
-        # The emergency valve, and the only compressor that measures the REAL
-        # request against the model's REAL window instead of a proxy
-        # (runtime/micro_compact.py). Last in the chain deliberately: it is the
-        # one that only matters once the other two have done what they can, and
-        # it is the most destructive of the three.
+        # 2. the emergency valve, and the only compressor that measures the REAL
+        #    request against the model's REAL window instead of a proxy. Last
+        #    deliberately: it is the most destructive of the three and only
+        #    matters once the others have done what they can.
         messages = sent + [{"role": "user", "content": prompt}]
         limit = context_for(self.settings.provider, self.settings.model)
         if micro_compact.prompt_tokens(system, messages) > self.settings.context_trigger * limit:
@@ -155,6 +157,23 @@ class KnowMe:
                 sent, self.settings.home,
                 self.settings.micro_keep, self.settings.micro_min_chars)
             messages = sent + [{"role": "user", "content": prompt}]
+
+            # 3. still over, after everything reversible has been tried: the
+            #    conversation is summarised and replaced. The ONLY lossy step in
+            #    the harness, which is why it is gated on the previous two
+            #    having already failed to bring this under the line
+            #    (runtime/state_summary.py).
+            if micro_compact.prompt_tokens(system, messages) > self.settings.context_trigger * limit:
+                replaced = state_summary.summarize(
+                    self.session.history, sent, self.settings.home, self.conn,
+                    self.session.session_id, self.client, self.settings.small_model,
+                    self.settings.summary_max_tokens)
+                if replaced is not None:
+                    # Working memory becomes the summary; chat_log keeps every
+                    # message, so the user's own record is untouched.
+                    self.session.history = replaced
+                    sent = replaced
+                    messages = sent + [{"role": "user", "content": prompt}]
 
         return run_loop(
             client=self.client,
