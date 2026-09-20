@@ -71,12 +71,13 @@ class Settings:
     # (watched kimi-k3 do exactly that at 2048). 8192 leaves room to think AND
     # answer; it's a ceiling, not a target, so efficient models still cost the same.
     max_tokens: int = field(default_factory=lambda: int(os.getenv("KNOWME_MAX_TOKENS", "8192")))
-    # Working memory is a SLIDING WINDOW (like context RAM): only the last N
-    # turns go into the prompt. Older turns aren't lost — they're in state.db,
-    # distilled into facts by consolidation, and pulled back by the retrieval
-    # gate when relevant. Without this cap a long thread (esp. the always-on
-    # Telegram session) resends its whole history every turn until it explodes.
-    history_turns: int = field(default_factory=lambda: int(os.getenv("KNOWME_HISTORY_TURNS", "12")))
+    # KNOWME_HISTORY_TURNS is GONE (2026-09-20), not deprecated. It capped
+    # working memory with history[-N:], which dropped every older turn without a
+    # trace — a long thread read to the model as though it had started late. The
+    # bound it existed for is now snip_head/snip_tail below, which ARCHIVES what
+    # it removes and leaves a marker saying so. The knob was removed rather than
+    # left as a no-op: a setting that silently stops applying is worse than one
+    # that is missing, because nothing tells you.
     # Tool results are the fastest-growing thing in the history window, and the
     # folded [tools used: ...] line re-sends them on every later turn. Two knobs
     # with two different jobs (see runtime/tool_budget.py):

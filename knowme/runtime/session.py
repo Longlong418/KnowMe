@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from knowme.config import Settings
+from knowme.runtime import snip_compact
 from knowme.runtime import tool_entries as te
 
 DEFAULT_SOUL = """\
@@ -63,10 +64,15 @@ class Session:
     """Holds one conversation: the chat history plus the recipe for the
     system prompt. One Session per gateway connection."""
 
-    def __init__(self, settings: Settings, memory=None, session_id: str = "default"):
+    def __init__(self, settings: Settings, memory=None, session_id: str = "default",
+                 conn=None):
         self.settings = settings
         self.memory = memory  # knowme.memory.Memory (None until Phase-2 wiring)
         self.session_id = session_id
+        # Only snip_compact's watermark needs this; when a caller passes a
+        # memory it already carries the same connection, so derive it rather
+        # than making every existing construction site learn a new argument.
+        self.conn = conn if conn is not None else getattr(memory, "conn", None)
         self.history: list[dict] = []
 
     def build_system(self) -> str:
@@ -147,6 +153,13 @@ class Session:
                 for c in tool_calls])
         self.history.append({"role": "user", "content": user_message})
         self.history.append({"role": "assistant", "content": record})
+        # The conversation-level bound. Runs here because this is the only place
+        # history grows, and it no-ops until the conversation is actually long
+        # (runtime/snip_compact.py). Replaces the old history[-N:] slice at the
+        # call site, which dropped the middle without saying so.
+        self.history = snip_compact.snip(
+            self.history, self.settings.home, self.conn, self.session_id,
+            self.settings.snip_head, self.settings.snip_tail)
         if self.memory is not None:
             self.memory.log_chat(user_message, record, session_id=self.session_id,
                                  source=source, meta=meta)
@@ -168,9 +181,9 @@ class Session:
         # recent tail here (as this used to) would drop the opening the snip
         # deliberately protects — and would do it silently, which is the failure
         # mode snip_compact exists to remove.
-        # only the recent tail of a past conversation goes back into working
-        # memory (respond() also windows it, but don't hold the whole thread)
-        turns = self.settings.history_turns
-        for user_msg, reply in list(self.memory.session_history(session_id))[-turns:]:
-            self.history.append({"role": "user", "content": user_msg})
-            self.history.append({"role": "assistant", "content": reply})
+        flat = [{"role": role, "content": text}
+                for user_msg, reply in self.memory.session_history(session_id)
+                for role, text in (("user", user_msg), ("assistant", reply))]
+        self.history = snip_compact.rebuild(
+            flat, self.settings.home, self.conn, session_id,
+            self.settings.snip_head, self.settings.snip_tail)

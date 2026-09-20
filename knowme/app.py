@@ -31,7 +31,7 @@ class KnowMe:
         self.memory = Memory(self.conn, self.settings, self.client)
         self.tools = build_registry(self.conn, self.settings, self.memory)
         self.mcp_bridge = getattr(self.tools, "mcp_bridge", None)
-        self.session = Session(self.settings, memory=self.memory)
+        self.session = Session(self.settings, memory=self.memory, conn=self.conn)
         self.tracer = Tracer(self.settings)
 
     def close(self) -> None:
@@ -127,16 +127,17 @@ class KnowMe:
         # message (see add_exchange), so context never accumulates across turns.
         context = self.session.build_turn_context(user_message, notify=notify)
         prompt = f"{context}\n\n{user_message}"
-        # Working memory is a bounded window: only the last N turns (2 rows
-        # each) enter the prompt, so context/cost/latency stay flat no matter
-        # how long the conversation runs. Older turns live in state.db and
-        # come back via the retrieval gate + episodic memory when relevant.
-        window = self.settings.history_turns * 2
+        # History is no longer sliced here. The old history[-window:] dropped
+        # every turn older than N without a trace, so a long conversation read
+        # to the model as though it had simply started late. The bound now lives
+        # in Session.add_exchange as snip_compact: over the threshold the middle
+        # is archived to .knowme/archives/ and a marker takes its place, so the
+        # model can see that something came before.
         # COMPRESSION HAPPENS HERE, on a copy, on the way to the model — never in
         # the stored conversation. session.history and chat_log hold the complete
         # record, because that is what the person reading the dashboard is owed;
         # these rewrites exist only so the request fits.
-        sent = self.session.history[-window:]
+        sent = self.session.history
         sent = tool_budget.fit_history(
             sent, self.settings.home,
             self.settings.tool_result_budget, self.settings.tool_result_cap)

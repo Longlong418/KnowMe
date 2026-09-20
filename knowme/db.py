@@ -73,6 +73,18 @@ CREATE TABLE IF NOT EXISTS chat_log (
     session_id TEXT DEFAULT 'default',
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- snip_compact's watermark (runtime/snip_compact.py): where a session's kept
+-- tail began at the last snip, so reopening a conversation rebuilds the SAME
+-- shape instead of reviving the archived middle. chat_log keeps every row —
+-- this only records what the WORKING MEMORY should look like.
+CREATE TABLE IF NOT EXISTS history_snips (
+    session_id TEXT PRIMARY KEY,
+    tail_start INTEGER NOT NULL,
+    archived INTEGER NOT NULL DEFAULT 0,
+    archive_path TEXT NOT NULL DEFAULT '',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 
