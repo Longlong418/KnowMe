@@ -122,9 +122,16 @@ const streamingCard = m => `<div class="card">
 </div>`;
 
 // Messages loaded from history (a switched/opened conversation) have no live
-// latency/iteration data, and their stored form carries an internal
-// "[tools used: ...]" annotation — strip both so the thread reads cleanly.
-const stripTools = t => (t || "").replace(/\s*\[tools used:[\s\S]*\]\s*$/, "").trim();
+// latency/iteration data, and their stored form carries an internal tool block —
+// strip both so the thread reads cleanly.
+//
+// The block has TWO shapes in the database and rows are never rewritten, so the
+// pattern has to match both: older rows end `[tools used: a -> b]` (colon, one
+// closing bracket, all on one line), newer ones are `[tools used]` followed by
+// one entry per line and NO closing bracket at all. Matching only the first
+// shape silently stopped stripping anything the day the format changed, and the
+// dashboard started showing whole tool outputs inside the chat bubble.
+const stripTools = t => (t || "").replace(/\s*\[tools used[\s\S]*$/, "").trim();
 const historicalCard = m => `<div class="card">
   <button class="msg-copy" onclick="copyMsg(this)" data-text="${esc(stripTools(m.reply))}" title="复制回复">复制</button>
   <div class="r">${renderMarkdown(stripTools(m.reply))}</div>
