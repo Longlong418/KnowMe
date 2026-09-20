@@ -28,7 +28,6 @@ credentials.json
 client_secret*.json
 *token*.json
 .gcp/
-docs/*
 
 .knowme
 .knowme-arena
