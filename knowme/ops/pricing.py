@@ -24,6 +24,7 @@ Imported by the arena (per-race cost), the dashboard (the spend chart), and
 from __future__ import annotations
 
 import json
+import os
 
 # Rough $/million tokens (in, out) for a dollar ESTIMATE — the number humans
 # actually feel. Keyed by provider; deliberately approximate and labelled "est".
@@ -109,6 +110,66 @@ MODEL_CUTOFF = {
     "deepseek-v4-flash": "2026-04",
     "deepseek-v4-flash-free": "2026-04",
 }
+
+
+# Context window in TOKENS, per model — used by micro_compact to decide when the
+# assembled prompt is dangerously full (runtime/micro_compact.py). Same shape and
+# same reason as MODEL_PRICING/MODEL_CUTOFF: only some endpoints publish this, so
+# the ones that do not get a hand-maintained row.
+#
+# Resolution order in context_for(): a live catalog value learned at runtime
+# beats all of this, then this table, then KNOWME_MODEL_CONTEXT, then a
+# deliberately conservative default. Conservative matters here: guessing LOW
+# compacts sooner than necessary, guessing HIGH risks a request that 400s.
+MODEL_CONTEXT = {
+    # Anthropic — platform.claude.com/docs/.../models
+    "claude-opus-4-8": 1_000_000,
+    "claude-fable-5": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
+    "claude-haiku-4-5-20251001": 200_000,
+    # OpenAI / Google — vendor model pages
+    "gpt-5.6-sol": 400_000,
+    "gpt-5.3-chat-latest": 400_000,
+    "gemini-3.1-pro-preview": 1_000_000,
+    "gemini-3.5-flash": 1_000_000,
+    # Moonshot / xAI
+    "kimi-k3": 256_000,
+    "grok-4.5": 256_000,
+    # OpenCode / deepseek
+    "deepseek-v4-flash": 128_000,
+    "deepseek-v4-flash-free": 128_000,
+}
+
+# Models the vendor does not publish a window for, or ids newer than this table.
+# Deliberately small: a wrong-but-large guess is the failure that hurts.
+_FALLBACK_CONTEXT = 128_000
+
+# Learned at runtime from a provider that reports it (see catalog.list_models).
+# Process-lifetime only, like _price_cache — a restart just falls back to the table.
+_context_cache: dict[str, int] = {}
+
+
+def remember_context(model: str, tokens: int | None) -> None:
+    """Record a live context window for a model. Called by catalog.list_models()
+    for endpoints that publish one (OpenRouter does; most do not)."""
+    if tokens and tokens > 0:
+        _context_cache[model] = int(tokens)
+
+
+def context_for(provider: str, model: str) -> int:
+    """The context window for one model, in tokens.
+
+    Four sources, most specific first: what a live catalog reported, the table
+    above, an explicit KNOWME_MODEL_CONTEXT, then the conservative fallback.
+    """
+    if model in _context_cache:
+        return _context_cache[model]
+    if model in MODEL_CONTEXT:
+        return MODEL_CONTEXT[model]
+    override = os.getenv("KNOWME_MODEL_CONTEXT", "").strip()
+    if override.isdigit() and int(override) > 0:
+        return int(override)
+    return _FALLBACK_CONTEXT
 
 
 def remember_price(model: str, price_in: float, price_out: float) -> None:

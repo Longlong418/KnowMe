@@ -10,8 +10,9 @@ from knowme.config import Settings, load_settings
 from knowme.db import connect
 from knowme.loop.agent import LoopResult, Observer, run_loop
 from knowme.loop.models import get_client
+from knowme.ops.pricing import context_for
 from knowme.ops.tracing import Tracer, compose
-from knowme.runtime import tool_budget
+from knowme.runtime import micro_compact, tool_budget
 from knowme.runtime.session import Session
 from knowme.tools import build_registry
 
@@ -141,7 +142,19 @@ class KnowMe:
         sent = tool_budget.fit_history(
             sent, self.settings.home,
             self.settings.tool_result_budget, self.settings.tool_result_cap)
+
+        # The emergency valve, and the only compressor that measures the REAL
+        # request against the model's REAL window instead of a proxy
+        # (runtime/micro_compact.py). Last in the chain deliberately: it is the
+        # one that only matters once the other two have done what they can, and
+        # it is the most destructive of the three.
         messages = sent + [{"role": "user", "content": prompt}]
+        limit = context_for(self.settings.provider, self.settings.model)
+        if micro_compact.prompt_tokens(system, messages) > self.settings.context_trigger * limit:
+            sent = micro_compact.compact(
+                sent, self.settings.home,
+                self.settings.micro_keep, self.settings.micro_min_chars)
+            messages = sent + [{"role": "user", "content": prompt}]
 
         return run_loop(
             client=self.client,

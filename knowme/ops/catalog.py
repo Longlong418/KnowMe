@@ -28,7 +28,7 @@ import os
 from pathlib import Path
 
 from knowme.config import load_settings
-from knowme.ops.pricing import remember_price
+from knowme.ops.pricing import remember_context, remember_price
 
 _models_cache: dict[str, tuple[float, list]] = {}
 
@@ -159,6 +159,10 @@ def list_models(provider: str | None = None, *, use_cache: bool = True) -> dict:
             entry["price_in"], entry["price_out"] = round(pin, 3), round(pout, 3)
         except (KeyError, TypeError, ValueError):
             pass
+        # Where the endpoint publishes a context window, hand it to the same
+        # kind of process-lifetime cache the price uses — micro_compact reads it
+        # through pricing.context_for() and must not fetch anything mid-turn.
+        remember_context(mid, entry["context"])
         models.append(entry)
     models.sort(key=lambda x: (not x["free"], x["tools"] is False, x["id"]))
     _models_cache[url] = (time.time(), models, None)   # None error = a real listing
