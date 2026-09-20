@@ -217,7 +217,8 @@ async function sendChat(fromInput){
   const ticker = setInterval(() => { if (pending.pending && !pending.stream) syncChatLogs(); }, 1000);
   try {
     const res = await fetch("/api/chat/stream", {method:"POST",
-      headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:text})});
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({message:text, agent_id:ACTIVE_AGENT})});
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
     for (;;){

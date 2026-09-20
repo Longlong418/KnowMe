@@ -43,6 +43,7 @@ function render(){
   }
   activeView = view; activeSub = sub;
   document.getElementById("model").textContent = `${D.provider} · ${D.model}`;
+  syncAgentChrome();
   document.getElementById("n-gw").textContent = (D.chat_log||[]).length;
   document.getElementById("n-loop").textContent = D.stats.turns;
   document.getElementById("n-graph").textContent =
@@ -64,7 +65,7 @@ async function restoreDock(){
   // On page load the dock is empty even though the current thread has messages
   // — restore them so a refresh never looks like it lost the chat.
   dockRestored = true;
-  const sid = D && D.current_session;
+  const sid = D && D.current_sessions && D.current_sessions[ACTIVE_AGENT];
   if (!sid || CHAT.length) return;
   await loadThreadInto(sid, {setSession: true});
 }
@@ -142,7 +143,8 @@ function publishReaderContext(extra = {}){
     resource: currentDoc.name,
     content: currentDoc.content,
     selection: extra.selection || "",
-    session_id: SESSION || D?.current_session || "default"
+    agent_id: ACTIVE_AGENT,
+    session_id: SESSION || D?.current_sessions?.[ACTIVE_AGENT] || "default"
   });
 }
 

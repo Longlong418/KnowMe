@@ -3,9 +3,39 @@
 // step, no modules). Load order + rules: static/README.md.
 
 // --- chat sessions (the "New chat" + history picker, like a chat app)
+let ACTIVE_AGENT = localStorage.getItem("knowme_active_agent") || "default";
 let SESSION = "default";
+
+function activeAgentData(){
+  return ((D && D.agents) || []).find(a => a.id === ACTIVE_AGENT) ||
+    {id:"default", name:"General", icon:"✦", status:"idle"};
+}
+
+function syncAgentChrome(){
+  const active = activeAgentData();
+  document.querySelectorAll(".agent-link").forEach(button => {
+    const data = ((D && D.agents) || []).find(a => a.id === button.dataset.agent);
+    button.classList.toggle("on", button.dataset.agent === ACTIVE_AGENT);
+    button.classList.toggle("ready", data && data.status === "ready");
+  });
+  const title = document.getElementById("dock-agent");
+  if (title) title.textContent = `${active.icon || "✦"} ${active.name} Agent`;
+  const input = document.getElementById("dmsg");
+  if (input) input.placeholder = `给 ${active.name} Agent 发消息…`;
+}
+
+async function selectAgent(agentId){
+  if (!((D && D.agents) || []).some(a => a.id === agentId)) return;
+  ACTIVE_AGENT = agentId;
+  localStorage.setItem("knowme_active_agent", agentId);
+  liveView = null;
+  SESSION = (D.current_sessions || {})[agentId] || "default";
+  CHAT.length = 0;
+  syncAgentChrome();
+  await loadThreadInto(SESSION, {setSession:true});
+}
 async function newChat(){
-  const r = await postJSON("/api/session", {action:"new"});
+  const r = await postJSON("/api/session", {action:"new", agent_id:ACTIVE_AGENT});
   if (r.session_id){ liveView = null; SESSION = r.session_id; CHAT.length = 0; syncChatLogs(); }
   closeSessMenu();
 }
@@ -16,11 +46,15 @@ async function newChat(){
 // Replaces CHAT + repaints, unless `guard` is set and the length is unchanged
 // (the live-poll case, to avoid a needless redraw). Returns the items or null.
 async function loadThreadInto(id, {mode = "history", setSession = false, guard = false} = {}){
-  const r = await postJSON("/api/session", {action: mode, id});
+  const r = await postJSON("/api/session", {action: mode, id, agent_id:ACTIVE_AGENT});
   if (!r.ok) return null;
   const fresh = (r.history || []).map(histItem);
   if (guard && fresh.length === CHAT.length) return fresh;   // unchanged -> skip repaint
-  if (setSession) SESSION = r.session_id;
+  if (setSession){
+    SESSION = r.session_id;
+    if (typeof publishReaderContext === "function" && currentDoc)
+      await publishReaderContext({selection:""});
+  }
   CHAT.length = 0; fresh.forEach(m => CHAT.push(m)); syncChatLogs();
   return fresh;
 }
@@ -59,7 +93,7 @@ function closeSessMenu(){ const m=document.getElementById("sessmenu"); if(m) m.r
 function toggleSessMenu(ev){
   ev.stopPropagation();
   if (document.getElementById("sessmenu")){ closeSessMenu(); return; }
-  const sessions = (D && D.sessions) || [];
+  const sessions = (D && D.sessions_by_agent && D.sessions_by_agent[ACTIVE_AGENT]) || [];
   const menu = document.createElement("div");
   menu.className = "sessmenu"; menu.id = "sessmenu";
   // "All messages" shows the full cross-thread timeline (like the Loop tab, but

@@ -50,6 +50,14 @@
         text-decoration:none;padding:6px 10px 6px 20px;border-radius:6px;font-size:13.5px;margin-top:2px}
   nav a:hover{background:var(--panel);color:var(--ink)}
   nav a.on{background:var(--accent-soft);color:var(--accent);font-weight:550}
+  .agent-link{width:100%;display:flex;align-items:center;gap:9px;border:0;background:transparent;
+    color:var(--ink2);padding:7px 10px 7px 14px;border-radius:7px;font:13.5px/1.4 inherit;
+    text-align:left;cursor:pointer;margin-top:2px}
+  .agent-link:hover{background:var(--panel);color:var(--ink)}
+  .agent-link.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .agent-link .agent-icon{width:18px;text-align:center;color:var(--accent);font-size:15px}
+  .agent-link i{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--ink3);opacity:.45}
+  .agent-link.ready i{background:var(--good);opacity:1}
   nav .n{font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}
   /* Proximity does the rest: a big gap ABOVE the header, a small one below it,
      so each header sits with its own children rather than floating between two

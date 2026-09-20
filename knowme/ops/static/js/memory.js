@@ -13,12 +13,12 @@ function editFact(id){
 }
 async function saveFact(id){
   const v = document.getElementById("ef-"+id).value.trim();
-  await postJSON("/api/memory", {action:"update_fact", id, content:v});
+  await postJSON("/api/memory", {action:"update_fact", id, content:v, agent_id:ACTIVE_AGENT});
   editing = false; refresh();
 }
 async function delMem(action, id){
   if(!confirm("确定要从记忆中删除吗？")) return;
-  await postJSON("/api/memory", {action, id});
+  await postJSON("/api/memory", {action, id, agent_id:ACTIVE_AGENT});
   refresh();
 }
 // dirty-state: a Save button stays muted until its editor actually changes

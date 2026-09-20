@@ -9,13 +9,10 @@ or when explicitly included via AgentSpec.tools allowlist.
 
 from __future__ import annotations
 
-import os
-import sys
 from datetime import datetime
 from pathlib import Path
 
 from knowme.tools.registry import Tool
-
 
 # ---------------------------------------------------------------------------
 # File reading helpers
@@ -174,9 +171,9 @@ add_note_func = _reader_tools["add_note"].fn
 highlight_func = _reader_tools["highlight"].fn
 
 __all__ = [
+    "add_note",
     "get_document",
     "get_selection",
-    "add_note",
     "highlight",
     "make_reader_tools",
 ]

@@ -63,9 +63,11 @@ async function runQuery(){
 // the Data tab shows the SAME rows as raw SQLite tables (see the explainer).
 function memOverview(d){
   const s = d.stats;
+  const facts = d.facts.filter(f => (f.agent_id||"default") === ACTIVE_AGENT);
+  const episodes = d.episodes.filter(e => !e.agent_id || e.agent_id === ACTIVE_AGENT);
   const pillars = [
-    ["语义记忆","semantic",d.facts.length+" 条事实","关于你和相关人员的持久、提炼后的事实"],
-    ["情景记忆","episodic",d.episodes.length+" 条情景","每次整理生成一条带日期的摘要——有意保持精简"],
+    ["语义记忆","semantic",facts.length+" 条事实","关于你和相关人员的持久、提炼后的事实"],
+    ["情景记忆","episodic",episodes.length+" 条情景","每次整理生成一条带日期的摘要——有意保持精简"],
     ["程序性记忆","skills",d.skills.length+" 个技能","仅在相关时加载的 SKILL.md——规定如何行动"],
   ].map(([t,sub,n,desc]) => `<div class="box" style="min-width:0" onclick="location.hash='memory/${sub}'">
       <b>${t} <span class="meta" style="font-weight:400">· ${n}</span></b><span>${desc}</span></div>`).join("");
@@ -85,10 +87,11 @@ function memOverview(d){
     <div class="meta" style="margin-top:14px">文件：${reveal("state.db","state.db")} · ${reveal("MEMORY.md","MEMORY.md")} · ${reveal("SOUL.md","SOUL.md")} · ${reveal("skills","skills/")}</div>`;
 }
 function memSemantic(d){
+  const facts = d.facts.filter(f => (f.agent_id||"default") === ACTIVE_AGENT);
   let h = `<div class="meta" style="margin-bottom:12px">从你告诉 KnowMe 的内容中提炼出的持久事实——
     这是最精简、复用率最高的存储。你可以编辑或遗忘任意事实；更改将在下一轮对话生效。</div>`;
   h += `<div class="card" style="padding:4px 8px"><table><tr><th>主题</th><th>事实</th><th>来源</th><th></th></tr>${
-    d.facts.map(f => `<tr id="fact-${f.id}">
+    facts.map(f => `<tr id="fact-${f.id}">
       <td><code>${esc(f.subject)}</code></td>
       <td class="fc">${esc(f.content)}</td>
       <td class="meta">${esc({user:"用户",consolidation:"记忆整理"}[f.source] || f.source)}</td>
@@ -97,6 +100,7 @@ function memSemantic(d){
   return h;
 }
 function memEpisodic(d){
+  const episodes = d.episodes.filter(e => !e.agent_id || e.agent_id === ACTIVE_AGENT);
   const src = d.episodes_source || "sqlite";
   let h = `<div class="meta" style="margin-bottom:8px">后端：<span class="srcpill">${esc(src)}</span></div>`;
   if (d.episodes_error) h += `<div class="card empty">无法从 Notion 读取情景记忆：${esc(d.episodes_error)}</div>`;
@@ -106,7 +110,7 @@ function memEpisodic(d){
     <a class="reveal" onclick="location.hash='database/chat_log'"><code>chat_log</code> 表</a>（数据量较大的表）；
     情景记忆只是其中的精华。</span></div>`;
   h += `<div class="card" style="padding:4px 8px"><table><tr><th>日期</th><th>情景</th><th></th></tr>${
-    d.episodes.map(e => `<tr><td class="meta">${esc(e.happened_at)}</td><td>${esc(e.summary)}</td>
+    episodes.map(e => `<tr><td class="meta">${esc(e.happened_at)}</td><td>${esc(e.summary)}</td>
       <td><a class="reveal del" onclick="delMem('delete_episode','${e.id}')">删除</a></td></tr>`).join("")}</table></div>`;
   return h;
 }
@@ -141,7 +145,9 @@ function memSoul(d){
     <div class="meta" style="margin-top:10px">${reveal("SOUL.md","在编辑器中打开 SOUL.md")}</div>`;
 }
 function memConsolidation(d){
-  const distilled = d.facts.filter(f => f.source==="consolidation");
+  const distilled = d.facts.filter(f => f.source==="consolidation" &&
+    (f.agent_id||"default") === ACTIVE_AGENT);
+  const episodes = d.episodes.filter(e => !e.agent_id || e.agent_id === ACTIVE_AGENT);
   let h = `<div class="card"><b>工作原理。</b> <span class="r">每经过 ${d.consolidate_every} 轮对话，
     一个低成本模型就会读取尚未整理的 ${"<code>chat_log</code>"}，将其提炼为持久的
     <b>事实</b>（语义记忆）和一条<b>情景</b>（情景记忆）。批量处理可以降低成本，
@@ -150,7 +156,7 @@ function memConsolidation(d){
     <div class="tile"><b>${d.chat_pending}</b><span>排队中的消息</span></div>
     <div class="tile"><b>${d.consolidate_every*2}</b><span>触发阈值</span></div>
     <div class="tile"><b>${distilled.length}</b><span>整理得到的事实</span></div>
-    <div class="tile"><b>${d.episodes.length}</b><span>情景总数</span></div></div>`;
+    <div class="tile"><b>${episodes.length}</b><span>情景总数</span></div></div>`;
   h += `<h2>提炼出的事实</h2>`;
   h += table(["主题","事实","时间"], distilled.map(f =>
     `<tr><td><code>${esc(f.subject)}</code></td><td>${esc(f.content)}</td><td class="meta">${esc((f.created_at||"").slice(0,10))}</td></tr>`));

@@ -105,15 +105,20 @@ class AgentRuntime:
             if kind == "graph_end":
                 captured["graph_path"] = ev.get("path")
         notify = compose(observer, self.tracer.event, _capture)
+        # turn_start/end are already written by Tracer.turn/end_turn.  Send
+        # them only to the live observer + capture path here, otherwise each
+        # boundary appears twice in JSONL and splits one run into two cards.
+        live_notify = compose(observer, _capture)
         t0 = time.perf_counter()
 
-        with self.tracer.turn(user_message):
-            notify("turn_start", {
-                "agent_id": resolved.name,
-                "session_id": session.session_id,
-                "model": resolved.model,
-                "source": source,
-            })
+        identity = {
+            "agent_id": resolved.name,
+            "session_id": session.session_id,
+            "model": resolved.model,
+            "source": source,
+        }
+        with self.tracer.turn(user_message, **identity):
+            live_notify("turn_start", identity)
             # The front door is optional and can NEVER make a turn worse: none
             # → this is exactly the plain path; one → it may answer, and any
             # failure anywhere falls open to the loop below (same fail-open
@@ -132,7 +137,6 @@ class AgentRuntime:
 
             quick = captured.get("graph_route", {}).get("target") == "quick_reply"
             meta = {
-                "context": captured.get("context"),
                 "gate": captured.get("gate"),
                 "graph": ({"workflow": "triage",
                            "route": "quick" if quick else "full",
@@ -149,21 +153,31 @@ class AgentRuntime:
                 "model": resolved.small_model if quick else resolved.model,
                 "provider": self.settings.provider,
             }
+            context_meta = captured.get("context")
+            # Preserve the historical meta shape for ordinary chat turns.  A
+            # context record is persisted only when something noteworthy
+            # happened (Application injection or compaction); the live event is
+            # still emitted on every turn.
+            if context_meta and (
+                context_meta["application_chars"] or context_meta["compaction"]
+            ):
+                meta["context"] = context_meta
             session.add_exchange(user_message, result.reply, tool_calls=result.tool_calls,
                                  source=source, meta=meta)
             if self.memory is not None:
                 self.memory.maybe_consolidate(notify=notify)
                 self.memory.export_markdown()   # keep MEMORY.md in sync
 
-            notify("turn_end", {
-                "agent_id": resolved.name,
-                "session_id": session.session_id,
+            end_event = {
+                **identity,
                 "iterations": result.iterations,
                 "latency_ms": meta["latency_ms"],
                 "tools": meta["tools"],
-            })
+            }
+            live_notify("turn_end", end_event)
 
-        self.tracer.end_turn(result.reply, result.iterations)
+        self.tracer.end_turn(result.reply, result.iterations, **identity,
+                             latency_ms=meta["latency_ms"], tools=meta["tools"])
         return TurnResult(reply=result.reply, tool_calls=result.tool_calls,
                           iterations=result.iterations, meta=meta)
 
@@ -208,14 +222,15 @@ class AgentRuntime:
         # not expose private prompt text; it exposes the useful facts a person
         # needs to understand the run: what was attached and which compaction
         # stages changed the request.
-        notify("context", {
-            "agent_id": resolved.name,
-            "session_id": session.session_id,
-            "application_chars": len(extra_context),
-            "history_messages": len(session.history),
-            "sent_messages": len(fit.sent),
-            "compaction": fit.ran or [],
-        })
+        if extra_context or fit.ran:
+            notify("context", {
+                "agent_id": resolved.name,
+                "session_id": session.session_id,
+                "application_chars": len(extra_context),
+                "history_messages": len(session.history),
+                "sent_messages": len(fit.sent),
+                "compaction": fit.ran or [],
+            })
 
         # AgentSpec.tools is an allowlist.  Keeping the full registry on the
         # runtime is useful (tools are built once and can hold resources), but

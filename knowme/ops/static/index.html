@@ -5,16 +5,25 @@
 <nav id="nav">
   <div class="brand">KnowMe<small id="model" style="cursor:pointer" title="点击切换模型" onclick="location.hash='#models'"></small>
     <button id="nav-toggle" title="隐藏侧栏">&#10094;</button></div>
-  <div class="grp">系统</div>
+  <div class="grp">Agents</div>
+  <button class="agent-link" data-agent="default" onclick="selectAgent('default')"><span class="agent-icon">✦</span><span>General</span><i></i></button>
+  <button class="agent-link" data-agent="coding" onclick="selectAgent('coding')"><span class="agent-icon">⌘</span><span>Coding</span><i></i></button>
+  <button class="agent-link" data-agent="learning" onclick="selectAgent('learning')"><span class="agent-icon">◈</span><span>Learning</span><i></i></button>
+  <button class="agent-link" data-agent="research" onclick="selectAgent('research')"><span class="agent-icon">◎</span><span>Research</span><i></i></button>
+  <div class="grp">Applications</div>
+  <a href="#reader" data-v="reader">阅读器</a>
+  <a href="#memory/semantic" data-v="memory" data-sub="semantic">知识库</a>
+  <a href="#memory" data-v="memory">记忆管理</a>
+  <a href="#database" data-v="database">Coding Workspace</a>
+  <div class="grp">Manage</div>
   <a href="#overview" data-v="overview">总览</a>
   <a href="#gateway" data-v="gateway">网关 <span class="n" id="n-gw"></span></a>
   <a href="#loop" data-v="loop">循环 <span class="n" id="n-loop"></span></a>
   <a href="#graph" data-v="graph">图工作流 <span class="n" id="n-graph"></span></a>
-  <a href="#memory" data-v="memory">记忆 <span class="n" id="n-mem"></span></a>
+  <a href="#memory" data-v="memory">记忆数据 <span class="n" id="n-mem"></span></a>
   <a href="#tools" data-v="tools">工具 <span class="n" id="n-tools"></span></a>
   <a href="#database" data-v="database">数据库 <span class="n" id="n-db"></span></a>
   <a href="#ops" data-v="ops">运维 <span class="n" id="n-ops"></span></a>
-  <a href="#reader" data-v="reader">阅读器</a>
   <div class="grp">设置</div>
   <a href="#models" data-v="models">模型</a>
   <a href="#connections" data-v="connections">连接</a>
@@ -31,7 +40,7 @@
 <div class="resizer" id="dock-resizer" title="拖动调整聊天区宽度"></div>
 <aside id="dock">
   <div class="dockhead">
-    <span class="dt">聊天</span>
+    <span class="dt" id="dock-agent">General Agent</span>
     <span class="arch-status"></span>
     <button id="dock-close" title="收起聊天区">&rsaquo;</button>
   </div>

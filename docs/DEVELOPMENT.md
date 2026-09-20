@@ -4,6 +4,9 @@
 
 一个以自研 Agent Core 为底座的个人 Agent 工作平台。支持多Agent记忆隔离，提供完整的阅读器应用。
 
+> 当前可运行范围和最短上手流程请先看 [MVP_GUIDE.md](MVP_GUIDE.md)。
+> Coding Workspace、完整知识库等后续功能不属于本轮 MVP。
+
 ### 核心特性
 - **Multi-Agent Memory Isolation**：每个Agent拥有独立的记忆空间
 - **Reader Application**：文档阅读+选中文本自动注入上下文
@@ -294,6 +297,14 @@ A: 确保在 `tools/__init__.py` 的 `build_registry()` 中注册。
 ---
 
 ## 版本历史
+
+### v0.3.0-dev MVP (2026-09-21)
+- **新增**：General / Coding / Learning / Research 四个内置 Agent，共用一个 Runtime
+- **新增**：左侧 Agents / Applications 产品化导航和右侧当前 Agent 对话面板
+- **新增**：每个 Agent 独立的会话、记忆、工具权限和 Application 上下文
+- **安全**：记忆更新和删除也校验 `agent_id`，不能跨 Agent 操作
+- **可见**：聊天卡片展示上下文条数、Application 注入和压缩阶段
+- **文档**：新增只描述已完成功能的 MVP 使用说明
 
 ### v0.3.0-dev (2026-09-21)
 - **修复**：Reader 页面状态现在真正进入 Agent 本轮上下文

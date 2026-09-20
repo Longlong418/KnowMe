@@ -96,3 +96,9 @@ def test_facade_passes_application_context_and_emits_transparent_events(tmp_path
     saved = json.loads(row["meta"])["context"]
     assert saved["application_chars"] == context["application_chars"]
     assert saved["sent_messages"] == context["sent_messages"]
+    records = [json.loads(line) for line in app.tracer.path.read_text(encoding="utf-8").splitlines()]
+    starts = [record for record in records if record["type"] == "turn_start"]
+    ends = [record for record in records if record["type"] == "turn_end"]
+    assert len(starts) == len(ends) == 1
+    assert starts[0]["agent_id"] == "default"
+    assert ends[0]["session_id"] == app.session.session_id

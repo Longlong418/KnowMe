@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from knowme.agents import get_profile, list_profiles
 from knowme.applications import ApplicationContextBridge
 from knowme.config import load_settings
 from knowme.db import connect
@@ -64,7 +65,7 @@ STATIC = Path(__file__).resolve().parent / "static"
 application_contexts = ApplicationContextBridge()
 
 
-def chat(message: str) -> dict:
+def chat(message: str, agent_id: str = "default") -> dict:
     """One turn, one JSON result — the non-streaming door to the same room.
 
     The dashboard itself uses /api/chat/stream; this exists for scripts and for
@@ -80,11 +81,11 @@ def chat(message: str) -> dict:
         if kind == "done":
             final.update(ev)
 
-    chat_stream(message, collect_done)
+    chat_stream(message, collect_done, agent_id=agent_id)
     return final
 
 
-def chat_stream(message: str, emit) -> None:
+def chat_stream(message: str, emit, agent_id: str = "default") -> None:
     """Run one turn, calling emit(kind, event) for every harness event AS it
     happens — gate decision, tool calls, and the reply text token by token —
     so the browser can show thinking streams like the CLI does. Ends
@@ -106,7 +107,7 @@ def chat_stream(message: str, emit) -> None:
         emit(kind, ev)
 
     with agent_lock:
-        agent = get_agent()
+        agent = get_agent(agent_id)
         maybe_rotate_session(agent)
         extra_context = application_contexts.render(
             agent.agent_id, agent.session.session_id
@@ -298,7 +299,8 @@ def collect() -> dict:
                 "source": "sqlite",
                 "error": "",
                 "items": rows(
-                    "SELECT id, happened_at, summary FROM episodes ORDER BY happened_at DESC"
+                    "SELECT id, happened_at, summary, agent_id "
+                    "FROM episodes ORDER BY happened_at DESC"
                 ),
             }
         try:
@@ -338,12 +340,16 @@ def collect() -> dict:
         kind = ev.get("type")
         if kind == "turn_start":
             current = {"user_message": ev.get("user_message"), "ts": ev.get("ts"),
+                       "agent_id": ev.get("agent_id", "default"),
+                       "session_id": ev.get("session_id"),
                        "gate": None, "llm_calls": [], "tools": [], "reply": None}
         elif kind == "wake_scan":
             wake_scans.append(ev)
         elif current is not None:
             if kind == "gate":
                 current["gate"] = ev
+            elif kind == "context":
+                current["context"] = ev
             elif kind == "route":
                 current["graph"] = {"workflow": ev.get("workflow"),
                                     "route": "quick" if ev.get("target") == "quick_reply" else "full",
@@ -439,9 +445,20 @@ def collect() -> dict:
         "all_tables": all_tables,
     }
 
-    # Peek at the shared agent WITHOUT building one — a page load should never
-    # pay for an agent nobody has chatted with yet.
-    live = browser_agent.current()
+    # Report every profile without eagerly building an LLM client.  A page load
+    # should stay cheap; selecting/chatting with an agent creates it lazily.
+    profiles = list_profiles()
+    live_agents = browser_agent.current_agents()
+    current_sessions = {
+        profile.id: (
+            live_agents[profile.id].session.session_id
+            if profile.id in live_agents else dash_session(profile.id)
+        )
+        for profile in profiles
+    }
+    sessions_by_agent = {
+        profile.id: session_list(conn, profile.id) for profile in profiles
+    }
 
     # --- graph workflows: topology straight from the engine (never hand-drawn,
     # so the picture can't drift) + quick/full split from the trace events
@@ -485,15 +502,31 @@ def collect() -> dict:
                        for e in events[-18:]][::-1],
         "trace_file": (trace_files[-1].name if trace_files else None),
         "trace_errors": trace_errors,
-        "facts": rows("SELECT id, subject, content, source, created_at FROM facts ORDER BY id DESC"),
+        "agents": [
+            {**profile.to_public(),
+             "status": "ready" if profile.id in live_agents else "idle",
+             "session_id": current_sessions[profile.id]}
+            for profile in profiles
+        ],
+        "facts": rows(
+            "SELECT id, subject, content, source, agent_id, created_at "
+            "FROM facts ORDER BY id DESC"
+        ),
         "episodes": episodes_data["items"],
         "episodes_source": episodes_data["source"],
         "episodes_error": episodes_data["error"],
         "soul": (home / "SOUL.md").read_text(encoding="utf-8") if (home / "SOUL.md").exists() else "",
         "chat_pending": conn.execute("SELECT COUNT(*) FROM chat_log WHERE consolidated=0").fetchone()[0],
-        "chat_log": rows("SELECT role, content, consolidated, source, session_id, created_at FROM chat_log ORDER BY id DESC LIMIT 80")[::-1],
-        "sessions": session_list(conn),
-        "current_session": (live.session.session_id if live is not None else dash_session()),
+        "chat_log": rows(
+            "SELECT role, content, consolidated, source, session_id, agent_id, created_at "
+            "FROM chat_log ORDER BY id DESC LIMIT 80"
+        )[::-1],
+        # Keep the two legacy fields for old open tabs.  New clients use the
+        # per-agent maps and never mix one agent's history into another's dock.
+        "sessions": sessions_by_agent["default"],
+        "current_session": current_sessions["default"],
+        "sessions_by_agent": sessions_by_agent,
+        "current_sessions": current_sessions,
         "consolidate_every": settings.consolidate_every,
         "calendar": rows('SELECT title, start, "end", attendees, created_at FROM calendar_events ORDER BY start'),
         "outbox": outbox,
@@ -528,26 +561,32 @@ def _rel_to_home(path, home) -> str:
         return str(path)
 
 
-def session_list(conn) -> list[dict]:
+def session_list(conn, agent_id: str = "default") -> list[dict]:
     """One row per conversation for the chat-history picker: id, its first user
     message (the title), message count, newest first. Sessions are just a
     session_id label on chat_log rows — the same table, no new storage."""
     groups = conn.execute(
         """SELECT session_id, COUNT(*) AS messages, MAX(created_at) AS last_at
-           FROM chat_log GROUP BY session_id ORDER BY last_at DESC"""
+           FROM chat_log WHERE agent_id=?
+           GROUP BY session_id ORDER BY last_at DESC""",
+        (agent_id,),
     ).fetchall()
     out = []
     for g in groups:
         sid = g["session_id"]
         first = conn.execute(
-            "SELECT content FROM chat_log WHERE session_id=? AND role='user' ORDER BY id LIMIT 1",
-            (sid,),
+            "SELECT content FROM chat_log WHERE session_id=? AND agent_id=? "
+            "AND role='user' ORDER BY id LIMIT 1",
+            (sid, agent_id),
         ).fetchone()
         last = conn.execute(
-            "SELECT role, content FROM chat_log WHERE session_id=? ORDER BY id DESC LIMIT 1", (sid,)
+            "SELECT role, content FROM chat_log WHERE session_id=? AND agent_id=? "
+            "ORDER BY id DESC LIMIT 1", (sid, agent_id)
         ).fetchone()
         sources = [r["source"] for r in conn.execute(
-            "SELECT DISTINCT source FROM chat_log WHERE session_id=?", (sid,)).fetchall()]
+            "SELECT DISTINCT source FROM chat_log WHERE session_id=? AND agent_id=?",
+            (sid, agent_id),
+        ).fetchall()]
         preview = ""
         if last:
             preview = ("you: " if last["role"] == "user" else "knowme: ") + last["content"][:80]
@@ -685,7 +724,7 @@ def run_query(payload: dict) -> dict:
         return {"error": str(exc)}
 
 
-def _thread_history(conn, sid: str) -> list[dict]:
+def _thread_history(conn, sid: str, agent_id: str = "default") -> list[dict]:
     """The ONE way to load a thread for the chat dock: role + content + the
     per-turn meta (gate/stats/tools/model) so every card renders in full.
     id '__all__' returns the whole cross-thread timeline (like the Loop tab,
@@ -693,12 +732,15 @@ def _thread_history(conn, sid: str) -> list[dict]:
     drift apart (they used to: 'switch' dropped meta and showed only text)."""
     if sid == "__all__":
         rows = conn.execute(
-            "SELECT role, content, meta FROM chat_log ORDER BY id DESC LIMIT 200"
+            "SELECT role, content, meta FROM chat_log WHERE agent_id=? "
+            "ORDER BY id DESC LIMIT 200",
+            (agent_id,),
         ).fetchall()[::-1]
     else:
         rows = conn.execute(
-            "SELECT role, content, meta FROM chat_log WHERE session_id=? ORDER BY id",
-            (sid,),
+            "SELECT role, content, meta FROM chat_log "
+            "WHERE session_id=? AND agent_id=? ORDER BY id",
+            (sid, agent_id),
         ).fetchall()
     return [{"role": r["role"], "content": r["content"],
              "meta": json.loads(r["meta"]) if r["meta"] else None} for r in rows]
@@ -709,6 +751,8 @@ def session_action(payload: dict) -> dict:
     read a conversation's history (read-only, for the live inbox). Sessions live
     in chat_log."""
     action = payload.get("action")
+    agent_id = payload.get("agent_id") or "default"
+    get_profile(agent_id)
     if action == "history":
         # read-only view of a conversation — never touches the agent, so the
         # dashboard can poll it live (e.g. to show new Telegram messages arrive).
@@ -716,20 +760,23 @@ def session_action(payload: dict) -> dict:
         settings.ensure_home()
         conn = connect(settings.home)
         sid = payload.get("id") or "default"
-        return {"ok": True, "session_id": sid, "history": _thread_history(conn, sid)}
+        return {"ok": True, "agent_id": agent_id, "session_id": sid,
+                "history": _thread_history(conn, sid, agent_id)}
     with agent_lock:
-        agent = get_agent()
+        agent = get_agent(agent_id)
         if action == "new":
-            sid = datetime.now().strftime("s-%Y%m%d-%H%M%S")
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            sid = f"s-{agent_id}-{stamp}"
             agent.session.start_new(sid)
-            return {"ok": True, "session_id": sid, "history": []}
+            return {"ok": True, "agent_id": agent_id, "session_id": sid, "history": []}
         if action == "switch":
             sid = payload.get("id") or "default"
             agent.session.switch(sid)
             # Same meta-rich rows as the read-only "history" action, so a
             # switched thread renders its full turn cards (gate/stats/tools/
             # model) — not just the text. (These two paths used to disagree.)
-            return {"ok": True, "session_id": sid, "history": _thread_history(agent.conn, sid)}
+            return {"ok": True, "agent_id": agent_id, "session_id": sid,
+                    "history": _thread_history(agent.conn, sid, agent_id)}
     return {"error": f"unknown action {action}"}
 
 
@@ -784,6 +831,8 @@ def memory_action(payload: dict) -> dict:
     settings = load_settings()
     settings.ensure_home()
     action = payload.get("action")
+    agent_id = payload.get("agent_id") or "default"
+    get_profile(agent_id)
     if action == "save_soul":
         text = (payload.get("content") or "").strip()
         if not text:
@@ -810,7 +859,8 @@ def memory_action(payload: dict) -> dict:
         return {"ok": True}
 
     conn = connect(settings.home)
-    facts, episodes = SqliteFactStore(conn), SqliteEpisodeStore(conn)
+    facts = SqliteFactStore(conn, agent_id=agent_id)
+    episodes = SqliteEpisodeStore(conn, agent_id=agent_id)
     if action == "delete_episode" and settings.episodic_store == "notion":
         global _notion_episodes
         with _notion_lock:
@@ -844,7 +894,8 @@ def extras_action(payload: dict) -> dict:
     open dashboard keeps working during an upgrade.
     """
     agent_id = (payload.get("agent_id") or "default").strip()
-    session_id = (payload.get("session_id") or dash_session()).strip()
+    get_profile(agent_id)
+    session_id = (payload.get("session_id") or dash_session(agent_id)).strip()
     if payload.get("action") == "clear":
         cleared = application_contexts.clear(agent_id, session_id)
         return {"ok": True, "cleared": cleared}
@@ -934,6 +985,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/data":
             self._send(json.dumps(collect(), default=str).encode(), "application/json")
+        elif self.path == "/api/agents":
+            live = browser_agent.current_agents()
+            payload = [
+                {**profile.to_public(),
+                 "status": "ready" if profile.id in live else "idle",
+                 "session_id": (
+                     live[profile.id].session.session_id
+                     if profile.id in live else dash_session(profile.id)
+                 )}
+                for profile in list_profiles()
+            ]
+            self._send(json.dumps(payload).encode(), "application/json")
         elif self.path.startswith("/api/models"):
             from urllib.parse import parse_qs, urlparse
 
@@ -972,6 +1035,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/chat/stream":
             payload = json.loads(self.rfile.read(length) or "{}")
             message = (payload.get("message") or "").strip()
+            agent_id = payload.get("agent_id") or "default"
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -988,7 +1052,7 @@ class Handler(BaseHTTPRequestHandler):
                 emit("done", {"error": "empty message"})
                 return
             try:
-                chat_stream(message, emit)
+                chat_stream(message, emit, agent_id=agent_id)
             except Exception as exc:  # surface as a terminal event, don't 500
                 emit("done", {"error": f"{type(exc).__name__}: {exc}"})
             return
@@ -1019,7 +1083,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/chat":
                 message = (payload.get("message") or "").strip()
-                out = chat(message) if message else {"error": "empty message"}
+                out = chat(message, payload.get("agent_id") or "default") if message else {
+                    "error": "empty message"
+                }
             elif self.path == "/api/extras":
                 out = extras_action(payload)
             elif self.path == "/api/connections":

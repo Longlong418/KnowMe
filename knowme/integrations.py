@@ -732,13 +732,17 @@ def apply_provider(provider: str, *, key: str | None = None, model: str | None =
         if changed_updates:
             _write_updates(changed_updates, ())
         affects_active_agent = bool(changed_updates) and (provider == previous or activate)
-        if affects_active_agent and browser_agent.current() is not None:
+        has_live_agent = (
+            browser_agent.current() is not None or bool(browser_agent.current_agents())
+        )
+        if affects_active_agent and has_live_agent:
             if error := browser_agent.rebuild():
                 raise RuntimeError(error)
-            current_agent = browser_agent.current()
-            if current_agent is not None:
-                current_agent.tracer.event("config", {"from": {"provider": previous},
-                                                       "to": {"provider": provider}})
+            for current_agent in browser_agent.current_agents().values():
+                current_agent.tracer.event(
+                    "config",
+                    {"from": {"provider": previous}, "to": {"provider": provider}},
+                )
         status = (IntegrationStatus(IntegrationState.ERROR, "Saved without a successful test")
                   if force else IntegrationStatus(IntegrationState.CONNECTED))
         record_health(provider, status)

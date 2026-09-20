@@ -137,8 +137,8 @@ class Tracer:
 
     # ---- one run = one root span + turn_start/turn_end JSONL markers
     @contextmanager
-    def turn(self, user_message: str):
-        self._write({"type": "turn_start", "user_message": user_message})
+    def turn(self, user_message: str, **metadata):
+        self._write({"type": "turn_start", "user_message": user_message, **metadata})
         if self._otel_tracer:
             with self._otel_tracer.start_as_current_span(
                 "agent_run",
@@ -152,8 +152,8 @@ class Tracer:
         else:
             yield self
 
-    def end_turn(self, reply: str, iterations: int) -> None:
-        self._write({"type": "turn_end", "reply": reply, "iterations": iterations})
+    def end_turn(self, reply: str, iterations: int, **metadata) -> None:
+        self._write({"type": "turn_end", "reply": reply, "iterations": iterations, **metadata})
         if getattr(self, "_otel_provider", None):
             # flush per turn: the trace should survive even a killed process
             self._otel_provider.force_flush(timeout_millis=2000)

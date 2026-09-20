@@ -110,17 +110,22 @@ class SqliteFactStore:
 
     def update(self, fact_id: int, content: str, subject: str | None = None) -> bool:
         if subject is None:
-            cur = self.conn.execute("UPDATE facts SET content=? WHERE id=?", (content, fact_id))
+            cur = self.conn.execute(
+                "UPDATE facts SET content=? WHERE id=? AND agent_id=?",
+                (content, fact_id, self.agent_id),
+            )
         else:
             cur = self.conn.execute(
-                "UPDATE facts SET content=?, subject=? WHERE id=?",
-                (content, subject.lower().strip(), fact_id),
+                "UPDATE facts SET content=?, subject=? WHERE id=? AND agent_id=?",
+                (content, subject.lower().strip(), fact_id, self.agent_id),
             )
         self.conn.commit()
         return cur.rowcount > 0
 
     def delete(self, fact_id: int) -> bool:
-        cur = self.conn.execute("DELETE FROM facts WHERE id=?", (fact_id,))
+        cur = self.conn.execute(
+            "DELETE FROM facts WHERE id=? AND agent_id=?", (fact_id, self.agent_id)
+        )
         self.conn.commit()
         return cur.rowcount > 0
 

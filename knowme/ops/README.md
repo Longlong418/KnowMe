@@ -14,7 +14,7 @@ frontend.
 | File | Owns |
 |---|---|
 | `dashboard.py` | The stdlib HTTP server: routes, SSE, `collect()`. Serves everything below. |
-| `browser_agent.py` | The ONE shared `KnowMe` behind the browser gateway + its dated chat session. |
+| `browser_agent.py` | The lazy browser Agent pool: one `KnowMe` + dated session per profile. |
 | `arena.py` | Racing N models through the same harness, in isolated temp homes. |
 | `catalog.py` | What models a provider can serve + your pinned `provider:model` shortlist. |
 | `pricing.py` | `$/M` rate tables, knowledge cutoffs, and the spend ledger summary. |
@@ -49,16 +49,18 @@ else takes plain Python arguments and returns plain dicts — which is why they'
 testable without starting a server, and why `evals/deterministic/` can call them
 directly.
 
-## The one global
+## The browser Agent pool
 
-`browser_agent` holds a module-level agent shared by every browser tab, because
-the dashboard is multi-threaded and long-lived in a way the CLI is not. Two
-callers mutate it (`dashboard` builds it on the first chat, `settings_api`
-rebuilds it on a provider switch), so **import the module, not the name**:
+`browser_agent` keeps one lazy instance for each selected Agent profile. The
+dashboard is multi-threaded and long-lived in a way the CLI is not, so access is
+serialized by one lock; a provider/model change rebuilds all live profiles while
+preserving their current sessions. **Import the module, not a mutable slot**:
 
 ```python
 from knowme.ops import browser_agent
 browser_agent.current()          # sees a later swap
+browser_agent.current("learning")
+browser_agent.current_agents()   # snapshot of the live pool
 ```
 
 ```python
