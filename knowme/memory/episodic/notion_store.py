@@ -37,7 +37,8 @@ def normalize_database_id(value: str) -> str:
 
 
 class NotionEpisodeStore:
-    def __init__(self, token: str | None = None, database_id: str | None = None) -> None:
+    def __init__(self, token: str | None = None, database_id: str | None = None,
+                 agent_id: str = "default") -> None:
         from notion_client import Client
 
         self.token = token or os.environ.get("NOTION_TOKEN")

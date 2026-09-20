@@ -34,16 +34,22 @@ class KnowMe:
         self.settings.ensure_home()
         self.conn = conn or connect(self.settings.home)
         self.client = client or get_client(self.settings)
+        self.spec = spec
+        # One name per agent — it scopes facts, episodes and chat_log rows so
+        # two agents never read each other's memory without meaning to. The
+        # default agent keeps the historical "default" tag, so existing databases
+        # see no behavioral change.
+        self.agent_id = spec.name
 
         # Memory first: the memory-management tools need it.
         from knowme.memory import Memory
 
-        self.memory = Memory(self.conn, self.settings, self.client)
+        self.memory = Memory(self.conn, self.settings, self.client, agent_id=self.agent_id)
         self.tools = build_registry(self.conn, self.settings, self.memory)
         self.mcp_bridge = getattr(self.tools, "mcp_bridge", None)
-        self.session = Session(self.settings, memory=self.memory, conn=self.conn)
+        self.session = Session(self.settings, memory=self.memory, conn=self.conn,
+                               agent_id=self.agent_id)
         self.tracer = Tracer(self.settings)
-        self.spec = spec
         self.runtime = AgentRuntime(
             self.settings, client=self.client, conn=self.conn, memory=self.memory,
             tools=self.tools, tracer=self.tracer, context_for=context_for)

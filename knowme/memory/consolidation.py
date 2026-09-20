@@ -41,10 +41,15 @@ def consolidate_if_due(
     every_n: int,
     facts: SqliteFactStore,
     episodes: SqliteEpisodeStore,
+    agent_id: str = "default",
 ) -> int:
-    """Returns how many new facts were written (0 = not due or nothing worth keeping)."""
+    """Returns how many new facts were written (0 = not due or nothing worth keeping).
+
+    Scoped to `agent_id` so consolidation for one agent never distills another's
+    unprocessed chat log."""
     rows = conn.execute(
-        "SELECT id, role, content FROM chat_log WHERE consolidated = 0 ORDER BY id"
+        "SELECT id, role, content FROM chat_log WHERE agent_id = ? AND consolidated = 0 ORDER BY id",
+        (agent_id,),
     ).fetchall()
     if len(rows) < every_n * 2:  # each exchange = 2 rows (user + assistant)
         return 0

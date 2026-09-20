@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS facts (
     subject TEXT NOT NULL,         -- who/what the fact is about, e.g. 'alex'
     content TEXT NOT NULL,         -- the fact itself
     source TEXT DEFAULT 'user',    -- 'user' (told directly) or 'consolidation'
+    agent_id TEXT DEFAULT 'default',  -- which agent owns this fact
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
@@ -49,6 +50,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     id INTEGER PRIMARY KEY,
     happened_at TEXT NOT NULL,     -- ISO 8601 date of the episode
     summary TEXT NOT NULL,
+    agent_id TEXT DEFAULT 'default',  -- which agent owns this episode
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS episodes_fts USING fts5(
@@ -71,6 +73,7 @@ CREATE TABLE IF NOT EXISTS chat_log (
     content TEXT NOT NULL,
     consolidated INTEGER DEFAULT 0,
     session_id TEXT DEFAULT 'default',
+    agent_id TEXT DEFAULT 'default',  -- which agent produced this exchange
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -116,6 +119,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # latency, iterations, tools) — so reopening a thread still shows how
         # each answer was produced, not just the plain text.
         conn.execute("ALTER TABLE chat_log ADD COLUMN meta TEXT")
+        conn.commit()
+    if "agent_id" not in cols:
+        conn.execute("ALTER TABLE chat_log ADD COLUMN agent_id TEXT DEFAULT 'default'")
+        conn.commit()
+
+    cols_facts = {r[1] for r in conn.execute("PRAGMA table_info(facts)").fetchall()}
+    if "agent_id" not in cols_facts:
+        conn.execute("ALTER TABLE facts ADD COLUMN agent_id TEXT DEFAULT 'default'")
+        conn.commit()
+
+    cols_episodes = {r[1] for r in conn.execute("PRAGMA table_info(episodes)").fetchall()}
+    if "agent_id" not in cols_episodes:
+        conn.execute("ALTER TABLE episodes ADD COLUMN agent_id TEXT DEFAULT 'default'")
         conn.commit()
 
 

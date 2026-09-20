@@ -68,7 +68,7 @@ _POLL_EVERY = 2.0
 
 
 class ZepFactStore:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, agent_id: str = _DEFAULT_USER):
         from zep_cloud import Zep
 
         self.client = Zep(api_key=os.environ["ZEP_API_KEY"])

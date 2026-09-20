@@ -41,7 +41,8 @@ _NAMESPACE = ("knowme", "facts")
 
 
 class LangMemFactStore:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, agent_id: str = "default"):
+        self.agent_id = agent_id
         self.top_k = settings.retrieval_top_k
         self.store = self._make_store()
 

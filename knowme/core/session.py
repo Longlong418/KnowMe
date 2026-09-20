@@ -65,10 +65,11 @@ class Session:
     system prompt. One Session per gateway connection."""
 
     def __init__(self, settings: Settings, memory=None, session_id: str = "default",
-                 conn=None):
+                 conn=None, agent_id: str = "default"):
         self.settings = settings
         self.memory = memory  # knowme.memory.Memory (None until Phase-2 wiring)
         self.session_id = session_id
+        self.agent_id = agent_id
         # Only snip_compact's watermark needs this; when a caller passes a
         # memory it already carries the same connection, so derive it rather
         # than making every existing construction site learn a new argument.

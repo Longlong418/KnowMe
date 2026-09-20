@@ -25,7 +25,7 @@ from knowme.memory.semantic.base import env_or
 
 
 class SupabaseFactStore:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, agent_id: str = "default"):
         import openai
         from supabase import create_client
 

@@ -43,19 +43,23 @@ def bundled_skill_dirs() -> list[Path]:
 
 class Memory:
     def __init__(self, conn: sqlite3.Connection, settings: Settings, client: anthropic.Anthropic,
-                 episode_store=None):
+                 episode_store=None, agent_id: str = "default"):
         # episode_store: inject an already-built store (the dashboard caches ONE
         # NotionEpisodeStore process-wide — its constructor hits the network,
         # so building one per Memory would re-query Notion on every poll).
+        # agent_id: which agent this memory belongs to. All fact/episode/chat
+        # writes and reads are scoped to it, so two agents never share a memory
+        # they didn't choose to (default = "default", the single agent today).
         self.conn = conn
         self.settings = settings
         self.client = client
-        self.facts = self._make_fact_store(conn, settings)
-        self.episodes = episode_store if episode_store is not None else self._make_episode_store(conn, settings)
+        self.agent_id = agent_id
+        self.facts = self._make_fact_store(conn, settings, agent_id)
+        self.episodes = episode_store if episode_store is not None else self._make_episode_store(conn, settings, agent_id)
         self.skills = SkillLoader([*bundled_skill_dirs(), settings.home / "skills"])
 
     @staticmethod
-    def _make_fact_store(conn, settings):
+    def _make_fact_store(conn, settings, agent_id="default"):
         # Every branch here returns something that satisfies FactStore
         # (semantic/base.py) and is held to it by the conformance suite — which
         # is the whole reason a hosted service can stand in for local SQLite
@@ -63,28 +67,28 @@ class Memory:
         if settings.semantic_store == "supabase":
             from knowme.memory.semantic.supabase_store import SupabaseFactStore
 
-            return SupabaseFactStore(settings)
+            return SupabaseFactStore(settings, agent_id)
         if settings.semantic_store == "mem0":
             from knowme.memory.semantic.mem0_store import Mem0FactStore
 
-            return Mem0FactStore(settings)
+            return Mem0FactStore(settings, agent_id)
         if settings.semantic_store == "zep":
             from knowme.memory.semantic.zep_store import ZepFactStore
 
-            return ZepFactStore(settings)
+            return ZepFactStore(settings, agent_id)
         if settings.semantic_store == "langmem":
             from knowme.memory.semantic.langmem_store import LangMemFactStore
 
-            return LangMemFactStore(settings)
-        return SqliteFactStore(conn)
+            return LangMemFactStore(settings, agent_id)
+        return SqliteFactStore(conn, agent_id)
 
     @staticmethod
-    def _make_episode_store(conn, settings):
+    def _make_episode_store(conn, settings, agent_id="default"):
         if settings.episodic_store == "notion":
             from knowme.memory.episodic.notion_store import NotionEpisodeStore
 
-            return NotionEpisodeStore()
-        return SqliteEpisodeStore(conn)
+            return NotionEpisodeStore(agent_id)
+        return SqliteEpisodeStore(conn, agent_id)
 
     # ---- retrieval (gated — see retrieval_gate.py for why)
     def gated_retrieve(self, message: str, notify=None) -> str:
@@ -110,14 +114,14 @@ class Memory:
                  source: str = "cli", meta: dict | None = None) -> None:
         import json as _json
         self.conn.execute(
-            "INSERT INTO chat_log (role, content, session_id, source) VALUES ('user', ?, ?, ?)",
-            (user_message, session_id, source),
+            "INSERT INTO chat_log (role, content, session_id, source, agent_id) VALUES ('user', ?, ?, ?, ?)",
+            (user_message, session_id, source, self.agent_id),
         )
         # meta (gate/latency/iterations/tools) rides on the assistant row so a
         # reopened thread can render the full turn card, not just the text.
         self.conn.execute(
-            "INSERT INTO chat_log (role, content, session_id, source, meta) VALUES ('assistant', ?, ?, ?, ?)",
-            (reply, session_id, source, _json.dumps(meta) if meta else None),
+            "INSERT INTO chat_log (role, content, session_id, source, agent_id, meta) VALUES ('assistant', ?, ?, ?, ?, ?)",
+            (reply, session_id, source, self.agent_id, _json.dumps(meta) if meta else None),
         )
         self.conn.commit()
 
@@ -126,8 +130,8 @@ class Memory:
         """The (user, assistant) exchanges of one past session, in order — used
         to reload working memory when the user switches back to a conversation."""
         rows = self.conn.execute(
-            "SELECT role, content FROM chat_log WHERE session_id = ? ORDER BY id",
-            (session_id,),
+            "SELECT role, content FROM chat_log WHERE session_id = ? AND agent_id = ? ORDER BY id",
+            (session_id, self.agent_id),
         ).fetchall()
         pairs, pending = [], None
         for r in rows:
@@ -140,19 +144,20 @@ class Memory:
 
     def list_sessions(self) -> list[dict]:
         """One row per conversation: id, first user message (the title), message
-        count, and when it started — newest first."""
+        count, and when it started — newest first. Scoped to this agent's turns."""
         rows = self.conn.execute(
             """SELECT session_id,
                       COUNT(*) AS messages,
                       MIN(created_at) AS started_at,
                       MAX(created_at) AS last_at
-               FROM chat_log GROUP BY session_id ORDER BY last_at DESC"""
+               FROM chat_log WHERE agent_id = ? GROUP BY session_id ORDER BY last_at DESC""",
+            (self.agent_id,),
         ).fetchall()
         out = []
         for r in rows:
             first = self.conn.execute(
-                "SELECT content FROM chat_log WHERE session_id = ? AND role = 'user' ORDER BY id LIMIT 1",
-                (r["session_id"],),
+                "SELECT content FROM chat_log WHERE session_id = ? AND role = 'user' AND agent_id = ? ORDER BY id LIMIT 1",
+                (r["session_id"], self.agent_id),
             ).fetchone()
             out.append({
                 "id": r["session_id"],
@@ -167,12 +172,18 @@ class Memory:
         """Mirror memory to a human-readable MEMORY.md next to state.db — so the
         whiteboard's `~/.knowme/MEMORY.md` box is literally real, and "your memory
         is a file you can open" is true. state.db stays the queryable source of
-        truth; this file is a generated view, refreshed after each turn."""
+        truth; this file is a generated view, refreshed after each turn.
+
+        Only exports THIS agent's facts and episodes — a multi-agent workspace
+        shows each agent's own memory in its own MEMORY.md (Phase 2+ will put
+        one per agent under a directory keyed by agent name)."""
         facts = self.conn.execute(
-            "SELECT subject, content FROM facts ORDER BY subject, id"
+            "SELECT subject, content FROM facts WHERE agent_id = ? ORDER BY subject, id",
+            (self.agent_id,),
         ).fetchall()
         eps = self.conn.execute(
-            "SELECT happened_at, summary FROM episodes ORDER BY happened_at DESC, id DESC"
+            "SELECT happened_at, summary FROM episodes WHERE agent_id = ? ORDER BY happened_at DESC, id DESC",
+            (self.agent_id,),
         ).fetchall()
         lines = [
             "# KnowMe memory",
@@ -197,6 +208,7 @@ class Memory:
             self.settings.consolidate_every,
             self.facts,
             self.episodes,
+            agent_id=self.agent_id,
         )
         if new_facts and notify:
             notify("consolidation", {"new_facts": new_facts})

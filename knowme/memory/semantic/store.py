@@ -65,13 +65,14 @@ def _fts_query(text: str) -> str:
 
 
 class SqliteFactStore:
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, agent_id: str = "default"):
         self.conn = conn
+        self.agent_id = agent_id
 
     def add(self, subject: str, content: str, source: str = "user") -> None:
         self.conn.execute(
-            "INSERT INTO facts (subject, content, source) VALUES (?,?,?)",
-            (subject.lower().strip(), content, source),
+            "INSERT INTO facts (subject, content, source, agent_id) VALUES (?,?,?,?)",
+            (subject.lower().strip(), content, source, self.agent_id),
         )
         self.conn.commit()
 
@@ -81,8 +82,8 @@ class SqliteFactStore:
             return []
         rows = self.conn.execute(
             "SELECT f.subject, f.content FROM facts_fts JOIN facts f ON f.id = facts_fts.rowid "
-            "WHERE facts_fts MATCH ? ORDER BY rank LIMIT ?",
-            (fts, top_k),
+            "WHERE facts_fts MATCH ? AND f.agent_id = ? ORDER BY rank LIMIT ?",
+            (fts, self.agent_id, top_k),
         ).fetchall()
         return [f"[{r['subject']}] {r['content']}" for r in rows]
 
@@ -90,8 +91,9 @@ class SqliteFactStore:
     # The facts_au / facts_ad triggers keep the FTS index in sync automatically.
     def list(self, limit: int = 200) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT id, subject, content, source, created_at FROM facts ORDER BY id DESC LIMIT ?",
-            (limit,),
+            "SELECT id, subject, content, source, created_at FROM facts "
+            "WHERE agent_id = ? ORDER BY id DESC LIMIT ?",
+            (self.agent_id, limit),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -101,8 +103,8 @@ class SqliteFactStore:
             return self.list(top_k)
         rows = self.conn.execute(
             "SELECT f.id, f.subject, f.content FROM facts_fts JOIN facts f ON f.id = facts_fts.rowid "
-            "WHERE facts_fts MATCH ? ORDER BY rank LIMIT ?",
-            (fts, top_k),
+            "WHERE facts_fts MATCH ? AND f.agent_id = ? ORDER BY rank LIMIT ?",
+            (fts, self.agent_id, top_k),
         ).fetchall()
         return [dict(r) for r in rows]
 

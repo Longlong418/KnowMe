@@ -14,13 +14,14 @@ from knowme.memory.semantic.store import _fts_query
 
 
 class SqliteEpisodeStore:
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, agent_id: str = "default"):
         self.conn = conn
+        self.agent_id = agent_id
 
     def add(self, summary: str, happened_at: str) -> None:
         self.conn.execute(
-            "INSERT INTO episodes (happened_at, summary) VALUES (?,?)",
-            (happened_at, summary),
+            "INSERT INTO episodes (happened_at, summary, agent_id) VALUES (?,?,?)",
+            (happened_at, summary, self.agent_id),
         )
         self.conn.commit()
 
@@ -31,27 +32,29 @@ class SqliteEpisodeStore:
             return self.recent(top_k)
         rows = self.conn.execute(
             "SELECT e.happened_at, e.summary FROM episodes_fts JOIN episodes e "
-            "ON e.id = episodes_fts.rowid WHERE episodes_fts MATCH ? "
+            "ON e.id = episodes_fts.rowid WHERE episodes_fts MATCH ? AND e.agent_id = ? "
             "ORDER BY rank, e.happened_at DESC LIMIT ?",
-            (fts, top_k),
+            (fts, self.agent_id, top_k),
         ).fetchall()
         return [f"({r['happened_at']}) {r['summary']}" for r in rows]
 
     def recent(self, top_k: int = 3) -> list[str]:
         rows = self.conn.execute(
-            "SELECT happened_at, summary FROM episodes ORDER BY happened_at DESC LIMIT ?",
-            (top_k,),
+            "SELECT happened_at, summary FROM episodes WHERE agent_id = ? "
+            "ORDER BY happened_at DESC LIMIT ?",
+            (self.agent_id, top_k),
         ).fetchall()
         return [f"({r['happened_at']}) {r['summary']}" for r in rows]
 
     def list(self, limit: int = 200) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT id, happened_at, summary, created_at FROM episodes ORDER BY id DESC LIMIT ?",
-            (limit,),
+            "SELECT id, happened_at, summary, created_at FROM episodes "
+            "WHERE agent_id = ? ORDER BY id DESC LIMIT ?",
+            (self.agent_id, limit),
         ).fetchall()
         return [dict(r) for r in rows]
 
     def delete(self, episode_id: int) -> bool:
-        cur = self.conn.execute("DELETE FROM episodes WHERE id=?", (episode_id,))
+        cur = self.conn.execute("DELETE FROM episodes WHERE id=? AND agent_id = ?", (episode_id, self.agent_id))
         self.conn.commit()
         return cur.rowcount > 0

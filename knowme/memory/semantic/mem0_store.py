@@ -42,7 +42,7 @@ _DEFAULT_USER = "knowme"
 
 
 class Mem0FactStore:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, agent_id: str = "default"):
         from mem0 import MemoryClient
 
         self.client = MemoryClient(api_key=os.environ["MEM0_API_KEY"])
