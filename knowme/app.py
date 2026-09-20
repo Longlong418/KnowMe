@@ -1,24 +1,33 @@
 """Wiring — builds one KnowMe from its parts. Gateways call `respond()`.
 
 This file is the assembly diagram in code: config → db → tools → memory →
-session → loop. If you want to understand the repo in one place, start here.
+session → runtime. If you want to understand the repo in one place, start here.
+
+KnowMe is now a FACADE over the Agent Core. The turn itself lives in
+knowme/core/runtime.py (AgentRuntime.run_turn), parameterised by an AgentSpec;
+KnowMe is the default agent — DEFAULT_SPEC on a runtime built from Settings —
+and keeps the constructor, attributes and respond() signature every gateway,
+ops command and eval already uses.
 """
 
 from __future__ import annotations
 
 from knowme.config import Settings, load_settings
-from knowme.core.context import micro_compact, state_summary, tool_budget
-from knowme.core.loop import LoopResult, Observer, run_loop
+from knowme.core.events import Observer
+from knowme.core.loop import LoopResult
 from knowme.core.models import get_client
+from knowme.core.runtime import AgentRuntime
 from knowme.core.session import Session
+from knowme.core.spec import DEFAULT_SPEC, AgentSpec
 from knowme.db import connect
 from knowme.ops.pricing import context_for
-from knowme.ops.tracing import Tracer, compose
+from knowme.ops.tracing import Tracer
 from knowme.tools import build_registry
 
 
 class KnowMe:
-    def __init__(self, settings: Settings | None = None, client=None, conn=None):
+    def __init__(self, settings: Settings | None = None, client=None, conn=None,
+                 spec: AgentSpec = DEFAULT_SPEC):
         # `client` and `conn` are injectable: evals swap in a scripted model,
         # the dashboard injects a cross-thread connection. Same seam either way.
         self.settings = settings or load_settings()
@@ -34,6 +43,10 @@ class KnowMe:
         self.mcp_bridge = getattr(self.tools, "mcp_bridge", None)
         self.session = Session(self.settings, memory=self.memory, conn=self.conn)
         self.tracer = Tracer(self.settings)
+        self.spec = spec
+        self.runtime = AgentRuntime(
+            self.settings, client=self.client, conn=self.conn, memory=self.memory,
+            tools=self.tools, tracer=self.tracer, context_for=context_for)
 
     def close(self) -> None:
         """Release external resources (MCP subprocesses). Called when the
@@ -43,149 +56,21 @@ class KnowMe:
 
     def respond(self, user_message: str, observer: Observer | None = None,
                 source: str = "cli", stream: bool = False) -> LoopResult:
-        """One full turn: assemble working memory → run the loop → persist.
-        `source` tags whether the message arrived through the CLI or dashboard,
-        so the unified chat can show its origin.
-        `stream=True` streams the reply text token by token to the observer.
-        Everything that happens is both shown (observer) and recorded (tracer)."""
-        # capture the gate + graph decisions as they flow by, so we can persist
-        # them with the turn (the reopened-thread telemetry the dashboard shows)
-        import time
-        captured: dict = {}
+        """One full turn through the runtime, as the default agent.
 
-        def _capture(kind, ev):
-            if kind == "gate":
-                captured["gate"] = {"decision": ev.get("decision"), "reason": ev.get("reason")}
-            if kind == "route":
-                captured["graph_route"] = {"target": ev.get("target"), "reason": ev.get("reason")}
-            if kind == "triage":
-                captured["triage_reason"] = ev.get("reason")
-            if kind == "graph_end":
-                captured["graph_path"] = ev.get("path")
-        notify = compose(observer, self.tracer.event, _capture)
-        t0 = time.perf_counter()
-
-        with self.tracer.turn(user_message):
-            # The graph front door is optional and can NEVER make KnowMe worse:
-            # flag off → this is exactly the old code path; flag on → the triage
-            # graph decides quick vs full, and any failure anywhere falls open
-            # to the plain loop below (same fail-open rule as the retrieval gate).
-            result = None
-            if self.settings.graph_workflows:
-                try:
-                    result = self._respond_via_graph(user_message, notify, stream)
-                except Exception as exc:
-                    notify("graph_end", {"workflow": "triage", "ms": 0, "steps": 0,
-                                         "path": [], "error": repr(exc)})
-                    result = None
-            if result is None:
-                result = self._run_full_turn(user_message, notify, stream)
-
-            quick = captured.get("graph_route", {}).get("target") == "quick_reply"
-
-            def _status(out: str) -> str:
-                low = (out or "").lower()
-                return "error" if ("failed" in low or "timed out" in low
-                                   or low.startswith("error")) else "ok"
-            meta = {
-                "gate": captured.get("gate"),
-                "graph": ({"workflow": "triage",
-                           "route": "quick" if quick else "full",
-                           "reason": captured.get("triage_reason", ""),
-                           "path": captured.get("graph_path")}
-                          if "graph_route" in captured else None),
-                "iterations": result.iterations,
-                "latency_ms": int((time.perf_counter() - t0) * 1000),
-                "tools": [{"tool": c["tool"], "status": _status(c["output"])}
-                          for c in result.tool_calls],
-                # which brain answered this turn — so a reopened thread (or a
-                # thread you switched models mid-way) shows it per card. A quick
-                # graph turn was answered by the small model; say so honestly.
-                "model": self.settings.small_model if quick else self.settings.model,
-                "provider": self.settings.provider,
-            }
-            self.session.add_exchange(user_message, result.reply, tool_calls=result.tool_calls,
-                                      source=source, meta=meta)
-            if self.memory is not None:
-                self.memory.maybe_consolidate(notify=notify)
-                self.memory.export_markdown()   # keep MEMORY.md in sync
-
-        self.tracer.end_turn(result.reply, result.iterations)
-        return result
+        The graph front door is optional and can NEVER make KnowMe worse:
+        flag off → the plain loop; flag on → the triage graph decides quick vs
+        full, and any failure anywhere falls open to the plain loop."""
+        front_door = self._respond_via_graph if self.settings.graph_workflows else None
+        return self.runtime.run_turn(
+            self.spec, self.session, user_message, observer=observer, source=source,
+            stream=stream, front_door=front_door,
+        ).as_loop_result()
 
     def _run_full_turn(self, user_message: str, notify, stream: bool) -> LoopResult:
-        """The classic turn: assemble working memory, run THE loop. Extracted
-        verbatim so the graph's full_agent node calls the SAME code as the
-        flag-off default — loop-as-a-node can never drift from loop-as-default."""
-        system = self.session.build_system()
-        # Everything per-turn rides WITH the user's message, never in the system
-        # prompt: the clock, the gated retrieval, the matched skills. The system
-        # prompt therefore stays byte-identical turn over turn, so a provider's
-        # prefix cache can hold onto it — prompt caching is a prefix match, and
-        # a per-turn change anywhere in the prefix re-bills everything after it.
-        #
-        # Only the PROMPT gets the context block; `history` keeps the bare
-        # message (see add_exchange), so context never accumulates across turns.
-        context = self.session.build_turn_context(user_message, notify=notify)
-        prompt = f"{context}\n\n{user_message}"
-        # History is no longer sliced here. The old history[-window:] dropped
-        # every turn older than N without a trace, so a long conversation read
-        # to the model as though it had simply started late. The bound now lives
-        # in Session.add_exchange as snip_compact: over the threshold the middle
-        # is archived to .knowme/archives/ and a marker takes its place, so the
-        # model can see that something came before.
-        # COMPRESSION HAPPENS HERE, on a copy, on the way to the model — never in
-        # the stored conversation. session.history and chat_log hold the complete
-        # record, because that is what the person reading the dashboard is owed;
-        # these rewrites exist only so the request fits.
-        sent = self.session.history
-
-        # 1. the per-turn budget: a turn whose tool output is oversized keeps a
-        #    pointer plus an excerpt (runtime/tool_budget.py).
-        sent = tool_budget.fit_history(
-            sent, self.settings.home,
-            self.settings.tool_result_budget, self.settings.tool_result_cap)
-
-        # 2. the emergency valve, and the only compressor that measures the REAL
-        #    request against the model's REAL window instead of a proxy. Last
-        #    deliberately: it is the most destructive of the three and only
-        #    matters once the others have done what they can.
-        messages = sent + [{"role": "user", "content": prompt}]
-        limit = context_for(self.settings.provider, self.settings.model)
-        if micro_compact.prompt_tokens(system, messages) > self.settings.context_trigger * limit:
-            sent = micro_compact.compact(
-                sent, self.settings.home,
-                self.settings.micro_keep, self.settings.micro_min_chars)
-            messages = sent + [{"role": "user", "content": prompt}]
-
-            # 3. still over, after everything reversible has been tried: the
-            #    conversation is summarised and replaced. The ONLY lossy step in
-            #    the harness, which is why it is gated on the previous two
-            #    having already failed to bring this under the line
-            #    (runtime/state_summary.py).
-            if micro_compact.prompt_tokens(system, messages) > self.settings.context_trigger * limit:
-                replaced = state_summary.summarize(
-                    self.session.history, sent, self.settings.home, self.conn,
-                    self.session.session_id, self.client, self.settings.small_model,
-                    self.settings.summary_max_tokens)
-                if replaced is not None:
-                    # Working memory becomes the summary; chat_log keeps every
-                    # message, so the user's own record is untouched.
-                    self.session.history = replaced
-                    sent = replaced
-                    messages = sent + [{"role": "user", "content": prompt}]
-
-        return run_loop(
-            client=self.client,
-            model=self.settings.model,
-            system=system,
-            messages=messages,
-            tools=self.tools,
-            max_iterations=self.settings.max_iterations,
-            max_tokens=self.settings.max_tokens,
-            observer=notify,
-            stream=stream,
-        )
+        """The classic turn — the graph's full_agent node calls this so
+        loop-as-a-node can never drift from loop-as-default."""
+        return self.runtime.run_loop_turn(self.spec, self.session, user_message, notify, stream)
 
     def _respond_via_graph(self, user_message: str, notify, stream: bool) -> LoopResult | None:
         """One turn through the triage graph workflow. Returns None whenever

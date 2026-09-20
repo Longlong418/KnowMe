@@ -44,6 +44,17 @@ class ToolRegistry:
     def schemas(self) -> list[dict[str, Any]]:
         return [t.to_api() for t in self._tools.values()]
 
+    def subset(self, names) -> ToolRegistry:
+        """A registry holding only `names` — an agent's allowlist applied to the
+        full set. Tools are shared, not copied; only the membership differs.
+        Unknown names are ignored rather than raised: a spec written for a
+        tool that is switched off (apple_tools, gh_tool) should still run."""
+        out = ToolRegistry()
+        for name in names:
+            if name in self._tools:
+                out.register(self._tools[name])
+        return out
+
     def execute(self, name: str, args: dict[str, Any], notify=None) -> str:
         """Run one tool call safely: the model observes errors as text instead
         of crashing the loop (execute_tool_safely pattern)."""

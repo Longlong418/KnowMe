@@ -75,7 +75,7 @@ class Session:
         self.conn = conn if conn is not None else getattr(memory, "conn", None)
         self.history: list[dict] = []
 
-    def build_system(self) -> str:
+    def build_system(self, persona: str | None = None, model: str | None = None) -> str:
         """The STABLE half of the prompt — byte-identical for every turn.
 
         Nothing per-turn belongs here. Prompt caching is a PREFIX match: a
@@ -88,20 +88,23 @@ class Session:
         by switching model — which invalidates the cache anyway, because caches
         are model-scoped. Stating it here therefore costs nothing.
 
+        `persona` and `model` are an AgentSpec's: None means SOUL.md and the
+        configured model, which is the default agent and the only one so far.
+
         Everything that moves turn to turn lives in build_turn_context().
         """
         return "\n".join([
-            load_soul(self.settings),
+            persona if persona is not None else load_soul(self.settings),
             # the agent should know its own brain — "what model are you?"
             # is the first question every curious user asks
-            (f"\nYour model: you are running on '{self.settings.model}' via the "
+            (f"\nYour model: you are running on '{model or self.settings.model}' via the "
              f"'{self.settings.provider}' provider, inside KnowMe, a local-first "
              "open-source agent harness."),
         ])
 
-    def build_turn_context(self, user_message: str, notify=None) -> str:
+    def build_turn_context(self, user_message: str, notify=None, extra: str = "") -> str:
         """The VOLATILE half — everything that changes from turn to turn: the
-        clock, the gated retrieval, the matched skills.
+        clock, the gated retrieval, and whatever the caller adds.
 
         Returned as text for the caller to prepend to the user's message rather
         than append to the system prompt. Where it sits decides what it breaks:
@@ -110,6 +113,10 @@ class Session:
 
         The agent runs on your laptop, so it should know your laptop's clock —
         local time WITH the timezone name, enough to resolve "in 30 minutes".
+
+        `extra` is the Application's contribution — the document open in the
+        Reader, the text the user has selected — appended LAST, after memory,
+        so a turn with nothing extra reads byte-for-byte as it always did.
         """
         now = datetime.now().astimezone()
         parts = [f"Right now it is {now:%A, %Y-%m-%d %H:%M} ({now:%Z}, UTC{now:%z})."]
@@ -126,6 +133,9 @@ class Session:
             # that skills exist. Pushing skill bodies in on every turn meant
             # paying for a skill the model never used — and guessing which one
             # matters from word overlap is a judgment the model does better.
+
+        if extra:
+            parts.append("\n" + extra)
 
         return "[context]\n" + "\n".join(parts)
 

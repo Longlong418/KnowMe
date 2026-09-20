@@ -247,6 +247,34 @@ def _belongs_elsewhere(model: str, provider_name: str) -> bool:
     return bool(owner) and owner != provider_name
 
 
+def resolve_models(settings: Settings) -> tuple[str, str]:
+    """(model, small_model) for this provider — a pure function of settings.
+
+    A model name belongs to the provider it was configured FOR. KNOWME_MODEL and
+    KNOWME_SMALL_MODEL are global, so code that switches provider could carry
+    anthropic's gate model to xAI, which answers
+    `400 Model not found: claude-haiku-4-5-20251001`. The retrieval gate then
+    FAILS OPEN by design, so it retrieved on every single turn for every
+    non-anthropic model instead of deciding, and reported that as a normal
+    "retrieve". A silent permanent failure wearing the costume of a healthy
+    decision.
+
+    So: a value INHERITED from the env for a different provider is dropped
+    (the provider's own default fills in); a value the caller passed
+    explicitly is kept, because that is a choice, not a leak. The two are
+    distinguishable exactly when the setting still equals the env string.
+    """
+    provider = PROVIDERS[settings.provider]
+    chosen = {}
+    for attr in ("model", "small_model"):
+        value = getattr(settings, attr)
+        inherited = os.getenv(f"KNOWME_{attr.upper()}", "").strip()
+        if inherited and value == inherited and _belongs_elsewhere(inherited, settings.provider):
+            value = ""
+        chosen[attr] = value or getattr(provider, attr)
+    return chosen["model"], chosen["small_model"]
+
+
 def get_client(settings: Settings):
     """Build the client for settings.provider and fill in default model ids.
     Returns anything with .messages.create(...) in the Anthropic shape."""
@@ -281,14 +309,11 @@ def get_client(settings: Settings):
     # (the provider's own default fills in below); a value the caller passed
     # explicitly is kept, because that is a choice, not a leak. The two are
     # distinguishable exactly when the setting still equals the env string.
-    for attr in ("model", "small_model"):
-        inherited = os.getenv(f"KNOWME_{attr.upper()}", "").strip()
-        if inherited and getattr(settings, attr) == inherited \
-                and _belongs_elsewhere(inherited, settings.provider):
-            setattr(settings, attr, "")
-
-    settings.model = settings.model or provider.model
-    settings.small_model = settings.small_model or provider.small_model
+    # Written back onto settings for now: everything downstream still reads
+    # settings.model. Phase 1 stops this write-back — an AgentSpec resolves its
+    # own model through resolve_models() and two agents on two models stop
+    # overwriting each other's choice.
+    settings.model, settings.small_model = resolve_models(settings)
     base_url = settings.base_url or provider.configured_base_url()
 
     # a hung network call must never freeze a turn silently
