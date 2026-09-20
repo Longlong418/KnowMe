@@ -61,16 +61,25 @@ class KnowMe:
             self.mcp_bridge.close()
 
     def respond(self, user_message: str, observer: Observer | None = None,
-                source: str = "cli", stream: bool = False) -> LoopResult:
+                source: str = "cli", stream: bool = False,
+                extra_context: str = "") -> LoopResult:
         """One full turn through the runtime, as the default agent.
 
         The graph front door is optional and can NEVER make KnowMe worse:
         flag off → the plain loop; flag on → the triage graph decides quick vs
         full, and any failure anywhere falls open to the plain loop."""
-        front_door = self._respond_via_graph if self.settings.graph_workflows else None
+        # The current triage graph only receives a message.  Application turns
+        # carry richer state, so keep them on the full loop until graph state
+        # has an explicit context field.  Silently dropping an open document or
+        # selection would be much worse than skipping the quick route.
+        front_door = (
+            self._respond_via_graph
+            if self.settings.graph_workflows and not extra_context
+            else None
+        )
         return self.runtime.run_turn(
             self.spec, self.session, user_message, observer=observer, source=source,
-            stream=stream, front_door=front_door,
+            stream=stream, extra_context=extra_context, front_door=front_door,
         ).as_loop_result()
 
     def _run_full_turn(self, user_message: str, notify, stream: bool) -> LoopResult:

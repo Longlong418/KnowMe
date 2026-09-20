@@ -50,6 +50,80 @@ knowme/
 
 ## 核心改动说明
 
+### 里程碑 1：Application Context Bridge 真正接入运行时（2026-09-21）
+
+#### 这次解决了什么
+
+此前 Reader 页面虽然会把选中文本发给 `/api/extras`，但聊天入口没有读取这份数据，
+所以 Agent 实际上看不到用户正在阅读的内容。现在链路已经完整：
+
+```text
+Reader 打开文档 / 选中文字
+  → ApplicationContextBridge 保存当前页面快照
+  → 发起聊天时按 Agent + 会话读取快照
+  → Session 把快照放进本轮临时上下文
+  → Agent 回答
+  → Trace 显示本轮是否带了 Application 上下文
+```
+
+Application 上下文是临时工作状态，不是长期记忆。它只存在于 Dashboard 进程中；
+切换 Agent 或会话不会串数据，重启服务后也不会把上次打开的文章错误带入新对话。
+
+#### 新增文件
+
+- `knowme/applications/context_bridge.py`
+  - `ApplicationState`：一份可读的页面快照，包括应用名、当前资源、正文、选区和少量元数据。
+  - `ApplicationContextBridge`：按 `(agent_id, session_id)` 隔离快照，并负责把它变成模型可读的文本。
+  - 正文默认最多 24,000 字符，选区最多 8,000 字符。限制发生在进入运行时之前，避免本地大文件撑爆模型上下文。
+
+#### 运行时改动
+
+- `KnowMe.respond(..., extra_context="")` 现在正式接受 Application 上下文。
+- 带 Application 上下文的请求暂时直接进入完整 Agent Loop，不走只接收纯文本的快速分流图。这样不会为了省一次模型调用而丢掉当前文档。
+- `AgentSpec.tools` 现在会在每轮执行前转成真正的工具子集。一个 Learning Agent 只声明 Reader 工具，就既看不到也调用不了 Coding 或日历工具。
+- Trace 新增三个容易读懂的事件：
+  - `turn_start`：谁、在哪个会话、用哪个模型开始执行。
+  - `context`：Application 上下文字符数、历史消息数、实际发送条数、运行了哪些压缩阶段。
+  - `turn_end`：迭代次数、耗时和工具结果状态。
+
+这些事件只记录结构和计数，不记录完整系统提示词、文档正文或选区内容。
+
+#### `/api/extras` 当前格式
+
+```json
+{
+  "application": "reader",
+  "resource": "notes.md",
+  "content": "文档正文",
+  "selection": "用户当前选中的段落",
+  "agent_id": "default",
+  "session_id": "dashboard-20260921-120000"
+}
+```
+
+清除当前会话的页面状态：
+
+```json
+{
+  "action": "clear",
+  "agent_id": "default",
+  "session_id": "dashboard-20260921-120000"
+}
+```
+
+旧版 `type=selection / text / source` 请求仍然兼容，避免升级服务后已打开的旧页面突然失效。
+
+#### 怎么验证
+
+```bash
+.venv/Scripts/python.exe -m pytest \
+  evals/deterministic/test_agent_spec.py \
+  evals/deterministic/test_application_context_bridge.py \
+  evals/deterministic/test_run_turn_extra_context.py -q
+```
+
+覆盖内容包括：Agent 工具白名单、上下文隔离、长度上限、清除行为、Facade 透传和透明 Trace 事件。
+
 ### Phase 1: 多Agent记忆隔离（2024-09-20）
 
 #### 背景
@@ -220,6 +294,13 @@ A: 确保在 `tools/__init__.py` 的 `build_registry()` 中注册。
 ---
 
 ## 版本历史
+
+### v0.3.0-dev (2026-09-21)
+- **修复**：Reader 页面状态现在真正进入 Agent 本轮上下文
+- **新增**：按 Agent + 会话隔离的 Application Context Bridge
+- **新增**：`turn_start`、`context`、`turn_end` 透明运行事件
+- **修复**：`AgentSpec.tools` 工具白名单在运行时生效
+- **兼容**：保留旧版 `/api/extras` 选区请求格式
 
 ### v0.2.0 (2024-09-20)
 - **新增**：多Agent记忆隔离

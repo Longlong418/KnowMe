@@ -89,6 +89,13 @@ class AgentRuntime:
         captured: dict = {}
 
         def _capture(kind, ev):
+            if kind == "context":
+                captured["context"] = {
+                    "application_chars": ev.get("application_chars", 0),
+                    "history_messages": ev.get("history_messages", 0),
+                    "sent_messages": ev.get("sent_messages", 0),
+                    "compaction": ev.get("compaction", []),
+                }
             if kind == "gate":
                 captured["gate"] = {"decision": ev.get("decision"), "reason": ev.get("reason")}
             if kind == "route":
@@ -101,6 +108,12 @@ class AgentRuntime:
         t0 = time.perf_counter()
 
         with self.tracer.turn(user_message):
+            notify("turn_start", {
+                "agent_id": resolved.name,
+                "session_id": session.session_id,
+                "model": resolved.model,
+                "source": source,
+            })
             # The front door is optional and can NEVER make a turn worse: none
             # → this is exactly the plain path; one → it may answer, and any
             # failure anywhere falls open to the loop below (same fail-open
@@ -119,6 +132,7 @@ class AgentRuntime:
 
             quick = captured.get("graph_route", {}).get("target") == "quick_reply"
             meta = {
+                "context": captured.get("context"),
                 "gate": captured.get("gate"),
                 "graph": ({"workflow": "triage",
                            "route": "quick" if quick else "full",
@@ -140,6 +154,14 @@ class AgentRuntime:
             if self.memory is not None:
                 self.memory.maybe_consolidate(notify=notify)
                 self.memory.export_markdown()   # keep MEMORY.md in sync
+
+            notify("turn_end", {
+                "agent_id": resolved.name,
+                "session_id": session.session_id,
+                "iterations": result.iterations,
+                "latency_ms": meta["latency_ms"],
+                "tools": meta["tools"],
+            })
 
         self.tracer.end_turn(result.reply, result.iterations)
         return TurnResult(reply=result.reply, tool_calls=result.tool_calls,
@@ -181,12 +203,31 @@ class AgentRuntime:
             session.history = fit.persisted
         messages = fit.sent + [{"role": "user", "content": prompt}]
 
+        # Context construction used to be invisible even though it is one of
+        # the most important decisions an agent runtime makes.  This event does
+        # not expose private prompt text; it exposes the useful facts a person
+        # needs to understand the run: what was attached and which compaction
+        # stages changed the request.
+        notify("context", {
+            "agent_id": resolved.name,
+            "session_id": session.session_id,
+            "application_chars": len(extra_context),
+            "history_messages": len(session.history),
+            "sent_messages": len(fit.sent),
+            "compaction": fit.ran or [],
+        })
+
+        # AgentSpec.tools is an allowlist.  Keeping the full registry on the
+        # runtime is useful (tools are built once and can hold resources), but
+        # each agent must only show and execute the tools declared in its spec.
+        tools = self.tools if resolved.tools is None else self.tools.subset(resolved.tools)
+
         return run_loop(
             client=self.client,
             model=resolved.model,
             system=system,
             messages=messages,
-            tools=self.tools,
+            tools=tools,
             max_iterations=resolved.max_iterations,
             max_tokens=resolved.max_tokens,
             observer=notify,

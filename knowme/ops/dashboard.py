@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from knowme.applications import ApplicationContextBridge
 from knowme.config import load_settings
 from knowme.db import connect
 from knowme.integrations import (
@@ -56,6 +57,11 @@ PORT = 8888 if os.name == "nt" else 7777
 # served as-is by this stdlib server — no build step, no framework. Edit those
 # to change the UI; edit this file to change the server/API.
 STATIC = Path(__file__).resolve().parent / "static"
+
+# Transient UI state belongs to the dashboard process, not SQLite memory.  The
+# bridge is intentionally explicit so the chat path cannot accidentally read
+# state from another agent or another conversation.
+application_contexts = ApplicationContextBridge()
 
 
 def chat(message: str) -> dict:
@@ -95,17 +101,27 @@ def chat_stream(message: str, emit) -> None:
     events: list[dict] = []
 
     def observer(kind, ev):
-        if kind in ("gate", "consolidation", "route", "triage"):
+        if kind in ("context", "gate", "consolidation", "route", "triage"):
             events.append({"kind": kind, **ev})
         emit(kind, ev)
 
     with agent_lock:
         agent = get_agent()
         maybe_rotate_session(agent)
+        extra_context = application_contexts.render(
+            agent.agent_id, agent.session.session_id
+        )
         start = datetime.now(UTC)
-        result = agent.respond(message, observer=observer, source="dashboard", stream=True)
+        result = agent.respond(
+            message,
+            observer=observer,
+            source="dashboard",
+            stream=True,
+            extra_context=extra_context,
+        )
         latency_ms = int((datetime.now(UTC) - start).total_seconds() * 1000)
 
+    context = next((e for e in events if e["kind"] == "context"), None)
     gate = next((e for e in events if e["kind"] == "gate"), None)
     cons = next((e for e in events if e["kind"] == "consolidation"), None)
     route = next((e for e in events if e["kind"] == "route"), None)
@@ -113,6 +129,12 @@ def chat_stream(message: str, emit) -> None:
     quick = bool(route) and route.get("target") == "quick_reply"
     emit("done", {
         "reply": result.reply,
+        "context": ({
+            "application_chars": context.get("application_chars", 0),
+            "history_messages": context.get("history_messages", 0),
+            "sent_messages": context.get("sent_messages", 0),
+            "compaction": context.get("compaction", []),
+        } if context else None),
         "gate": {"decision": gate["decision"], "reason": gate.get("reason")} if gate else None,
         "graph": ({"workflow": route.get("workflow", "triage"),
                    "route": "quick" if quick else "full",
@@ -810,28 +832,64 @@ def memory_action(payload: dict) -> dict:
     return {"error": f"unknown action {action}"}
 
 
-# Application Context Bridge — stores extra context (selections, doc state)
-# that gets injected into the turn's prompt via extra_context.
-_app_context = {}  # module-level store, keyed by session_id
-
-
 def extras_action(payload: dict) -> dict:
-    """Store context from Reader Application for injection into agent turn.
+    """Publish or clear the Application snapshot used by the next agent turn.
 
-    POST with {'type': 'selection', 'text': '...', 'source': 'doc.md'}
-    Stores the context keyed by the current session_id for the next chat turn.
+    Preferred payload::
+
+        {"application": "reader", "resource": "paper.md",
+         "content": "...", "selection": "...", "session_id": "..."}
+
+    The earlier ``type=selection/text/source`` shape remains accepted so an old
+    open dashboard keeps working during an upgrade.
     """
-    ctx_type = payload.get("type")
-    if ctx_type != "selection":
-        return {"error": f"unknown context type: {ctx_type}"}
+    agent_id = (payload.get("agent_id") or "default").strip()
+    session_id = (payload.get("session_id") or dash_session()).strip()
+    if payload.get("action") == "clear":
+        cleared = application_contexts.clear(agent_id, session_id)
+        return {"ok": True, "cleared": cleared}
 
-    text = payload.get("text", "")
-    source = payload.get("source", "")
-    session_id = payload.get("session_id", "default")
+    legacy_selection = payload.get("type") == "selection"
+    if payload.get("type") and not legacy_selection:
+        return {"error": f"unknown context type: {payload.get('type')}"}
 
-    key = f"{session_id}:{ctx_type}"
-    _app_context[key] = {"type": ctx_type, "text": text, "source": source}
-    return {"ok": True, "key": key, "type": ctx_type, "text": text[:100] + "..." if len(text) > 100 else text}
+    previous = application_contexts.get(agent_id, session_id)
+    application = payload.get("application") or (
+        previous.application if previous else "reader"
+    )
+    resource = payload.get("resource", payload.get("source"))
+    if resource is None:
+        resource = previous.resource if previous else ""
+    content = payload.get("content")
+    if content is None:
+        content = previous.content if previous else ""
+    selection = payload.get("selection", payload.get("text"))
+    if selection is None:
+        selection = previous.selection if previous else ""
+
+    state = application_contexts.publish(
+        agent_id=agent_id,
+        session_id=session_id,
+        application=application,
+        resource=resource,
+        content=content,
+        selection=selection,
+        metadata=payload.get("metadata") or (previous.metadata if previous else {}),
+    )
+    return {
+        "ok": True,
+        "agent_id": agent_id,
+        "session_id": session_id,
+        "application": state.application,
+        "resource": state.resource,
+        "content_chars": len(state.content),
+        "selection_chars": len(state.selection),
+        "truncated": (
+            len(payload.get("content") or "") > application_contexts.max_content_chars
+            or len(payload.get("selection", payload.get("text")) or "")
+            > application_contexts.max_selection_chars
+        ),
+    }
 
 
 

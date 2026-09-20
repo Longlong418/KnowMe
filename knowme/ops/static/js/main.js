@@ -130,19 +130,27 @@ function readerLoad(){
     currentDoc = { name: file.name, content: e.target.result };
     document.getElementById("rc-content").innerHTML = "<pre>" + esc(e.target.result) + "</pre>";
     document.getElementById("rc-content").dataset.path = file.name;
+    publishReaderContext({selection: ""});
   };
   reader.readAsText(file);
+}
+
+function publishReaderContext(extra = {}){
+  if (!currentDoc) return Promise.resolve({ok:false, error:"no document"});
+  return postJSON("/api/extras", {
+    application: "reader",
+    resource: currentDoc.name,
+    content: currentDoc.content,
+    selection: extra.selection || "",
+    session_id: SESSION || D?.current_session || "default"
+  });
 }
 
 function rcSend(){
   const sel = window.getSelection();
   if (!sel.rangeCount || !sel.toString().trim()) { alert("请先在文档中选中文字"); return; }
   const text = sel.toString();
-  fetch("/api/extras", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "selection", text: text, source: currentDoc?.name || "(unknown)", session_id: D?.current_session || "default" })
-  }).then(r => r.json()).then(res => {
+  publishReaderContext({selection: text}).then(res => {
     if (res.ok) {
       document.getElementById("dmsg").value = "[选中文本] " + text.substring(0, 200) + (text.length > 200 ? "..." : "");
       document.getElementById("rc-selection").style.display = "none";

@@ -26,6 +26,7 @@ function histItem(m){
   if (m.role === "user") return {role:"user", text:m.content};
   if (m.meta) return {role:"knowme", reply:m.content, gate:m.meta.gate,
                       graph:m.meta.graph,
+                      context:m.meta.context,
                       tools:m.meta.tools, iterations:m.meta.iterations,
                       latency_ms:m.meta.latency_ms, model:m.meta.model};
   return {role:"knowme", reply:m.content, historical:true};
@@ -70,6 +71,9 @@ function stagesRow(t, live){
   const gateCls = live ? (t.gate ? "done" : "on") : "done";
   const replyCls = live ? (t.stream ? "on" : "") : "done";
   const tools = (t.tools||[]).map(x => toolChip(x.tool)).join("");
+  const context = t.context
+    ? `<span class="stage done">上下文 · ${t.context.sent_messages||0} 条${
+        t.context.application_chars ? " + 应用" : ""}</span>` : "";
   // graph chip first — the front door. A quick graph turn has NO gate stage
   // (memory retrieval never ran), so the gate chip is honest and disappears.
   const graph = (t.graph && t.graph.route)
@@ -77,15 +81,17 @@ function stagesRow(t, live){
   const gate = (t.graph && t.graph.route === "quick") ? ""
     : `<span class="stage ${gateCls}">门控${t.gate?` · ${esc(statusZh(t.gate.decision))}`:""}</span>`;
   return `<div class="stages${live?"":" tele"}">`
-    + graph + gate + tools + `<span class="stage ${replyCls}">回复</span></div>`;
+    + graph + context + gate + tools + `<span class="stage ${replyCls}">回复</span></div>`;
 }
 // The per-turn telemetry footer: seconds · iterations · model · consolidation.
 const teleFooter = t => `<div class="meta tele">${secs(t.latency_ms)} · ${t.iterations??"?"} 次迭代${
-  t.model?` · ${esc(t.model)}`:""}${t.consolidation?` · 整理出 ${t.consolidation.new_facts} 条事实`:""}</div>`;
+  t.model?` · ${esc(t.model)}`:""}${t.context&&(t.context.compaction||[]).length
+    ? ` · 压缩：${esc(t.context.compaction.join(" → "))}`:""}${
+  t.consolidation?` · 整理出 ${t.consolidation.new_facts} 条事实`:""}</div>`;
 
 const chatTurnCard = t => `<div class="card">
   <button class="msg-copy" onclick="copyMsg(this)" data-text="${esc(t.reply)}" title="复制回复">复制</button>
-  ${(t.gate||t.graph)?`${stagesRow(t, false)}
+  ${(t.context||t.gate||t.graph)?`${stagesRow(t, false)}
     <div class="meta tele" style="margin:0 0 6px">${esc((t.gate&&t.gate.reason)||(t.graph&&t.graph.reason)||"")}</div>`:""}
   ${nodesRow(t)}
   ${(t.tools||[]).length?`<div class="tele">${(t.tools||[]).map(toolRow).join("")}</div>`:""}
@@ -174,6 +180,12 @@ function applyStreamEvent(pending, ev){
       {status: ev.error ? "error" : "done", ms: ev.ms};
   }
   if (ev.kind === "gate") pending.gate = {decision: ev.decision, reason: ev.reason};
+  else if (ev.kind === "context") pending.context = {
+    application_chars: ev.application_chars,
+    history_messages: ev.history_messages,
+    sent_messages: ev.sent_messages,
+    compaction: ev.compaction || []
+  };
   else if (ev.kind === "route")
     pending.graph = {route: ev.target === "quick_reply" ? "quick" : "full",
                      reason: (pending.graph || {}).reason};
