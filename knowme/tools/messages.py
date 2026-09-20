@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from knowme.tools.registry import Tool
+from knowme.core.tools import Tool
 
 
 def make_tool(home: Path) -> Tool:

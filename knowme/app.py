@@ -7,13 +7,13 @@ session → loop. If you want to understand the repo in one place, start here.
 from __future__ import annotations
 
 from knowme.config import Settings, load_settings
+from knowme.core.context import micro_compact, state_summary, tool_budget
+from knowme.core.loop import LoopResult, Observer, run_loop
+from knowme.core.models import get_client
+from knowme.core.session import Session
 from knowme.db import connect
-from knowme.loop.agent import LoopResult, Observer, run_loop
-from knowme.loop.models import get_client
 from knowme.ops.pricing import context_for
 from knowme.ops.tracing import Tracer, compose
-from knowme.runtime import micro_compact, state_summary, tool_budget
-from knowme.runtime.session import Session
 from knowme.tools import build_registry
 
 

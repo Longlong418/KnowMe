@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from knowme.config import Settings
+from knowme.core.events import compose as _compose
 
 
 def _now() -> str:
@@ -158,10 +159,6 @@ class Tracer:
             self._otel_provider.force_flush(timeout_millis=2000)
 
 
-def compose(*observers) -> callable:
-    """Fan one loop event out to several observers (gateway display + tracer)."""
-    active = [o for o in observers if o]
-    def fanout(kind: str, event: dict) -> None:
-        for obs in active:
-            obs(kind, event)
-    return fanout
+# compose() moved to knowme.core.events — the loop and graph engine need it
+# and neither may import ops. Re-exported so existing callers keep working.
+compose = _compose

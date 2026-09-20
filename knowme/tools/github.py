@@ -32,7 +32,7 @@ import json
 import re
 import subprocess
 
-from knowme.tools.registry import Tool
+from knowme.core.tools import Tool
 
 _TIMEOUT = 20
 # A PR diff is unbounded — knowme-agent has had 400-line ones and the wider world

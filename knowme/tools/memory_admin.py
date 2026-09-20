@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import re
 
+from knowme.core.tools import Tool
 from knowme.memory import bundled_skill_dirs
 from knowme.memory.procedural.loader import _parse_text
-from knowme.tools.registry import Tool
 
 SOUL_MAX = 8000
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
@@ -88,7 +88,7 @@ def make_manage_memory_tool(memory) -> Tool:
 
 
 def make_update_soul_tool(settings) -> Tool:
-    from knowme.runtime.session import load_soul
+    from knowme.core.session import load_soul
 
     def update_soul(rule: str) -> str:
         rule = rule.strip().lstrip("-").strip()

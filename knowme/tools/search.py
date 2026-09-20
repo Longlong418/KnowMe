@@ -21,7 +21,7 @@ import re
 import urllib.parse
 import urllib.request
 
-from knowme.tools.registry import Tool
+from knowme.core.tools import Tool
 
 _UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 

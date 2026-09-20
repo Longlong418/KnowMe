@@ -41,9 +41,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from knowme.config import Settings
-from knowme.loop.models import PROVIDERS
+from knowme.core.models import PROVIDERS
+from knowme.core.tools import Tool
 from knowme.tools._env import delegate_env as _delegate_env
-from knowme.tools.registry import Tool
 
 PI_INSTALL_HINT = "npm install -g --ignore-scripts @earendil-works/pi-coding-agent"
 

@@ -7,8 +7,8 @@ from __future__ import annotations
 import sqlite3
 
 from knowme.config import Settings
+from knowme.core.tools import ToolRegistry
 from knowme.tools import calendar, memory_admin, messages, notes, search, tool_results
-from knowme.tools.registry import ToolRegistry
 
 
 def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) -> ToolRegistry:

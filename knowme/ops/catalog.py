@@ -58,7 +58,7 @@ def list_models(provider: str | None = None, *, use_cache: bool = True) -> dict:
     import time
     import urllib.request
 
-    from knowme.loop.models import PROVIDERS
+    from knowme.core.models import PROVIDERS
 
     s = load_settings()
     # An explicit provider overrides the active one (and its custom base_url:
@@ -177,7 +177,7 @@ def default_pinned_specs() -> list[str]:
     """Starter shortlist before the user has curated their own: flagship + fast
     for every provider that has a key set (so the switcher only shows models you
     can actually use). Flagship comes first, so it's that provider's default."""
-    from knowme.loop.models import PROVIDERS
+    from knowme.core.models import PROVIDERS
 
     specs = []
     for name, prov in PROVIDERS.items():

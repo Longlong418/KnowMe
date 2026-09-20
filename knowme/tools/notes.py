@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from knowme.tools.registry import Tool
+from knowme.core.tools import Tool
 
 
 def make_tool(conn: sqlite3.Connection) -> Tool:

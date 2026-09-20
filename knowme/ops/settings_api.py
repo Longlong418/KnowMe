@@ -11,7 +11,7 @@ from __future__ import annotations
 import shutil
 
 from knowme.config import load_settings
-from knowme.loop.models import PROVIDERS
+from knowme.core.models import PROVIDERS
 from knowme.ops import catalog
 
 

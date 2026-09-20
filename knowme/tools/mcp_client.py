@@ -22,7 +22,7 @@ import threading
 from contextlib import AsyncExitStack
 from pathlib import Path
 
-from knowme.tools.registry import Tool
+from knowme.core.tools import Tool
 
 
 class MCPBridge:

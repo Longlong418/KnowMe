@@ -32,7 +32,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from knowme.tools.registry import Tool
+from knowme.core.tools import Tool
 
 _TIMEOUT = 30
 _PROBE_TIMEOUT = 8

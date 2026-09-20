@@ -20,7 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from knowme.loop.models import PROVIDERS, Provider
+from knowme.core.models import PROVIDERS, Provider
 from knowme.memory.episodic.notion_store import normalize_database_id
 
 

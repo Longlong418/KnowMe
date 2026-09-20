@@ -23,7 +23,7 @@ from datetime import datetime
 from email.utils import parseaddr
 from pathlib import Path
 
-from knowme.tools.registry import Tool
+from knowme.core.tools import Tool
 
 APPLE_CALENDAR_NAME = "KnowMe"
 APPLE_CALENDAR_PROBE_TIMEOUT = 15

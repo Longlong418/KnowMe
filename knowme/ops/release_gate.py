@@ -70,7 +70,7 @@ def main() -> None:
     # judge needs the ACTIVE provider's key (anthropic, openrouter, ...), same
     # rule as evals/helpers.HAS_KEY
     from knowme.config import load_settings
-    from knowme.loop.models import PROVIDERS
+    from knowme.core.models import PROVIDERS
 
     settings = load_settings()
     provider = PROVIDERS.get(settings.provider)

@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 
+from knowme.core.loop import run_loop
+from knowme.core.tools import ToolRegistry
 from knowme.graph.engine import Node, NodeFn, RouteFn
-from knowme.loop.agent import run_loop
-from knowme.tools.registry import ToolRegistry
 
 
 def tool_node(name: str, fn: Callable[..., object], in_keys: Iterable[str],

@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from knowme.runtime.tool_budget import STORED_DIR
-from knowme.tools.registry import Tool
+from knowme.core.context.tool_budget import STORED_DIR
+from knowme.core.tools import Tool
 
 
 def make_tool(home: Path) -> Tool:

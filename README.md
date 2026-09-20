@@ -57,7 +57,7 @@ file: `.knowme/state.db`.
 **Use the model you already pay for.** Anthropic (default), OpenAI, Gemini, DeepSeek, MiniMax,
 Kimi, GLM, OpenRouter (one key, hundreds of hosted models), OpenCode Zen, or OpenCode Go —
 set `KNOWME_PROVIDER=`, paste the key, done. One dialect in the loop;
-a [~60-line adapter](knowme/loop/models.py) handles the rest.
+a [~60-line adapter](knowme/core/models.py) handles the rest.
 
 ## Watch the harness run — the dashboard
 
@@ -157,8 +157,8 @@ Every box is one module (full version with every file path: [docs/architecture.m
 | Diagram box | Module |
 |---|---|
 | Interface (CLI / web) | [`knowme/gateway/`](knowme/gateway) + [`knowme/ops/dashboard.py`](knowme/ops/dashboard.py) |
-| Ephemeral Agent Run → Working Memory | [`knowme/runtime/session.py`](knowme/runtime/session.py) |
-| The Loop (LLM ↔ tools, end-loop guardrails) | [`knowme/loop/agent.py`](knowme/loop/agent.py) |
+| Ephemeral Agent Run → Working Memory | [`knowme/core/session.py`](knowme/core/session.py) |
+| The Loop (LLM ↔ tools, end-loop guardrails) | [`knowme/core/loop.py`](knowme/core/loop.py) |
 | Graph workflows (structure around the loop) | [`knowme/graph/`](knowme/graph) |
 | Agentic Tools (schedule / note / message) | [`knowme/tools/`](knowme/tools) |
 | Procedural Memory (SKILL.md, "how to act") | [`knowme/memory/procedural/`](knowme/memory/procedural) + [`skills/`](skills) |
@@ -179,7 +179,7 @@ raw `state.db` tables.
 
 ## The Loop — reason → act → repeat
 
-Yes, there's a real agent loop, and it's [~95 lines of plain Python](knowme/loop/agent.py) —
+Yes, there's a real agent loop, and it's [~95 lines of plain Python](knowme/core/loop.py) —
 no LangGraph, no hidden control flow (and when a task needs structure *around* the loop,
 that structure is another ~200 readable lines — see
 [Graph workflows](#graph-workflows--when-a-turn-needs-shape) below):
@@ -225,7 +225,7 @@ But some work has **shape** — steps that could run *at the same time*, and exp
 "if this, go here" routing. A **graph workflow** makes that shape first-class: nodes
 (each does one job — a function, one LLM call, or a whole loop turn) connected by edges
 (what happens next). It's an extension of the Loop pillar, not a replacement:
-[`loop/agent.py`](knowme/loop/agent.py) did not change one line — a graph *arranges calls
+[`core/loop.py`](knowme/core/loop.py) did not change one line — a graph *arranges calls
 around it, and to it*. And it's still no-framework: the entire engine is
 [one readable file](knowme/graph/engine.py), same trick as the loop.
 
@@ -306,7 +306,7 @@ per-turn gate decisions, and the raw traces inline.
 **The bug workflow (this is the discipline you show on camera):** when you catch a bug by using
 the thing live, you fix it AND add a deterministic case so it can never come back. A real example
 from this repo: the agent didn't know the current *time* and asked for it before scheduling
-"in 30 minutes" → fixed in [`session.py`](knowme/runtime/session.py), locked forever by
+"in 30 minutes" → fixed in [`session.py`](knowme/core/session.py), locked forever by
 [`test_working_memory.py`](evals/deterministic/test_working_memory.py). Run `make gate` → green →
 the eval history records the run.
 
