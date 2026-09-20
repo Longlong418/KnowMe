@@ -77,6 +77,61 @@ class Settings:
     # gate when relevant. Without this cap a long thread (esp. the always-on
     # Telegram session) resends its whole history every turn until it explodes.
     history_turns: int = field(default_factory=lambda: int(os.getenv("KNOWME_HISTORY_TURNS", "12")))
+    # Tool results are the fastest-growing thing in the history window, and the
+    # folded [tools used: ...] line re-sends them on every later turn. Two knobs
+    # with two different jobs (see runtime/tool_budget.py):
+    #   budget — does this turn get compressed at all? A turn already under it is
+    #            returned untouched, so ordinary turns never pay for this.
+    #   cap    — how small one compressed result gets, counting the pointer and
+    #            the elision marker (not just the excerpt, or every digest would
+    #            come out cap + ~90 and a high cap would GROW the turn). Results
+    #            already under the cap are skipped, so short ones (create_event,
+    #            save_note) keep their exact text.
+    # Characters, not tokens: exact, zero-dependency, and monotonic — which is
+    # all a threshold needs. At ~3.6 chars/token these are roughly 1.1k and 330
+    # tokens. The full text is written to .knowme/tool_results/ either way.
+    tool_result_budget: int = field(
+        default_factory=lambda: int(os.getenv("KNOWME_TOOL_RESULT_BUDGET", "4000")))
+    tool_result_cap: int = field(
+        default_factory=lambda: int(os.getenv("KNOWME_TOOL_RESULT_CAP", "1200")))
+    # snip_compact (runtime/snip_compact.py): the conversation-level bound that
+    # replaced the history_turns sliding window. Over HEAD+1+TAIL messages, the
+    # middle is ARCHIVED to .knowme/archives/ and one marker takes its place —
+    # nothing is dropped silently, which is what the window did.
+    #   head — how many opening messages survive (a conversation that lost its
+    #          first messages has lost its subject)
+    #   tail — how many recent messages are kept verbatim; also how much room
+    #          one snip buys, since the trigger is derived as head + 1 + tail.
+    snip_head: int = field(default_factory=lambda: int(os.getenv("KNOWME_SNIP_HEAD", "3")))
+    snip_tail: int = field(default_factory=lambda: int(os.getenv("KNOWME_SNIP_TAIL", "46")))
+
+    # micro_compact (runtime/micro_compact.py): the emergency valve. It measures
+    # the assembled prompt against the model's real context window and, past
+    # `context_trigger` of it, replaces older tool results with a pointer to
+    # their full text on disk — no excerpt, because the alternative is a request
+    # that does not fit.
+    #   context_trigger — fraction of the window that counts as "too full"
+    #   micro_keep      — the most recent N tool results are never touched
+    #   micro_min_chars — only results longer than this are worth replacing
+    context_trigger: float = field(
+        default_factory=lambda: float(os.getenv("KNOWME_CONTEXT_TRIGGER", "0.8")))
+    micro_keep: int = field(default_factory=lambda: int(os.getenv("KNOWME_MICRO_KEEP", "3")))
+    micro_min_chars: int = field(
+        default_factory=lambda: int(os.getenv("KNOWME_MICRO_MIN_CHARS", "120")))
+    # The last resort (runtime/state_summary.py): if the prompt is STILL over the
+    # trigger after every reversible compressor has run, the conversation is
+    # summarised and replaced. It runs on the small model — the gate's model —
+    # because it is a compression call, not a reasoning one. The summary is the
+    # only thing the model keeps, so the prompt that produces it is where the
+    # safety margin lives.
+    summary_max_tokens: int = field(
+        default_factory=lambda: int(os.getenv("KNOWME_SUMMARY_MAX_TOKENS", "4096")))
+
+    @property
+    def snip_at(self) -> int:
+        """Messages allowed before a snip. Derived so the three numbers cannot
+        disagree — 3 + 1 marker + 46 keeps the conversation at 50."""
+        return self.snip_head + 1 + self.snip_tail
 
     # --- Memory
     # Consolidate (distill chats into durable facts) only after N new exchanges.
@@ -138,6 +193,10 @@ class Settings:
         self.home.mkdir(parents=True, exist_ok=True)
         (self.home / "traces").mkdir(exist_ok=True)
         (self.home / "outbox").mkdir(exist_ok=True)
+        # full copies of any tool result too long to keep in history
+        (self.home / "tool_results").mkdir(exist_ok=True)
+        # snippets of conversation snip_compact removed from working memory
+        (self.home / "archives").mkdir(exist_ok=True)
         return self.home
 
 

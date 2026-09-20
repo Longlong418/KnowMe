@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from knowme.config import Settings
+from knowme.runtime import tool_entries as te
 
 DEFAULT_SOUL = """\
 You are KnowMe, a personal assistant running locally on your user's laptop.
@@ -29,9 +30,11 @@ Rules:
 - When asked to message someone, use send_message (it drafts to a local outbox).
 - If memory context is provided with the message, trust it — it came from your
   own store.
-- Call each tool at most once per request. Your history shows [tools used: ...]
-  lines for past turns — if a tool already ran, do NOT run it again; answer
-  from that record instead.
+- Call each tool at most once per request. Your history shows [tools used]
+  blocks listing what past turns called — if a tool already ran, do NOT run it
+  again; answer from that record instead. A tool result shown as
+  `[full: <path> — read_tool_result]` was too long to keep: call read_tool_result
+  with that filename to see it, rather than guessing at what it said.
 - Be honest about where things live. Every tool's output states exactly where
   its artifact landed (local calendar file, Apple Calendar, memory database at
   .knowme/state.db) — relay that truthfully, and never claim something synced
@@ -125,14 +128,23 @@ class Session:
         """Record the turn in history (working memory) and, if memory is wired,
         in the chat log (so consolidation can distill it later).
 
-        Tool activity is folded into the assistant's history entry as a compact
-        [tools used: ...] line. Without it, the model forgets it already acted
-        and happily re-runs the same tool next turn (the triple-booked-meeting
-        bug from the first live test)."""
+        Tool activity is folded into the assistant's history entry as a [tools
+        used] block, one entry per line. Without it the model forgets it already
+        acted and happily re-runs the same tool next turn (the triple-booked-
+        meeting bug from the first live test).
+
+        THE RECORD STORED HERE IS THE COMPLETE ONE. Nothing is compressed on the
+        way to disk: this string is both the model's working memory and the
+        conversation the USER reads back in the dashboard, and those two want
+        opposite things. Compression belongs to prompt assembly — see
+        app._run_full_turn, which rewrites a copy on the way out. Storing the
+        compressed form here is how the dashboard ended up showing an excerpt and
+        a file path where the user had a right to see the actual tool output."""
         record = reply
         if tool_calls:
-            summary = "; ".join(f"{c['tool']}({c['args']}) -> {c['output']}" for c in tool_calls)
-            record = f"{reply}\n[tools used: {summary}]"
+            record = te.render(reply, [
+                te.entry(c["tool"], c["args"], c["output"])
+                for c in tool_calls])
         self.history.append({"role": "user", "content": user_message})
         self.history.append({"role": "assistant", "content": record})
         if self.memory is not None:
@@ -152,6 +164,10 @@ class Session:
         self.history = []
         if self.memory is None:
             return
+        # Reload the WHOLE thread, then reproduce the snip shape. Slicing to the
+        # recent tail here (as this used to) would drop the opening the snip
+        # deliberately protects — and would do it silently, which is the failure
+        # mode snip_compact exists to remove.
         # only the recent tail of a past conversation goes back into working
         # memory (respond() also windows it, but don't hold the whole thread)
         turns = self.settings.history_turns

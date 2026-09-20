@@ -7,7 +7,7 @@ from __future__ import annotations
 import sqlite3
 
 from knowme.config import Settings
-from knowme.tools import calendar, memory_admin, messages, notes, search
+from knowme.tools import calendar, memory_admin, messages, notes, search, tool_results
 from knowme.tools.registry import ToolRegistry
 
 
@@ -31,6 +31,11 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
     # Web search — pairs with create_event for the multi-tool loop demo
     # ("find the World Cup games left and add them to my calendar").
     registry.register(search.make_tool())
+    # The way back to a long tool result that was compressed on its way into
+    # history (runtime/tool_budget.py). Registered unconditionally: whether a
+    # turn needs it depends on how big that turn's tool output was, which is not
+    # knowable here — and a missing pointer target is worse than an unused tool.
+    registry.register(tool_results.make_tool(settings.home))
 
     # Memory self-management — the agent can correct/forget memory, learn rules,
     # and author its own skills (feels like a personal agent, not a black box).

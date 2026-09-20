@@ -11,6 +11,7 @@ from knowme.db import connect
 from knowme.loop.agent import LoopResult, Observer, run_loop
 from knowme.loop.models import get_client
 from knowme.ops.tracing import Tracer, compose
+from knowme.runtime import tool_budget
 from knowme.runtime.session import Session
 from knowme.tools import build_registry
 
@@ -131,7 +132,15 @@ class KnowMe:
         # how long the conversation runs. Older turns live in state.db and
         # come back via the retrieval gate + episodic memory when relevant.
         window = self.settings.history_turns * 2
-        messages = self.session.history[-window:] + [{"role": "user", "content": prompt}]
+        # COMPRESSION HAPPENS HERE, on a copy, on the way to the model — never in
+        # the stored conversation. session.history and chat_log hold the complete
+        # record, because that is what the person reading the dashboard is owed;
+        # these rewrites exist only so the request fits.
+        sent = self.session.history[-window:]
+        sent = tool_budget.fit_history(
+            sent, self.settings.home,
+            self.settings.tool_result_budget, self.settings.tool_result_cap)
+        messages = sent + [{"role": "user", "content": prompt}]
 
         return run_loop(
             client=self.client,
