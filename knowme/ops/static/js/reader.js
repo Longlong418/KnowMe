@@ -126,7 +126,12 @@ function wireAsk(){
 async function loadAskThread(){
   askLoaded = true;
   const sid = (D && D.current_sessions && D.current_sessions[ASK_AGENT]) || "default";
-  const r = await postJSON("/api/session", {action: "history", id: sid, agent_id: ASK_AGENT});
+  let r;
+  try {
+    r = await postJSON("/api/session", {action: "history", id: sid, agent_id: ASK_AGENT});
+  } catch (error) {
+    return;
+  }
   if (!r.ok) return;
   ASK.length = 0;
   (r.history || []).map(histItem).forEach(m => ASK.push(m));
@@ -140,11 +145,24 @@ async function loadAskThread(){
 // the list is not something the server pushes.
 async function loadLibrary(force){
   if (libraryLoaded && !force) return libraryDocs;
-  const res = await postJSON("/api/library", {action: "list", agent_id: ACTIVE_AGENT});
-  libraryDocs = (res && res.documents) || [];
-  libraryLoaded = true;
-  renderLibrary();
-  return libraryDocs;
+  try {
+    const res = await postJSON("/api/library", {action: "list", agent_id: ACTIVE_AGENT});
+    libraryDocs = (res && res.documents) || [];
+    libraryLoaded = true;
+    renderLibrary();
+    return libraryDocs;
+  } catch (error) {
+    // Keep the retry visible instead of leaving an empty list that looks like
+    // a successful, brand-new library.  `loadLibrary(true)` is safe to call
+    // again after the user restarts the Dashboard or fixes its port.
+    const el = document.getElementById("rc-library");
+    if (el) {
+      const message = esc(error.message || error);
+      el.innerHTML = `<div class="empty">文档库加载失败：${message}<br>
+        <button class="sessbtn" onclick="loadLibrary(true)">重试</button></div>`;
+    }
+    return [];
+  }
 }
 
 // Paint the list (or the search results, which have the same row shape plus a
@@ -192,9 +210,14 @@ function readerSearch(){
   // Debounced: search is a round trip, and this fires on every keystroke.
   searchTimer = setTimeout(async () => {
     if (!readerQuery){ librarySearchRows = []; renderLibrary(); return; }
-    const res = await postJSON("/api/library", {action: "search", query: readerQuery});
-    librarySearchRows = (res && res.results) || [];
-    renderLibrary();
+    try {
+      const res = await postJSON("/api/library", {action: "search", query: readerQuery});
+      librarySearchRows = (res && res.results) || [];
+      renderLibrary();
+    } catch (error) {
+      const el = document.getElementById("rc-library");
+      if (el) el.innerHTML = `<div class="empty">搜索失败：${esc(error.message || error)}</div>`;
+    }
   }, 220);
 }
 
@@ -240,7 +263,12 @@ async function handleUrlInput(){
 
 async function readerDelete(docId){
   if (!confirm("从文档库删除这份文档？原文文件也会一起删除。")) return;
-  await postJSON("/api/library", {action: "delete", doc_id: docId});
+  try {
+    await postJSON("/api/library", {action: "delete", doc_id: docId});
+  } catch (error) {
+    alert("删除失败：" + (error.message || error));
+    return;
+  }
   if (currentDoc && currentDoc.id === docId) currentDoc = null;
   await loadLibrary(true);
   renderReaderDoc();
@@ -249,7 +277,13 @@ async function readerDelete(docId){
 // --- opening and painting a document ----------------------------------------
 
 async function readerOpen(docId){
-  const res = await postJSON("/api/library", {action: "open", doc_id: docId});
+  let res;
+  try {
+    res = await postJSON("/api/library", {action: "open", doc_id: docId});
+  } catch (error) {
+    alert("文档打不开：" + (error.message || error));
+    return;
+  }
   if (!res.ok) { alert("文档打不开：" + (res.error || "未知错误")); return; }
   currentDoc = {...res.document, text: res.text, has_more: res.has_more,
                 file_url: res.file_url};
