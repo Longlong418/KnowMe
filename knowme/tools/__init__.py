@@ -93,6 +93,14 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
     for tool in make_reader_tools().values():
         registry.register(tool)
 
+    # Document-library tools — list/search/read/import the documents you added
+    # to the Reader. Workspace-level, not agent-scoped (see library.py), so
+    # unlike the knowledge tools they take no agent id.
+    from knowme.tools.documents import make_document_tools
+    for tool in make_document_tools(conn, settings.home,
+                                    settings.tool_result_budget).values():
+        registry.register(tool)
+
     # Knowledge base tools — Sapphire-style notes with [[wiki-links]].
     from knowme.tools.knowledge import make_knowledge_tools
     knowledge_agent_id = getattr(memory, "agent_id", "default")

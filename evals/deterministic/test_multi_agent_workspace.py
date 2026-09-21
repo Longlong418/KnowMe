@@ -10,11 +10,16 @@ from knowme.ops.dashboard import _thread_history, session_list
 def test_builtin_profiles_are_small_explicit_agent_specs():
     profiles = list_profiles()
     assert [profile.id for profile in profiles] == [
-        "default", "coding", "learning", "research"
+        "default", "coding", "learning", "research", "reader"
     ]
     assert all(profile.spec.name == profile.id for profile in profiles)
     assert get_profile("default").spec.tools is None
     assert "get_document" in get_profile("learning").spec.tools
+    # the reader agent lives in the reading pane and works from the document
+    # library; it deliberately has no search_web (Research is next door for that)
+    reader_tools = get_profile("reader").spec.tools
+    assert {"open_document", "search_documents", "list_documents"} <= reader_tools
+    assert "search_web" not in reader_tools
 
 
 def test_sessions_and_history_are_isolated_by_agent(tmp_path):

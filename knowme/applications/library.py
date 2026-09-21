@@ -9,14 +9,34 @@ TWO THINGS are stored per document, on purpose:
       The stored name is a fresh UUID, NEVER the uploaded filename: a filename
       is attacker-controlled input and must never decide where a file lands.
 
-  the EXTRACTED TEXT, in SQLite (``documents.content``), FTS5-indexed
+  the EXTRACTED TEXT, in SQLite (``documents.content``)
       This is what the agent reads and what search runs over, so neither has to
       re-parse a PDF on every turn.
 
 WHERE IT LIVES: ``_ensure_table`` creates the table lazily, like
-``tools/knowledge.py`` does — NOT in ``db.py``'s ``SCHEMA``. An existing
-workspace therefore needs no migration, and the FTS index is built with the
-same external-content + trigger idiom ``db.py`` already uses for facts.
+``tools/knowledge.py`` does — NOT in ``db.py``'s ``SCHEMA``, so an existing
+workspace needs no migration.
+
+WHY SEARCH IS LIKE AND NOT FTS5
+    This first shipped with an FTS5 index, mirroring ``db.py``'s facts_fts.
+    Measurement killed it:
+
+      unicode61 (the FTS5 default)  「检索门控」→ 0 hits, 「门控」→ 0 hits
+      trigram                       「检索门控」→ 1 hit,  「门控」→ 0 hits
+
+    ``unicode61`` has no word boundaries to split Chinese on, so a whole
+    sentence becomes ONE token and no query inside it can ever match.
+    ``trigram`` fixes that but needs three characters, so every two-character
+    Chinese word — 门控, 记忆, 文档 — silently matches nothing. A search box
+    that quietly finds nothing is worse than a search box that is 20 ms slower.
+
+    So search is a LIKE scan with a snippet built here, which is language-
+    agnostic, correct at any query length, and the same approach
+    ``tools/knowledge.py``'s ``search_notes`` already takes. The cost is O(n)
+    over the text; documents are capped at 4 MB each and a personal library is
+    thousands of pages at most, so it is milliseconds. If a library ever grows
+    past that, the fix is a trigram index WITH a LIKE fallback for short
+    queries — not a bare FTS index.
 
 SCOPE: documents are **workspace-level, not agent-scoped**. Everyone in the
 workspace shares one library — a document on your disk is not owned by
@@ -71,13 +91,10 @@ def kind_for(name: str) -> str:
 
 
 def _ensure_table(conn: sqlite3.Connection) -> None:
-    """Create the documents table + its FTS index, the first time it is needed.
+    """Create the documents table, the first time it is needed.
 
-    The FTS table is EXTERNAL CONTENT (``content=documents``): the text is
-    stored once, in ``documents``, and the index holds only the tokens. The
-    three triggers keep the index in step, which is the same pattern db.py
-    uses for facts_fts — including the ``'delete'``-then-insert dance on
-    update, which is how you remove an entry from an external-content index.
+    One table, no index to keep in step: search is a LIKE scan (see the module
+    docstring for why that is a decision and not an oversight).
     """
     conn.execute("""
     CREATE TABLE IF NOT EXISTS documents (
@@ -87,37 +104,13 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
         suffix TEXT NOT NULL,
         path TEXT NOT NULL,              -- relative to home: documents/<uuid4>.pdf
         source TEXT DEFAULT '',          -- the filename or URL it came from
-        content TEXT DEFAULT '',         -- the extracted text (FTS-indexed)
+        content TEXT DEFAULT '',         -- the extracted text search runs over
         chars INTEGER DEFAULT 0,
         bytes INTEGER DEFAULT 0,
         sha256 TEXT DEFAULT '',          -- re-adding the same file is a no-op
         added_by TEXT DEFAULT 'default',
         created_at TEXT NOT NULL
     )
-    """)
-    conn.execute("""
-    CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-        title, content, content=documents, content_rowid=rowid
-    )
-    """)
-    # rowid, not id: this table's key is a TEXT uuid, so the rowid is the
-    # integer handle FTS needs. (facts/episodes use new.id because theirs IS
-    # an INTEGER PRIMARY KEY — same idiom, different key type.)
-    conn.execute("""
-    CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
-        INSERT INTO documents_fts(rowid, title, content) VALUES (new.rowid, new.title, new.content);
-    END
-    """)
-    conn.execute("""
-    CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
-        INSERT INTO documents_fts(documents_fts, rowid, title, content) VALUES ('delete', old.rowid, old.title, old.content);
-    END
-    """)
-    conn.execute("""
-    CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
-        INSERT INTO documents_fts(documents_fts, rowid, title, content) VALUES ('delete', old.rowid, old.title, old.content);
-        INSERT INTO documents_fts(rowid, title, content) VALUES (new.rowid, new.title, new.content);
-    END
     """)
     conn.commit()
 
@@ -214,29 +207,48 @@ def delete_document(conn: sqlite3.Connection, home: Path, doc_id: str) -> bool:
     return bool(cursor.rowcount)
 
 
-def search_documents(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict]:
-    """Full-text search over titles and bodies.
+SNIPPET_RADIUS = 90
+SNIPPET_SPAN = 2 * SNIPPET_RADIUS
 
-    FTS5 treats punctuation as syntax, so the query is reduced to bare terms
-    and each is quoted — otherwise a search for "O'Reilly" or "what is x?" is a
-    syntax error rather than a search. Long documents are matched, not dumped:
-    each hit carries a short snippet around the match, which is what an agent
-    (and the sidebar) actually needs.
+
+def _escape_like(term: str) -> str:
+    """`%` and `_` are LIKE wildcards; a user typing them means the character."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def search_documents(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict]:
+    """Substring search over titles and bodies, with a snippet per hit.
+
+    Every term must appear somewhere in the document (title or body), which is
+    what makes a multi-word query narrow rather than widen. Terms are matched
+    as plain substrings — no tokenizer, no query syntax — so punctuation and
+    CJK are searched literally and nothing raises a parse error at the user.
+
+    The snippet is cut IN SQL, around the match, so a 4 MB document never has
+    to travel into Python just to show eighty characters of it.
     """
     _ensure_table(conn)
-    terms = re.findall(r"\w+", query or "")
+    terms = [t for t in re.split(r"\s+", (query or "").strip()) if t]
     if not terms:
         return []
-    match = " ".join(f'"{t}"' for t in terms)
+    where = " AND ".join(f"(title LIKE :t{i} ESCAPE '\\' OR content LIKE :t{i} ESCAPE '\\')"
+                         for i in range(len(terms)))
+    params = {f"t{i}": f"%{_escape_like(term)}%" for i, term in enumerate(terms)}
+    # `instr` gives the byte position of the first hit; substr then takes a
+    # window around it. lower() on both sides matches LIKE's ASCII
+    # case-insensitivity, which is all SQLite has built in.
     rows = conn.execute(
-        "SELECT d.id, d.title, d.kind, d.chars, "
-        "       snippet(documents_fts, 1, '', '', ' … ', 18) AS snippet "
-        "FROM documents_fts JOIN documents d ON d.rowid = documents_fts.rowid "
-        "WHERE documents_fts MATCH ? ORDER BY rank LIMIT ?",
-        (match, limit),
+        f"""SELECT id, title, kind, chars,
+              CASE WHEN instr(lower(content), lower(:first)) > 0
+                   THEN substr(content, max(1, instr(lower(content), lower(:first)) - :radius), :span)
+                   ELSE substr(content, 1, :span) END AS snippet
+            FROM documents WHERE {where}
+            ORDER BY created_at DESC, rowid DESC LIMIT :limit""",
+        {**params, "first": terms[0], "radius": SNIPPET_RADIUS,
+         "span": SNIPPET_SPAN, "limit": limit},
     ).fetchall()
-    return [{"id": r["id"], "title": r["title"], "kind": r["kind"],
-             "chars": r["chars"], "snippet": r["snippet"]} for r in rows]
+    return [{"id": r["id"], "title": r["title"], "kind": r["kind"], "chars": r["chars"],
+             "snippet": " ".join((r["snippet"] or "").split())} for r in rows]
 
 
 def text_window(text: str, offset: int = 0, limit: int = 4000) -> dict:

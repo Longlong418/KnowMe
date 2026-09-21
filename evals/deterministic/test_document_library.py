@@ -70,29 +70,59 @@ def test_search_finds_a_document_by_its_body(tmp_path):
     hits = search_documents(conn, "retrieval gate")
     assert [h["title"] for h in hits] == ["notes"]
     assert "retrieval" in hits[0]["snippet"]
+    assert search_documents(conn, "words")[0]["title"] == "other"
 
-    # Terms are combined with AND (FTS5's default), so a whole sentence finds
-    # nothing — precise beats fuzzy for a library an agent also queries.
+    # Every term must appear, so more words narrow the result rather than
+    # widen it — precise beats fuzzy for a library an agent also queries.
     assert search_documents(conn, "retrieval gate memory") != []
     assert search_documents(conn, "retrieval unrelated") == []
+    assert search_documents(conn, "   ") == []
 
-    # Punctuation IS FTS5 syntax (`?`, `"`, `*`, `(` all mean something), so a
-    # query is reduced to bare quoted terms. Raw, each of these is a parse error
-    # the user cannot act on; sanitized, they are just words.
-    assert search_documents(conn, 'retrieval (gate') != []      # unbalanced paren
-    assert search_documents(conn, '"retrieval" gate') != []     # stray quotes
-    assert search_documents(conn, "retrieval* NOT") != []       # operator-looking
-    assert search_documents(conn, "...") == []                  # nothing searchable in it
+    # Punctuation is searched LITERALLY, not parsed: none of these raises the
+    # way an FTS5 query would, and a character that is not in the document is
+    # simply not found. Each term stands alone, so "(gate" is a term no
+    # document contains while "gate" on its own is found.
+    assert search_documents(conn, "retrieval (gate") == []     # "(gate" is literal
+    assert search_documents(conn, "retrieval (gate") == search_documents(conn, "(gate")
+    assert search_documents(conn, '"retrieval"') == []         # stray quotes are literal
+    assert search_documents(conn, "retrieval*") == []          # * is not a wildcard
+    assert search_documents(conn, "a%b") == []                 # % is not a wildcard
+    assert search_documents(conn, "a_b") == []                 # _ is not a wildcard
+    assert search_documents(conn, "retrieval gate") != []      # ...and the words are found
 
 
-def test_delete_removes_the_row_the_index_and_the_file(tmp_path):
+def test_chinese_search_works_at_any_query_length(tmp_path):
+    """The reason search is LIKE and not FTS5.
+
+    FTS5's default tokenizer has no word boundaries to split Chinese on, so a
+    whole sentence becomes one token and NO query inside it matches; the
+    trigram tokenizer needs three characters, so every two-character word
+    (门控, 记忆, 文档) silently matched nothing. Both failures were invisible —
+    an empty result list looks the same as "no such document".
+    """
+    conn = connect(tmp_path)
+    save_document(conn, tmp_path, name="论文.md", raw=b"x",
+                  text="这一段落讲了检索门控的设计，以及记忆如何注入上下文。")
+    save_document(conn, tmp_path, name="其他.md", raw=b"y", text="完全无关的内容。")
+
+    assert [h["title"] for h in search_documents(conn, "检索门控")] == ["论文"]
+    assert [h["title"] for h in search_documents(conn, "门控")] == ["论文"]     # 2 chars
+    assert [h["title"] for h in search_documents(conn, "记忆")] == ["论文"]     # 2 chars
+    assert [h["title"] for h in search_documents(conn, "上下文")] == ["论文"]
+    assert search_documents(conn, "不存在") == []
+    # a mixed query still narrows on both scripts
+    assert search_documents(conn, "检索 gate") == []
+    assert "检索门控" in search_documents(conn, "门控")[0]["snippet"]
+
+
+def test_delete_removes_the_row_and_the_file(tmp_path):
     conn = connect(tmp_path)
     doc = save_document(conn, tmp_path, name="gone.md", raw=b"x", text="findable token")
     assert search_documents(conn, "findable") != []
 
     assert delete_document(conn, tmp_path, doc["id"]) is True
     assert get_document(conn, doc["id"]) is None
-    assert search_documents(conn, "findable") == []      # the FTS trigger fired
+    assert search_documents(conn, "findable") == []
     assert not (tmp_path / "documents" / f"{doc['id']}.md").exists()
     assert delete_document(conn, tmp_path, doc["id"]) is False
 
