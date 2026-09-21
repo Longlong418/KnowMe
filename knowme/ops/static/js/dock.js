@@ -33,6 +33,7 @@ async function selectAgent(agentId){
   CHAT.length = 0;
   syncAgentChrome();
   await loadThreadInto(SESSION, {setSession:true});
+  await refresh();
 }
 async function newChat(){
   const r = await postJSON("/api/session", {action:"new", agent_id:ACTIVE_AGENT});

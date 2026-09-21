@@ -280,16 +280,17 @@ def _get_notion_store():
     return _notion_store
 
 
-def collect() -> dict:
-    """Everything the page shows, in one JSON blob."""
+def collect(agent_id: str = "default") -> dict:
+    """Everything the page shows for one Agent, in one JSON blob."""
+    get_profile(agent_id)
     settings = load_settings()
     info = settings_info()
     settings.ensure_home()
     home = settings.home
     conn = connect(home)
 
-    def rows(sql: str) -> list[dict]:
-        return [dict(r) for r in conn.execute(sql).fetchall()]
+    def rows(sql: str, args: tuple = ()) -> list[dict]:
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
     def episodes_payload() -> dict:
         """Episodes from the active backend: sqlite (default) or notion.
@@ -300,7 +301,8 @@ def collect() -> dict:
                 "error": "",
                 "items": rows(
                     "SELECT id, happened_at, summary, agent_id "
-                    "FROM episodes ORDER BY happened_at DESC"
+                    "FROM episodes WHERE agent_id=? ORDER BY happened_at DESC",
+                    (agent_id,),
                 ),
             }
         try:
@@ -308,14 +310,22 @@ def collect() -> dict:
             with _notion_lock:
                 store = _get_notion_store()
                 if _notion_episodes and time.time() - _notion_episodes[0] < _NOTION_EPISODES_TTL:
-                    return {"source": "notion", "error": "", "items": _notion_episodes[1]}
+                    items = _notion_episodes[1]
+                    return {"source": "notion", "error": "", "items": [
+                        item for item in items
+                        if item.get("agent_id", "default") == agent_id
+                    ]}
                 items = store.list()
                 _notion_episodes = (time.time(), items)
-                return {"source": "notion", "error": "", "items": items}
+                return {"source": "notion", "error": "", "items": [
+                    item for item in items
+                    if item.get("agent_id", "default") == agent_id
+                ]}
         except Exception as exc:
             # Degrade gracefully: never take the payload down, and serve the
             # last good fetch if we have one (an outage shouldn't blank the tab).
-            stale = _notion_episodes[1] if _notion_episodes else []
+            stale = [item for item in (_notion_episodes[1] if _notion_episodes else [])
+                     if item.get("agent_id", "default") == agent_id]
             return {"source": "notion", "error": str(exc), "items": stale}
 
     episodes_data = episodes_payload()
@@ -335,6 +345,7 @@ def collect() -> dict:
                 events.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
+    events = [event for event in events if event.get("agent_id", agent_id) == agent_id]
     turns, current, wake_scans = [], None, []
     for ev in events:
         kind = ev.get("type")
@@ -429,9 +440,14 @@ def collect() -> dict:
         info = conn.execute(f"PRAGMA table_info({name})").fetchall()
         cols = [r["name"] for r in info]
         types = {r["name"]: r["type"] for r in info}
-        count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+        scoped = "agent_id" in cols
+        where = " WHERE agent_id=?" if scoped else ""
+        args = (agent_id,) if scoped else ()
+        count = conn.execute(f"SELECT COUNT(*) FROM {name}{where}", args).fetchone()[0]
         # up to 200 newest rows so each table has its own scrollable tab
-        sample = [dict(r) for r in conn.execute(f"SELECT * FROM {name} ORDER BY rowid DESC LIMIT 200").fetchall()]
+        sample = [dict(r) for r in conn.execute(
+            f"SELECT * FROM {name}{where} ORDER BY rowid DESC LIMIT 200", args
+        ).fetchall()]
         return {"name": name, "columns": cols, "types": types, "count": count, "sample": sample}
 
     db_path = home / "state.db"
@@ -457,7 +473,8 @@ def collect() -> dict:
         for profile in profiles
     }
     sessions_by_agent = {
-        profile.id: session_list(conn, profile.id) for profile in profiles
+        profile.id: session_list(conn, profile.id) if profile.id == agent_id else []
+        for profile in profiles
     }
 
     # --- graph workflows: topology straight from the engine (never hand-drawn,
@@ -510,7 +527,7 @@ def collect() -> dict:
         ],
         "facts": rows(
             "SELECT id, subject, content, source, agent_id, created_at "
-            "FROM facts ORDER BY id DESC"
+            "FROM facts WHERE agent_id=? ORDER BY id DESC", (agent_id,)
         ),
         "episodes": episodes_data["items"],
         "episodes_source": episodes_data["source"],
@@ -519,7 +536,7 @@ def collect() -> dict:
         "chat_pending": conn.execute("SELECT COUNT(*) FROM chat_log WHERE consolidated=0").fetchone()[0],
         "chat_log": rows(
             "SELECT role, content, consolidated, source, session_id, agent_id, created_at "
-            "FROM chat_log ORDER BY id DESC LIMIT 80"
+            "FROM chat_log WHERE agent_id=? ORDER BY id DESC LIMIT 80", (agent_id,)
         )[::-1],
         # Keep the two legacy fields for old open tabs.  New clients use the
         # per-agent maps and never mix one agent's history into another's dock.
@@ -547,7 +564,7 @@ def collect() -> dict:
         "workspace": workspace_info(),
         "settings": info,
         "providers": [asdict(view) for view in list_providers()],
-        "knowledge_info": knowledge_info(),
+        "knowledge_info": knowledge_info(agent_id),
         "connections": [asdict(view) for view in list_connections()],
         "tools": tools_info(),
         "usage": usage_summary(home),
@@ -622,7 +639,7 @@ def _tool_source(name: str, mcp_servers: list[str]) -> str:
     return "other"
 
 
-def knowledge_info() -> dict:
+def knowledge_info(agent_id: str = "default") -> dict:
     """Return the current user's knowledge notes for the dashboard.
 
     The browser filters the returned snapshots by its selected Agent. Keeping
@@ -631,22 +648,13 @@ def knowledge_info() -> dict:
     from knowme.tools.knowledge import list_folders, list_notes
     settings = load_settings()
     conn = connect(settings.home)
-    notes = list_notes(conn, agent_id="default")
-    folders = list_folders(conn, agent_id="default")
-    # Include every agent's rows for the multi-agent UI; no API caller can
-    # mutate them without supplying the matching agent scope.
-    all_notes = []
-    all_folders = set()
-    from knowme.agents import list_profiles
-    for profile in list_profiles():
-        scoped = list_notes(conn, agent_id=profile.id)
-        all_notes.extend(scoped)
-        all_folders.update(list_folders(conn, agent_id=profile.id))
+    notes = list_notes(conn, agent_id=agent_id)
+    folders = list_folders(conn, agent_id=agent_id)
     return {
         "notes_count": len(notes),
         "folders": folders,
-        "notes": all_notes,
-        "all_folders": sorted(all_folders),
+        "notes": notes,
+        "all_folders": folders,
     }
 
 
@@ -1100,6 +1108,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/data":
             self._send(json.dumps(collect(), default=str).encode(), "application/json")
+        elif self.path.startswith("/api/data?"):
+            from urllib.parse import parse_qs, urlparse
+
+            agent_id = parse_qs(urlparse(self.path).query).get("agent_id", ["default"])[0]
+            try:
+                payload = collect(agent_id or "default")
+            except ValueError as exc:
+                payload = {"error": str(exc)}
+            self._send(json.dumps(payload, default=str).encode(), "application/json")
         elif self.path == "/api/agents":
             live = browser_agent.current_agents()
             payload = [

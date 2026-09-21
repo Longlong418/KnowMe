@@ -479,7 +479,7 @@ const VIEWS = {
   // conversation, tagged with its channel(s). Click one to open it in the chat
   // dock (the active thread). No longer a flat stream that duplicates the dock.
   gateway(d){
-    const sessions = d.sessions || [];
+    const sessions = (d.sessions_by_agent && d.sessions_by_agent[ACTIVE_AGENT]) || d.sessions || [];
     let h = `<div class="meta" style="margin-bottom:14px">网页端和 CLI 的对话都使用同一套记忆与循环。
       点击一项即可在右侧聊天区打开 &rarr;。</div>`;
     if (!sessions.length)

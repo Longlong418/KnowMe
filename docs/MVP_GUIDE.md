@@ -13,6 +13,8 @@
 
 知识库笔记也按当前 Agent 隔离。Learning Agent 创建的笔记不会出现在 Coding Agent 的列表中；Agent 通过工具创建、搜索、更新和删除笔记时也遵守同一个边界。
 
+Dashboard 的 Memory、聊天、Trace 和数据库预览也按当前 Agent 拉取；切换左侧 Agent 会重新请求对应范围的数据。
+
 它们不是四套重复代码。四个 Agent 都运行同一个 `AgentRuntime` 和同一个 Agent Loop，区别只是：
 
 ```text

@@ -46,7 +46,7 @@
 
 ## 测试结果
 - Knowledge Base / Reader / Agent 隔离定向回归：**14 passed**
-- 全量确定性套件（排除两个已知基线测试）：**566 passed, 62 skipped**
+- 全量确定性套件（排除两个已知基线测试）：**568 passed, 62 skipped**
 - 未纳入的基线测试仍涉及缺少 `knowme/ops/coding_eval.py` 和打包 skill；本轮没有把它们伪装成已解决。
 
 ## 知识点

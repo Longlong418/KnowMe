@@ -74,7 +74,7 @@ async function restoreDock(){
 }
 async function refresh(){
   try {
-    D = await (await fetch("/api/data")).json(); lastFetch = Date.now();
+    D = await (await fetch("/api/data?agent_id=" + encodeURIComponent(ACTIVE_AGENT || "default"))).json(); lastFetch = Date.now();
     render(); tickLive();
     syncModelChip();  // keep the dock's model pill in sync with the active brain
     applyTele();      // reflect the stats on/off choice (default on)

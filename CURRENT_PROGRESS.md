@@ -39,6 +39,11 @@
 ## Phase 4: 多Agent增强 ⏳ 后续迭代
 基于用户分享的 Octopus 界面，计划：
 
+### 本轮隔离收口（2026-09-21）
+- ✅ Dashboard 数据按 `agent_id` 查询，Memory、聊天、Trace 和数据库样本不再跨 Agent 返回
+- ✅ 切换 Agent 后重新拉取对应 Dashboard 数据
+- ✅ 新增 `evals/deterministic/test_dashboard_agent_scope.py`
+
 ### 界面优化
 1. **Agent 视图**：左侧 Agent 列表，支持分支
 2. **SmartReader 风格**：文件上传 + URL 粘贴 + 继续阅读卡片

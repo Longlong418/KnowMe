@@ -32,6 +32,12 @@
 - ✅ 打开文件后通过 `application: coding` 写入 Context Bridge
 - ✅ 暂不开放任意写入和 Terminal；变更仍通过显式 `delegate_task(cwd=...)` 完成
 
+### Phase 5：Dashboard Agent 隔离收口
+- ✅ `/api/data?agent_id=...` 只返回当前 Agent 的 facts、episodes、chat log、Trace 和数据库样本
+- ✅ 切换 Agent 后前端重新拉取对应数据，避免只靠浏览器端过滤
+- ✅ 未知 Agent 在数据接口和 Workspace API 中都会被拒绝
+- ✅ 新增 Dashboard 隔离回归测试
+
 ## 四栏布局设计
 
 ```
