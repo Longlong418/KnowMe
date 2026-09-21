@@ -30,8 +30,8 @@ import sqlite3
 from pathlib import Path
 
 from knowme.applications import library
-from knowme.core.tools import Tool
 from knowme.applications.reader import ReaderError
+from knowme.core.tools import Tool
 
 
 def _format_listing(rows: list[dict]) -> str:

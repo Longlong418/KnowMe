@@ -102,7 +102,40 @@ const statusZh = s => ({retrieve:"检索", skip:"跳过", quick:"快速", full:"
 // --- memory CRUD (dashboard side). `editing` pauses the 5s rebuild so an
 // in-progress edit isn't wiped (same idea as the animation guard).
 let editing = false;
-async function postJSON(url, body){ return (await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
+// All dashboard POST requests go through this small adapter.  The old one-liner
+// called Response.json() unconditionally, which turned an empty 404/connection
+// response into the much less useful browser error "Unexpected end of JSON
+// input".  Reading text first lets us report the HTTP status and still handle
+// a server-side error that is returned as JSON.
+async function postJSON(url, body){
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "Accept": "application/json"},
+      cache: "no-store",
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    throw new Error(`无法连接 Dashboard（${error.message || error}）`);
+  }
+
+  const text = await response.text();
+  let payload = {};
+  if (text.trim()) {
+    try {
+      payload = JSON.parse(text);
+    } catch (_error) {
+      throw new Error(`服务器返回了无法解析的响应（HTTP ${response.status}）`);
+    }
+  } else if (response.ok) {
+    throw new Error(`服务器返回了空响应（HTTP ${response.status}）`);
+  }
+  if (!response.ok) {
+    throw new Error(payload.error || `请求失败（HTTP ${response.status}）`);
+  }
+  return payload;
+}
 
 // --- Shared row atoms.
 //

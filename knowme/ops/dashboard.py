@@ -1201,8 +1201,9 @@ def events_since(cursor):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def _send(self, body: bytes, ctype: str, *, no_cache: bool = False) -> None:
-        self.send_response(200)
+    def _send(self, body: bytes, ctype: str, *, no_cache: bool = False,
+              status: int = 200) -> None:
+        self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         # The frontend files (app.js/style.css) change as we develop; without
@@ -1269,7 +1270,7 @@ class Handler(BaseHTTPRequestHandler):
             doc_id = parse_qs(urlparse(self.path).query).get("id", [""])[0]
             settings = load_settings()
             settings.ensure_home()
-            body, kind, suffix = library_file(connect(settings.home), settings.home, doc_id)
+            body, _kind, suffix = library_file(connect(settings.home), settings.home, doc_id)
             if body is None:
                 self.send_response(404)
                 self.end_headers()
@@ -1305,10 +1306,18 @@ class Handler(BaseHTTPRequestHandler):
         self._send(target.read_bytes(), ctype, no_cache=True)
 
     def do_POST(self):
-        length = int(self.headers.get("Content-Length", 0))
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(length) or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            self._send(
+                json.dumps({"ok": False, "error": f"请求 JSON 无效：{exc}"}).encode(),
+                "application/json", status=400,
+            )
+            return
+
         # /api/chat/stream streams harness events (SSE) as the turn runs.
         if self.path == "/api/chat/stream":
-            payload = json.loads(self.rfile.read(length) or "{}")
             message = (payload.get("message") or "").strip()
             agent_id = payload.get("agent_id") or "default"
             self.send_response(200)
@@ -1332,7 +1341,6 @@ class Handler(BaseHTTPRequestHandler):
                 emit("done", {"error": f"{type(exc).__name__}: {exc}"})
             return
         if self.path == "/api/graph/stream":
-            payload = json.loads(self.rfile.read(length) or "{}")
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -1355,10 +1363,11 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/connections": None, "/api/connections/test": None,
                   "/api/providers": None, "/api/extras": extras_action}
         if self.path not in routes:
-            self.send_response(404)
-            self.end_headers()
+            self._send(
+                json.dumps({"ok": False, "error": f"没有这个 API：{self.path}"}).encode(),
+                "application/json", status=404,
+            )
             return
-        payload = json.loads(self.rfile.read(length) or "{}")
         try:
             if self.path == "/api/chat":
                 message = (payload.get("message") or "").strip()

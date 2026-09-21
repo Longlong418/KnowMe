@@ -1,5 +1,33 @@
 # KnowMe 开发文档
 
+## Phase 11：先把 Reader 的上传链路做稳（2026-09-22）
+
+这一轮没有改 Dashboard 的两栏布局。左边仍然是 Agent 和应用入口，右边仍然显示当前 Agent 的对话，或者当前应用（阅读器、知识库、记忆等）。这次只处理 Reader 真正影响使用的问题。
+
+### 这次修了什么
+
+- 修复了浏览器端请求遇到空响应时的错误提示。以前 `postJSON()` 不管响应状态，直接调用 `response.json()`；服务端返回空的 404 或连接中断时，浏览器只会显示 `Unexpected end of JSON input`，看不出到底是哪一个接口失败。现在会先读取响应文本，再显示 HTTP 状态或服务端返回的错误。
+- Dashboard 收到无效 JSON 时不再直接断开连接，而是返回一个带状态码的 JSON 错误。不存在的 POST API 也会返回 JSON，而不是空响应。
+- 去掉了左侧导航里两个都跳到 `#memory` 的入口。现在只保留“记忆管理”；需要看原始记忆数据时，进入已有的“数据库”页面，不会再出现点两个菜单却看到同一页的情况。
+
+### Reader 的正确数据流
+
+1. 浏览器读取文件，转成 data URL。
+2. `/api/library` 解码文件并调用 `applications/reader.py` 提取文字。
+3. `applications/library.py` 同时保存原始文件和提取后的文字：原始文件用于 PDF 渲染，文字用于搜索和给 Agent 阅读。
+4. 打开文档时，接口返回提取文字和 `/api/library/file?id=...`。
+5. Markdown/文本直接渲染；PDF 使用内置 pdf.js 渲染原始文件，扫描版 PDF 没有文字层时仍然可以显示页面，只是不能搜索和引用其中的文字。
+
+### 调试上传失败时先看这三件事
+
+- 确认浏览器连接的是刚启动的 Dashboard 端口。旧的 Dashboard 进程如果还占着端口，旧版本可能没有 `/api/library`，这时 PDF 会表现为 `Failed to fetch`。
+- 打开浏览器 Network 面板，检查 `POST /api/library` 的状态和响应 JSON；现在即使失败也会返回可读错误，不会再只显示 JSON 解析错误。
+- PDF 仍然打不开时，直接访问 Network 里返回的 `/api/library/file?id=...`。如果它返回 `application/pdf`，说明上传和保存成功，问题只在浏览器端 PDF 渲染；如果返回 404，说明连接的不是包含文档库路由的 Dashboard 实例。
+
+### 还没有做的事情
+
+这轮没有引入 Vue，也没有重做整体布局。先确保“添加文件 → 文档库出现 → 文本/PDF 能打开 → 选中文本能交给 Agent”稳定，再继续完善知识库和更丰富的 Reader 功能。
+
 ## 项目概览
 
 一个以自研 Agent Core 为底座的个人 Agent 工作平台。支持多Agent记忆隔离，提供Reader应用和Context Bridge。

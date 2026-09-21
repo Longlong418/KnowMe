@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import TypedDict
 from uuid import uuid4
 
-from knowme.applications.reader import ReaderError, parse_bytes
+from knowme.applications.reader import parse_bytes
 
 # Suffix -> a coarse kind the frontend switches its renderer on. Anything not
 # listed is plain text, which is what the reader falls back to anyway.
