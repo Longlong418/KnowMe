@@ -142,6 +142,14 @@
                font-size:11px;padding:2px 8px;cursor:pointer;font-family:inherit;
                transition:color .15s,border-color .15s,background .15s}
   .mdcode-copy:hover{color:var(--accent);border-color:var(--accent)}
+/* Knowledge base (Sapphire) styling */
+ #kb-edit-content{resize:vertical}
+ .kb-link{background:var(--accent-soft);border:1px solid var(--accent);
+          border-radius:4px;padding:2px 6px;color:var(--accent);cursor:pointer}
+ .kb-link:hover{background:var(--accent);color:var(--panel)}
+ /* Knowledge note list tiles */
+ .kb-note{border:1px solid var(--line);border-radius:6px;padding:12px;transition:box-shadow .15s}
+ .kb-note:hover{box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer}
   .mdcode-copy.copied{color:var(--good);border-color:var(--good);background:var(--good-soft)}
   .mdcode pre{margin:0;padding:12px 14px;overflow-x:auto;font-family:var(--mono);
               font-size:12.5px;line-height:1.65;color:var(--ink2);white-space:pre}
