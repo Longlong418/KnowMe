@@ -107,7 +107,7 @@ async function postJSON(url, body){ return (await fetch(url,{method:"POST",heade
 // --- Shared row atoms.
 //
 // Deliberately three tiny FRAGMENTS, not one big sessionRow()/pinnedRow().
-// The session inbox (views.js) and the dock's thread menu (dock.js) draw
+// The session inbox (views.js) and the conversation's thread menu (chat.js) draw
 // genuinely different things — a card in a tab versus an item in a dropdown —
 // so a shared row component would need a parameter for every difference and
 // would be worse than the duplication. What they actually share is these three
@@ -123,7 +123,7 @@ const gwTags = s => (s.sources||[]).map(src =>
 const sessionMeta = s =>
   `${s.messages} 条消息 · ${esc((s.last_at||"").slice(0,16).replace("T"," "))}`;
 
-// One tool in a stage strip. Shared by the chat dock's harness strip
+// One tool in a stage strip. Shared by the conversation's harness strip
 // (render.js) and the arena's per-card strip (compare.js) — those two strips
 // are otherwise different on purpose (the arena has no gate/reply stage and
 // wraps), but the chip itself must look identical in both or the same tool

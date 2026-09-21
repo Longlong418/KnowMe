@@ -8,7 +8,7 @@ let activeView = null, activeSub = null;
 // moved: after the Connections registry took keys, providers and integrations
 // out of that page, what remained was two switches that change how a turn runs,
 // which is a behaviour, not a setting.
-const TITLES = {chat:"聊天与观察", overview:"总览", gateway:"网关", loop:"循环",
+const TITLES = {agent:"对话", overview:"总览", gateway:"网关", loop:"循环",
                 memory:"记忆", tools:"工具", models:"模型", connections:"连接",
                 ops:"LLM 运维", reader:"阅读器", knowledge:"知识库",
                 graph:"图工作流——为循环提供结构",
@@ -20,6 +20,13 @@ function render(){
   const [v, subRaw] = (location.hash||"#overview").slice(1).split("/");
   const sub = subRaw || null;
   const view = VIEWS[v] ? v : "overview";
+  // The hash is the source of truth for WHICH agent you are looking at, so a
+  // sidebar click, the back button and a pasted #agent/coding link all land the
+  // same way. selectAgent() is a pure state switch and never writes the hash,
+  // which is why this can't recurse: after it runs the two agree and this stops
+  // firing. selection changes have already taken effect by the time it returns
+  // (its first await is below that), so the render continues normally.
+  if (view === "agent" && sub && sub !== ACTIVE_AGENT) selectAgent(sub);
   const subChanged = sub !== activeSub || view !== activeView;
   const effSub = sub;
   document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("on",
@@ -40,6 +47,13 @@ function render(){
     // cleared a mid-drag text selection in the document. There is nothing on
     // this page that the poll refreshes, so skip the rebuild entirely and let
     // restoreReaderState() below paint the document.
+  } else if (view === "agent" && !subChanged){
+    // Same trap as the Reader, and the same fix. The conversation panel owns
+    // state the server knows nothing about: what you have typed into #dmsg, where
+    // the log is scrolled, which <details> you expanded. Rebuilding it every 5s
+    // would wipe all three mid-sentence. Navigations still rebuild (subChanged),
+    // and the thread itself is repainted from CHAT by wireChat() below — which
+    // is the part that actually needs to track the poll.
   } else if ((view === "memory" || view === "settings" || view === "database" || view === "models" || view === "connections") && editing && !subChanged){
     // don't wipe an in-progress edit on the 5s refresh — but DO switch sub-tabs
   } else {
@@ -66,6 +80,10 @@ function render(){
   document.getElementById("n-ops").textContent = D.stats.tool_errors || (D.eval_report ? "" : "!");
   // Restore reader state if on reader view
   if (view === "reader") restoreReaderState();
+  // The conversation markup is generated, so its input and log have to be
+  // (re)bound and repainted after every rebuild — the same reason the Reader
+  // needs restoreReaderState().
+  if (view === "agent") wireChat();
 }
 let lastFetch = Date.now();
 function tickLive(){
@@ -74,26 +92,17 @@ function tickLive(){
   document.getElementById("sub").innerHTML =
     `<span class="live"><span class="dot"></span>实时</span> · ${ago} 秒前更新 · ${esc(D.home)}`;
 }
-let dockRestored = false;
-async function restoreDock(){
-  // On page load the dock is empty even though the current thread has messages
-  // — restore them so a refresh never looks like it lost the chat.
-  dockRestored = true;
-  const sid = D && D.current_sessions && D.current_sessions[ACTIVE_AGENT];
-  if (!sid || CHAT.length) return;
-  await loadThreadInto(sid, {setSession: true});
-}
 async function refresh(){
   try {
     D = await (await fetch("/api/data?agent_id=" + encodeURIComponent(ACTIVE_AGENT || "default"))).json(); lastFetch = Date.now();
     render(); tickLive();
-    syncModelChip();  // keep the dock's model pill in sync with the active brain
+    syncModelChip();  // keep the conversation's model pill in sync with the active brain
     applyTele();      // reflect the stats on/off choice (default on)
     syncLiveView();   // live-update an opened conversation (e.g. new phone messages)
-    if (!dockRestored) restoreDock();
+    if (!threadRestored) restoreThread();
   } catch(e){ /* server restarting — keep showing last data */ }
 }
-// --- resizable columns: drag the thin handle between nav|main and main|dock.
+// --- resizable sidebar: drag the thin handle between nav|main.
 // Width lives in a CSS var + localStorage, so it survives refreshes.
 function wireResizer(id, cssVar, key, fromRight, min, max){
   const el = document.getElementById(id);
@@ -116,9 +125,7 @@ function wireResizer(id, cssVar, key, fromRight, min, max){
 function wireChrome(){
   // restore saved widths
   const nw = localStorage.getItem("navW"); if (nw) document.documentElement.style.setProperty("--nav-w", nw+"px");
-  const dw = localStorage.getItem("dockW"); if (dw) document.documentElement.style.setProperty("--dock-w", dw+"px");
   wireResizer("nav-resizer", "--nav-w", "navW", false, 150, 380);
-  wireResizer("dock-resizer", "--dock-w", "dockW", true, 260, 680);
   // hide / show the sidebar
   const setNav = v => { document.body.classList.toggle("nav-hidden", v); localStorage.setItem("navHidden", v?"1":"0"); };
   const nt = document.getElementById("nav-toggle"), nr = document.getElementById("nav-reopen");
@@ -129,7 +136,12 @@ function wireChrome(){
 
 window.addEventListener("hashchange", render);
 window.__hold = (v)=>{ animating = v; };   // test hook: freeze the diagram
-wireDock(); wireChrome();
+// Open on the conversation. An empty hash used to fall back to 总览, but the
+// agent thread is what you come back to — a real hash (bookmark, reload, back
+// button) is respected and wins over this. wireChat() is not called here: the
+// panel does not exist until render() has run, and refresh() calls it.
+if (!location.hash) location.hash = "#agent/" + ACTIVE_AGENT;
+wireChrome();
 refresh(); setInterval(refresh, 5000); setInterval(tickLive, 1000);
 pollEvents(); setInterval(pollEvents, 450);   // live harness animation
 

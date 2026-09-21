@@ -160,10 +160,12 @@ function renderChatLog(){
 }
 
 function syncChatLogs(){
-  // one conversation, two surfaces: the Chat & watch tab and the side dock
+  // Fan out by CLASS, not by id: the conversation panel is generated markup, and
+  // there is exactly one .chatlog in the document at a time now. The scroll-to-
+  // bottom is what makes a streaming reply feel live.
   document.querySelectorAll(".chatlog").forEach(el => {
     el.innerHTML = renderChatLog();
-    el.scrollTop = el.scrollHeight;      // dock scrolls its own container
+    el.scrollTop = el.scrollHeight;
   });
 }
 
@@ -211,7 +213,7 @@ function applyStreamEvent(pending, ev){
 }
 
 async function sendChat(fromInput){
-  const input = fromInput || document.getElementById("msg") || document.getElementById("dmsg");
+  const input = fromInput || document.getElementById("dmsg");
   const text = (input && input.value || "").trim();
   if (!text) return;
   input.value = "";
@@ -245,15 +247,13 @@ async function sendChat(fromInput){
   syncChatLogs();
   input.focus();
 }
-function wireDock(){
+// Bind the conversation panel's input + repaint its log. Called from render()
+// (main.js) after the #agent view is built, because that markup is generated —
+// there is no element to bind at load time, and a rebuild replaces both nodes.
+// There is no collapse/reopen pair to wire any more: the panel is the view.
+function wireChat(){
   const b = document.getElementById("dsend"), i = document.getElementById("dmsg");
   if (b) b.onclick = () => sendChat(i);
   if (i) i.onkeydown = e => { if (e.key==="Enter") sendChat(i); };
-  const close = document.getElementById("dock-close"), reopen = document.getElementById("dock-reopen");
-  const setClosed = v => { document.body.classList.toggle("dock-closed", v); localStorage.setItem("dockClosed", v?"1":"0"); };
-  if (close) close.onclick = () => setClosed(true);
-  if (reopen) reopen.onclick = () => setClosed(false);
-  const saved = localStorage.getItem("dockClosed");
-  setClosed(saved === null ? window.innerWidth < 1180 : saved === "1");
   syncChatLogs();
 }

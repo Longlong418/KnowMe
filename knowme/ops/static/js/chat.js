@@ -1,6 +1,13 @@
-// knowme dashboard — chat sessions/history (loadThreadInto), model chip, stats toggle.
+// knowme dashboard — the conversation view (#agent/<id>), sessions/history,
+// model chip, stats toggle.
 // Split out of app.js: classic <script>, shared global scope (no build
 // step, no modules). Load order + rules: static/README.md.
+//
+// This file used to be dock.js and rendered into a permanent third column. That
+// column is gone: a conversation is now a VIEW, reached by clicking an agent in
+// the sidebar (`#agent/<id>`), so it gets the full width and the browser's back
+// button works. Everything below that was not about the column survived the
+// move unchanged.
 
 // --- chat sessions (the "New chat" + history picker, like a chat app)
 let ACTIVE_AGENT = localStorage.getItem("knowme_active_agent") || "default";
@@ -12,18 +19,54 @@ function activeAgentData(){
 }
 
 function syncAgentChrome(){
-  const active = activeAgentData();
   document.querySelectorAll(".agent-link").forEach(button => {
     const data = ((D && D.agents) || []).find(a => a.id === button.dataset.agent);
     button.classList.toggle("on", button.dataset.agent === ACTIVE_AGENT);
     button.classList.toggle("ready", data && data.status === "ready");
   });
-  const title = document.getElementById("dock-agent");
-  if (title) title.textContent = `${active.icon || "✦"} ${active.name} Agent`;
-  const input = document.getElementById("dmsg");
-  if (input) input.placeholder = `给 ${active.name} Agent 发消息…`;
 }
 
+// The conversation view: one agent, the full width of the pane. This is what
+// the sidebar's agent buttons open. The header text and the input placeholder
+// are generated here rather than patched in later by syncAgentChrome(), because
+// this markup is rebuilt from scratch on every navigation — there is nothing to
+// keep in sync.
+VIEWS.agent = function(){
+  const a = activeAgentData();
+  const name = esc(a.name || "General");
+  return `<section class="agent-view">
+    <div class="agent-head">
+      <span class="agent-title"><span class="agent-icon">${esc(a.icon || "✦")}</span>${name} Agent</span>
+      <span class="arch-status"></span>
+    </div>
+    <div class="sesshead">
+      <button class="sessbtn" onclick="newChat()">+ 新建对话</button>
+      <button class="sessbtn" onclick="toggleSessMenu(event)">历史记录 &#9662;</button>
+      <button class="sessbtn teletoggle" id="teletoggle" onclick="toggleTele()" title="显示或隐藏每轮统计：门控决策、耗时、迭代和工具">统计</button>
+      <button class="modelchip" id="modelchip" onclick="toggleModelMenu(event)" title="切换当前对话使用的模型">&hellip;</button>
+    </div>
+    <div class="chatlog"></div>
+    <div class="chatbar">
+      <input id="dmsg" placeholder="给 ${name} Agent 发消息…" autocomplete="off">
+      <button id="dsend">发送</button>
+    </div>
+  </section>`;
+};
+
+// The sidebar buttons call this. It ONLY routes — the hash is what decides which
+// agent you are looking at, which is what makes the back button work.
+function openAgent(agentId){
+  const target = "#agent/" + agentId;
+  // Clicking the agent you are already on leaves the hash unchanged, so no
+  // hashchange fires and the click would look broken. Reload the thread by hand.
+  if (location.hash === target) selectAgent(agentId);
+  else location.hash = target;
+}
+
+// Pure state switch. Deliberately does NOT touch location.hash: render() is the
+// only thing that routes, and it calls this when the hash and the state
+// disagree. A state change that also routed would be the recursion this split
+// exists to avoid.
 async function selectAgent(agentId){
   if (!((D && D.agents) || []).some(a => a.id === agentId)) return;
   ACTIVE_AGENT = agentId;
@@ -40,8 +83,9 @@ async function newChat(){
   if (r.session_id){ liveView = null; SESSION = r.session_id; CHAT.length = 0; syncChatLogs(); }
   closeSessMenu();
 }
-// The ONE way to pull a thread's rows into the dock, so the paths can't drift
-// (they used to: some dropped meta, some added a length-guard, some didn't).
+// The ONE way to pull a thread's rows into the conversation, so the paths can't
+// drift (they used to: some dropped meta, some added a length-guard, some
+// didn't).
 //   mode 'switch'  -> action:switch, also moves the agent's active thread
 //   mode 'history' -> action:history, read-only ('__all__' = full timeline)
 // Replaces CHAT + repaints, unless `guard` is set and the length is unchanged
@@ -63,29 +107,30 @@ async function switchSession(id){
   await loadThreadInto(id, {mode: "switch", setSession: true});
   closeSessMenu();
 }
-// Open a conversation from the Gateway inbox: load it into the dock (the active
-// thread), keep it live-synced (so new CLI messages appear), and make
-// sure the dock is visible.
+// Open a conversation from the Gateway inbox: go to that agent's conversation
+// view (the dock column it used to un-hide is gone), load the thread into it,
+// and keep it live-synced so new CLI messages appear.
 let liveView = null;   // a conversation opened from the inbox, kept live-updated
 async function openConversation(id){
-  document.body.classList.remove("dock-closed");
-  localStorage.setItem("dockClosed", "0");
   liveView = id;
+  const target = "#agent/" + ACTIVE_AGENT;
+  if (location.hash !== target) location.hash = target;
   await switchSession(id);   // switch the agent so a reply continues this thread
   render();                  // reflect the active-session highlight in the inbox
 }
-// Read-only "everything" view: the full cross-thread timeline in the dock, like
-// the Loop tab but as chat. Doesn't switch the agent — your next message still
-// goes to the active thread; this is purely for reading your whole history.
+// Read-only "everything" view: the full cross-thread timeline, like the Loop tab
+// but as chat. Doesn't switch the agent — your next message still goes to the
+// active thread; this is purely for reading your whole history.
 async function viewAllHistory(){
   closeSessMenu();
-  document.body.classList.remove("dock-closed");
-  localStorage.setItem("dockClosed", "0");
   liveView = "__all__";
+  const target = "#agent/" + ACTIVE_AGENT;
+  if (location.hash !== target) location.hash = target;
   await loadThreadInto("__all__");
+  render();
 }
 // Re-pull the opened conversation each refresh so CLI messages show up live —
-// unless a turn is mid-stream in the dock.
+// unless a turn is mid-stream.
 async function syncLiveView(){
   if (!liveView || CHAT.some(m => m.pending)) return;
   await loadThreadInto(liveView, {guard: true});   // guard: repaint only if changed
@@ -122,9 +167,9 @@ document.addEventListener("click", e => {
   if (mm && !mm.contains(e.target) && e.target !== chip && !chip?.contains(e.target)) closeModelMenu();
 });
 
-// --- mini model switcher in the chat dock: a pill showing the current brain,
-// clicking it drops the live catalog to swap without leaving the conversation.
-// Posts to /api/providers (the same endpoint the Models page uses).
+// --- mini model switcher in the conversation header: a pill showing the
+// current brain, clicking it drops the live catalog to swap without leaving the
+// conversation. Posts to /api/providers (the same endpoint the Models page uses).
 function syncModelChip(){
   const el = document.getElementById("modelchip");
   if (!el || !D || !D.settings) return;
@@ -135,7 +180,9 @@ function closeModelMenu(){ const m = document.getElementById("modelmenu"); if (m
 
 // --- per-turn stats toggle (gate / seconds / iterations / tools). On by
 // default; the choice persists in localStorage. Hides the .tele blocks via a
-// body class so it applies to already-rendered turns too.
+// body class so it applies to already-rendered turns too. NOTE: the CSS rule
+// that does the hiding is keyed off `.chatlog` (style.css), which is why the
+// conversation's log element keeps that class name.
 function applyTele(){
   const off = localStorage.getItem("knowme_tele") === "0";
   document.body.classList.toggle("no-tele", off);
@@ -182,4 +229,14 @@ async function switchTo(provider, model){
   await postJSON("/api/providers", {provider, model,
     small_model: provider === st.provider ? st.small_model : ""});
   await refresh();
+}
+
+// On load the conversation view is empty even though the current thread has
+// messages — restore them so a refresh never looks like it lost the chat.
+let threadRestored = false;
+async function restoreThread(){
+  threadRestored = true;
+  const sid = D && D.current_sessions && D.current_sessions[ACTIVE_AGENT];
+  if (!sid || CHAT.length) return;
+  await loadThreadInto(sid, {setSession: true});
 }

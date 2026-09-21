@@ -160,6 +160,101 @@ const assert = (ok, msg) => {
          "VIEWS.reader is assigned exactly once, in main.js");
 })();
 
+// ---- the conversation panel (#agent/<id>) -----------------------------------
+// Same class of bug as the Reader's, so it gets the same lock. The panel is
+// generated markup that carries the composer and the log, and render() rebuilds
+// it on every navigation -- if the 5s poll rebuilt it too, the draft in #dmsg
+// and the scroll position would die mid-sentence every five seconds.
+(function testAgentPollGuard() {
+  const renderFn = src.slice(src.indexOf("function render(){"),
+                             src.indexOf("\nlet lastFetch"));
+  let activeView = null, activeSub = null, animating = false, editing = false;
+  const VIEWS = { agent: (d, sub) => "<agent:" + sub + ">", loop: () => "<loop>" };
+  const TITLES = { agent: "对话" };
+  const D = { provider: "p", model: "m", chat_log: [], stats: { turns: 0, tool_errors: 0 },
+              graph: { stats: { quick: 0, full: 0 } }, facts: [], episodes: [],
+              calendar: [], outbox: [], db: { all_tables: [] }, home: "H",
+              agents: [{ id: "default" }, { id: "coding" }], current_sessions: {} };
+  const els = {};
+  const document = {
+    querySelectorAll: () => [],
+    querySelector: () => ({ scrollTop: 0 }),
+    getElementById: id => (els[id] = els[id] || { textContent: "", innerHTML: "", style: {} }),
+  };
+  const window = { addEventListener() {}, getSelection: () => ({ toString: () => "" }) };
+  const esc = s => String(s);
+  const location = { hash: "#agent/coding" };
+  let ACTIVE_AGENT = "default";
+  const switched = [];
+  let wired = 0;
+  // The real selectAgent() is async but assigns ACTIVE_AGENT before its first
+  // await, and render() relies on exactly that -- so a synchronous stand-in is
+  // faithful to the contract being tested.
+  function selectAgent(id) { switched.push(id); ACTIVE_AGENT = id; }
+  function syncAgentChrome() {}
+  function restoreReaderState() {}
+  function wireChat() { wired++; }
+  eval(renderFn);
+
+  els["view"] = { innerHTML: "", style: {} };
+  render();
+  assert(switched.length === 1 && switched[0] === "coding",
+         "a #agent/<id> hash that disagrees with the state switches agents");
+  assert(els["view"].innerHTML === "<agent:coding>",
+         "the conversation is built for the agent named in the hash");
+  assert(wired === 1, "the generated panel is bound after it is built");
+
+  render(); render();
+  assert(els["view"].innerHTML === "<agent:coding>",
+         "a poll does NOT rebuild the conversation (the #dmsg draft survives)");
+  assert(wired === 3, "a poll still re-binds and repaints the log");
+  assert(switched.length === 1, "render() stops switching once hash and state agree");
+
+  location.hash = "#agent/default";
+  render();
+  assert(els["view"].innerHTML === "<agent:default>", "changing agent rebuilds the panel");
+})();
+
+// ---- the panel's element ids are a contract with the rest of the app --------
+// #dmsg/#dsend are bound by wireChat(), #teletoggle by applyTele(), #modelchip
+// by syncModelChip(), and .chatlog is what body.no-tele hides. All four are
+// looked up by id/class from another file, so dropping one breaks a feature
+// with no error anywhere.
+(function testPanelContract() {
+  const chatSrc = fs.readFileSync(
+    process.argv[2].replace(/main\.js$/, "chat.js"), "utf8");
+  const from = chatSrc.indexOf("function activeAgentData(){");
+  const to = chatSrc.indexOf("\n};", chatSrc.indexOf("VIEWS.agent = function(){")) + 3;
+  let ACTIVE_AGENT = "coding";
+  let D = { agents: [{ id: "coding", name: "Coding", icon: "⌘", status: "idle" }],
+            current_sessions: {} };
+  const VIEWS = {};
+  const esc = s => String(s).replace(/[&<>"]/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  eval(chatSrc.slice(from, to));
+  const html = VIEWS.agent(D, "coding");
+
+  for (const [needle, why] of [
+    ['class="chatlog"', ".chatlog is what body.no-tele hides for the stats toggle"],
+    ['id="dmsg"', "wireChat() binds the composer by id"],
+    ['id="dsend"', "wireChat() binds Send by id"],
+    ['id="teletoggle"', "applyTele() syncs the stats button by id"],
+    ['id="modelchip"', "syncModelChip() syncs the model pill by id"],
+  ]) assert(html.includes(needle), why);
+  assert(html.includes("Coding"), "the header names the active agent");
+  assert(!/id="dock/.test(chatSrc), "no dock ids survive in the panel");
+
+  // The one-directional routing that keeps this from recursing: openAgent()
+  // writes the hash, selectAgent() only switches state, and render() is the
+  // only thing that maps one onto the other.
+  const selectFn = chatSrc.match(/async function selectAgent\(agentId\)\{[\s\S]*?\n\}/);
+  assert(selectFn && !/location\.hash/.test(selectFn[0]),
+         "selectAgent never writes the hash (that is what keeps it from recursing)");
+  assert(chatSrc.match(/function openAgent\(agentId\)\{[\s\S]*?\n\}/)[0]
+           .includes('"#agent/" + agentId'),
+         "openAgent routes to #agent/<id>");
+})();
+
 process.exit(failures ? 1 : 0);
 """
 

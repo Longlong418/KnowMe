@@ -474,16 +474,17 @@ const VIEWS = {
     return items.length ? connectionsGrid(items) : `<div class="card empty">尚未注册任何集成。</div>`;
   },
   // Conversation inbox shared by the dashboard and CLI. Each message is tagged
-  // with where it came from. You type in the dock on the right.
+  // with where it came from.
   // Gateway = an INBOX of conversations (like Slack/Intercom): one row per
-  // conversation, tagged with its channel(s). Click one to open it in the chat
-  // dock (the active thread). No longer a flat stream that duplicates the dock.
+  // conversation, tagged with its channel(s). Click one to open it as the active
+  // thread — that navigates to the agent's conversation view. No longer a flat
+  // stream that duplicates the chat.
   gateway(d){
     const sessions = (d.sessions_by_agent && d.sessions_by_agent[ACTIVE_AGENT]) || d.sessions || [];
     let h = `<div class="meta" style="margin-bottom:14px">网页端和 CLI 的对话都使用同一套记忆与循环。
-      点击一项即可在右侧聊天区打开 &rarr;。</div>`;
+      点击一项即可打开这条对话 &rarr;。</div>`;
     if (!sessions.length)
-      return h + `<div class="card empty">还没有对话——在右侧聊天区说点什么吧 &rarr;</div>`;
+      return h + `<div class="card empty">还没有对话——在左侧点一个 Agent 说点什么吧 &rarr;</div>`;
     h += sessions.map(s => {
       const tags = gwTags(s);
       const on = s.id === SESSION;

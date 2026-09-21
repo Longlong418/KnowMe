@@ -4,10 +4,15 @@ Plain static files served as-is by `knowme/ops/dashboard.py` (a stdlib HTTP
 server). **No build step, no framework, no bundler, no dependencies.** Edit these
 files to change the UI; edit `dashboard.py` to change the server/API.
 
-- `index.html` — the shell (sidebar nav, `<main>`, chat dock) + the ordered
+- `index.html` — the shell (sidebar nav + one `<main>` pane) + the ordered
   `<script>` tags.
 - `style.css` — one flat file, `:root` design tokens at the top, light + dark.
 - `js/` — the app, split by concern (below).
+
+Two columns, not three: a conversation is a **route** (`#agent/<id>`), so it
+renders into `<main>` like any other view instead of occupying a permanent
+side column. `openAgent()` sets the hash; `selectAgent()` is the state switch
+and never writes the hash — one direction only, so neither can recurse.
 
 ## The files (`js/`), in load order
 
@@ -24,9 +29,11 @@ runs the bootstrap and must load last**.
 | `diagram.js` | `archSVG` (the architecture chart) **and** its live animation (`STAGE`/`hot`/`pollEvents`) |
 | `graph.js`   | graph workflows: data-driven topology chart (`graphSVG` from `d.graph.workflows`), the Overview panel (`graphPanel`), and `animateGraphStage` for `graph_*`/`route` events |
 | `views.js`   | subtab/db helpers, SQL console, Memory/Tools sub-views, the `VIEWS` router object |
-| `compare.js` | the Model arena (`Arena` tab; internals keep the `compare` name) — race one message through several models at once |
-| `dock.js`    | chat sessions/history (`loadThreadInto`), model chip, stats toggle |
+| `chat.js`    | `VIEWS.agent` + chat sessions/history (`loadThreadInto`), model chip, stats toggle |
 | `main.js`    | `render`/`refresh` loop, resizers, and the bootstrap (**loads last**) |
+
+`chat.js` was `dock.js` until the chat stopped being a dock — `git log --follow`
+across the rename.
 
 Data flows one way: `refresh()` (main.js) fetches `/api/data` into the global
 `D`, then `render()` writes `VIEWS[hash](D)` into `#view`. Every mutation
@@ -56,9 +63,9 @@ Data flows one way: `refresh()` (main.js) fetches `/api/data` into the global
 
 Frontend logic is not unit-tested; verify in the browser preview:
 `make dashboard` (or the preview tool) → hard-reload `localhost:7777` → click the
-sidebar tabs and the chat dock → check the console shows **zero errors**. The
-Python side (`dashboard.py` endpoints, `_thread_history`, pins, session resume)
-*is* covered by `evals/deterministic/`.
+sidebar tabs and an agent in the sidebar → check the console shows **zero
+errors**. The Python side (`dashboard.py` endpoints, `_thread_history`, pins,
+session resume) *is* covered by `evals/deterministic/`.
 
 **A running server does not pick up Python changes.** Static files here (`.js`,
 `.css`, `index.html`) are read from disk on every request, so a hard-reload shows
