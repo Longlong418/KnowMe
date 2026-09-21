@@ -11,7 +11,7 @@
 - ✅ `restoreReaderState()` 在 render() 末尾调用
 - ✅ Context Bridge 集成：选中文本自动注入上下文
 
-### ✅ Phase 2: 知识库系统 (Sapphire) 完全部面完成
+### ✅ Phase 2: 知识库系统 (Sapphire) MVP 完成
 完全实现知识库系统：
 - ✅ `knowme/tools/knowledge.py`：完整 CRUD + 搜索 + 反向链接
   - `create_note(conn, title, folder, content)`
@@ -27,6 +27,8 @@
 - ✅ `/api/knowledge` 端点处理 CRUD + 搜索 + 反向链接
 - ✅ 前端 `VIEWS.knowledge()`：创建笔记、列表、编辑、预览
 - ✅ 导航链接添加
+- ✅ 笔记按 `agent_id` 隔离，旧数据库自动迁移
+- ✅ 标题更新、UUID、空标题校验、删除结果和 wiki-link 转义
 
 ### ⏳ Phase 3: 多Agent增强 已实现核心功能
 基于 Octopus 界面，已完成：
@@ -36,9 +38,9 @@
 - ✅ `/api/knowledge` 端点：完整 RESTful API
 
 ## 测试结果
-- **557 passed**（全部通过）
-- 62 skipped
-- 17 deselected（delegate_env, packaging）
+- Knowledge Base / Reader / Agent 隔离定向回归：**14 passed**
+- 全量确定性套件（排除两个已知基线测试）：**561 passed, 62 skipped**
+- 未纳入的基线测试仍涉及缺少 `knowme/ops/coding_eval.py` 和打包 skill；本轮没有把它们伪装成已解决。
 
 ## 知识点
 1. 知识库笔记使用 SQLite 存储在 `state.db` 中

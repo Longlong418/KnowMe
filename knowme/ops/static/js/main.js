@@ -161,15 +161,19 @@ function handleUrlInput(){
   const input = document.getElementById("rc-url-input");
   if (!input || !input.value.trim()) return;
   const url = input.value.trim();
-  const isFile = url.match(/\.(md|txt|py|json|csv|html)$/i);
-  if (isFile){
-    currentDoc = { name: url.split("/").pop(), content: "" };
-    publishReaderContext({selection: ""});
-    renderReaderContent();
-  } else {
-    publishReaderContext({selection: ""});
-    renderReaderContent();
-  }
+  // Browser fetch keeps the MVP dependency-free. Public pages must allow CORS;
+  // when they do not, the error tells the user to download the file instead.
+  fetch(url)
+    .then(response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.text();
+    })
+    .then(content => {
+      currentDoc = {name: url.split("/").pop() || url, content};
+      renderReaderContent();
+      return publishReaderContext({selection: ""});
+    })
+    .catch(error => alert("URL 加载失败（目标可能不允许浏览器跨域读取）：" + error));
 }
 
 function publishReaderContext(extra = {}){
@@ -212,13 +216,17 @@ async function createKnowledgeNote(){
   const folder = document.getElementById("kb-folder")?.value?.trim() || "default";
   const content = document.getElementById("kb-content")?.value || "";
   if (!title) return alert("请输入笔记标题");
-  const res = await postJSON("/api/knowledge", {action: "create", title, folder, content});
+  const res = await postJSON("/api/knowledge", {
+    action: "create", title, folder, content, agent_id: ACTIVE_AGENT
+  });
   if (res.ok) location.hash = "#knowledge";
 }
 
 async function viewKnowledgeNote(noteId){
   currentNoteId = noteId;
-  const res = await postJSON("/api/knowledge", {action: "get", note_id: noteId});
+  const res = await postJSON("/api/knowledge", {
+    action: "get", note_id: noteId, agent_id: ACTIVE_AGENT
+  });
   if (res.ok){
     document.getElementById("kb-note-detail").style.display = "block";
     document.getElementById("kb-edit-title").value = res.note?.title || "";
@@ -232,14 +240,18 @@ async function saveKnowledgeNote(){
   const content = document.getElementById("kb-edit-content")?.value || "";
   const title = document.getElementById("kb-edit-title")?.value?.trim();
   if (!id) return;
-  const res = await postJSON("/api/knowledge", {action: "update", note_id: id, content, title});
+  const res = await postJSON("/api/knowledge", {
+    action: "update", note_id: id, content, title, agent_id: ACTIVE_AGENT
+  });
   if (res.ok) location.hash = "#knowledge";
 }
 
 async function deleteKnowledgeNote(){
   if (!currentNoteId) return;
   if (!confirm("确定删除这条笔记吗？此操作不可撤销。")) return;
-  const res = await postJSON("/api/knowledge", {action: "delete", note_id: currentNoteId});
+  const res = await postJSON("/api/knowledge", {
+    action: "delete", note_id: currentNoteId, agent_id: ACTIVE_AGENT
+  });
   closeKnowledgeDetail();
   location.hash = "#knowledge";
 }
@@ -252,10 +264,15 @@ function closeKnowledgeDetail(){
 
 function renderKnowledgePreview(){
   const content = document.getElementById("kb-edit-content")?.value || "";
-  const html = content.replace(/\[\[([^\]]+)\]\]/g, '<a href="#knowledge" style="color:var(--accent)">[$1]</a>');
-  document.getElementById("kb-preview").innerHTML = "<pre>" + esc(html) + "</pre>";
+  const safe = esc(content);
+  const html = safe.replace(/\[\[([^\]]+)\]\]/g,
+    '<a href="#knowledge" style="color:var(--accent)">[$1]</a>');
+  document.getElementById("kb-preview").innerHTML = "<pre>" + html + "</pre>";
 }
 
 function filterKnowledgeNotes(){
+  const folder = document.getElementById("kb-folder-filter")?.value || "";
+  if (folder) localStorage.setItem("knowme_kb_folder", folder);
+  else localStorage.removeItem("knowme_kb_folder");
   location.hash = "#knowledge"; // Will refresh and filter
 }

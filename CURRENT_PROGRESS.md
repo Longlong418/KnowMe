@@ -9,7 +9,7 @@
 - ✅ 增强 views.js 样式：flex 布局、加载按钮
 - ✅ 文档自动进入上下文（Context Bridge 已实现）
 
-## Phase 2: 知识库系统 (Sapphire) ✅ 完成
+## Phase 2: 知识库系统 (Sapphire) ✅ MVP 完成
 - ✅ 新增 `knowme/tools/knowledge.py`：
   - `create_note()`, `get_note()`, `update_note()`, `delete_note()`
   - `parse_links()` 提取 `[[wiki-links]]`
@@ -24,7 +24,13 @@
   - `createKnowledgeNote()`, `viewKnowledgeNote()`, `saveKnowledgeNote()`
   - `deleteKnowledgeNote()`, `closeKnowledgeDetail()`, `renderKnowledgePreview()`
 
-## Phase 3: 多Agent增强 ⏳ 进行中
+### MVP 收口修复（2026-09-21）
+- ✅ notes 表增加 `agent_id`，旧表启动时自动迁移
+- ✅ 知识库 CRUD、搜索、反向链接和 Agent 工具全部按 Agent 隔离
+- ✅ 标题更新、UUID、空标题校验、删除结果和 wiki-link 转义
+- ✅ 新增 `evals/deterministic/test_knowledge_base.py`
+
+## Phase 3: 多Agent增强 ⏳ 后续迭代
 基于用户分享的 Octopus 界面，计划：
 
 ### 界面优化

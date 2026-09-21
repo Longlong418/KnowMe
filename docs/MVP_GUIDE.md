@@ -11,6 +11,8 @@
 - **Learning**：配合 Reader 解释材料、回答选区问题、做笔记。
 - **Research**：检索和比较资料，强调来源与结论的区分。
 
+知识库笔记也按当前 Agent 隔离。Learning Agent 创建的笔记不会出现在 Coding Agent 的列表中；Agent 通过工具创建、搜索、更新和删除笔记时也遵守同一个边界。
+
 它们不是四套重复代码。四个 Agent 都运行同一个 `AgentRuntime` 和同一个 Agent Loop，区别只是：
 
 ```text
@@ -49,6 +51,7 @@ cd D:\LLM\Agent\knowme-agent
    - 是否发生上下文压缩；
    - 迭代次数、模型和耗时。
 6. 切换到 **记忆管理**，只能看到当前 Agent 自己的事实和情景。一个 Agent 无法编辑或删除另一个 Agent 的事实。
+7. 打开 **知识库**，创建一条带 `[[另一条笔记]]` 的笔记。标题、正文、文件夹、搜索、反向链接和删除都通过同一个 Agent 范围保存。
 
 ## 代码从哪里读
 
@@ -88,6 +91,7 @@ cd D:\LLM\Agent\knowme-agent
 - 独立的知识库导入、搜索、关联和批量整理界面；
 - Agent 通过 Application 专用工具实时修改浏览器里的高亮和笔记；
 - PDF / EPUB 的完整解析与阅读进度；
+- URL 阅读的服务端抓取和网页正文清洗（当前版本使用浏览器 `fetch`，目标站点需要允许跨域读取）；
 - 可视化创建自定义 Agent；
 - Scheduler、Multi-Agent 协作、Connector 市场和远程访问；
 - 前端框架迁移。

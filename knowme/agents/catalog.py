@@ -33,7 +33,9 @@ class AgentProfile:
 _READER_TOOLS = frozenset({
     "get_document", "get_selection", "add_note", "highlight",
     "search_web", "save_note", "read_tool_result", "skill",
-    "create_skill", "manage_memory",
+    "create_skill", "manage_memory", "get_note", "create_note",
+    "update_note", "delete_note", "list_notes", "search_notes",
+    "list_folders", "get_linked_notes", "parse_links",
 })
 
 

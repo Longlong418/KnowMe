@@ -18,6 +18,13 @@
 - ✅ 前端 Reader 视图：文件输入、文档显示、文本选中
 - ✅ 自动注入：文档内容自动进入 Agent 上下文
 
+### Phase 3：Knowledge Base MVP
+- ✅ SQLite notes 表支持 `agent_id`，旧数据库启动时自动迁移
+- ✅ 知识库 CRUD、搜索、文件夹和 `[[双向链接]]`
+- ✅ Agent 工具和 Dashboard API 均按当前 Agent 隔离
+- ✅ 标题更新、UUID、空标题校验、删除结果和 wiki-link 转义
+- ✅ `evals/deterministic/test_knowledge_base.py` 覆盖核心行为
+
 ## 四栏布局设计
 
 ```
@@ -86,11 +93,6 @@ cd D:\LLM\Agent\knowme-agent
 - 数据库：`.knowme/state.db`
 
 ## 下期计划
-
-### Phase 3：知识库系统（Sapphire 风格）
-- 文件夹组织界面
-- [[双向链接]] 语法支持
-- 笔记编辑和版本管理
 
 ### Phase 4：文件解析增强
 - PDF/EPUB 支持

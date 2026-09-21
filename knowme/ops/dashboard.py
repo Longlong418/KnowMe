@@ -622,13 +622,31 @@ def _tool_source(name: str, mcp_servers: list[str]) -> str:
 
 
 def knowledge_info() -> dict:
-    """Return knowledge base overview: notes count and folders."""
-    from knowme.tools.knowledge import list_notes, list_folders
+    """Return the current user's knowledge notes for the dashboard.
+
+    The browser filters the returned snapshots by its selected Agent. Keeping
+    the agent id on each row also makes old dashboards safe during migration.
+    """
+    from knowme.tools.knowledge import list_folders, list_notes
     settings = load_settings()
     conn = connect(settings.home)
-    notes = list_notes(conn)
-    folders = list_folders(conn)
-    return {"notes_count": len(notes), "folders": folders}
+    notes = list_notes(conn, agent_id="default")
+    folders = list_folders(conn, agent_id="default")
+    # Include every agent's rows for the multi-agent UI; no API caller can
+    # mutate them without supplying the matching agent scope.
+    all_notes = []
+    all_folders = set()
+    from knowme.agents import list_profiles
+    for profile in list_profiles():
+        scoped = list_notes(conn, agent_id=profile.id)
+        all_notes.extend(scoped)
+        all_folders.update(list_folders(conn, agent_id=profile.id))
+    return {
+        "notes_count": len(notes),
+        "folders": folders,
+        "notes": all_notes,
+        "all_folders": sorted(all_folders),
+    }
 
 
 def tools_info() -> dict:
@@ -656,7 +674,7 @@ def tools_info() -> dict:
         # Display-only: same tools minus MCP (building the real registry would
         # start MCP servers, which we don't want on a 5-second poll).
         from knowme.memory import Memory
-        from knowme.tools import calendar, memory_admin, messages, notes, search
+        from knowme.tools import calendar, knowledge, memory_admin, messages, notes, search
 
         conn = connect(settings.home)
         try:
@@ -686,6 +704,9 @@ def tools_info() -> dict:
         if mem is not None:
             tools += [memory_admin.make_manage_memory_tool(mem),
                       memory_admin.make_create_skill_tool(settings, mem)]
+        tools += list(knowledge.make_knowledge_tools(
+            conn, agent_id=getattr(mem, "agent_id", "default")
+        ).values())
         if settings.apple_tools:
             from knowme.tools import apple
 
@@ -958,41 +979,63 @@ def knowledge_action(payload: dict) -> dict:
     """Store, retrieve, and delete knowledge notes with [[links]] support."""
     from knowme.db import connect
     from knowme.tools.knowledge import (
-        create_note, delete_note, get_note, get_linked_notes,
-        list_folders, list_notes, search_notes, update_note
+        create_note,
+        delete_note,
+        get_linked_notes,
+        get_note,
+        list_folders,
+        list_notes,
+        search_notes,
+        update_note,
     )
 
     settings = load_settings()
     conn = connect(settings.home)
+    agent_id = payload.get("agent_id") or "default"
+    get_profile(agent_id)
 
     action = payload.get("action", "")
 
     if action == "list":
-        notes = list_notes(conn, payload.get("folder"))
-        folders = list_folders(conn)
+        notes = list_notes(conn, payload.get("folder"), agent_id)
+        folders = list_folders(conn, agent_id)
         return {"ok": True, "notes": notes, "folders": folders}
     elif action == "get":
-        note = get_note(conn, payload.get("note_id", ""))
+        note = get_note(conn, payload.get("note_id", ""), agent_id)
         return {"ok": True, "note": note} if note else {"ok": False, "error": "Note not found"}
     elif action == "create":
-        note = create_note(
-            conn,
-            title=payload.get("title", ""),
-            folder=payload.get("folder", "default"),
-            content=payload.get("content", "")
-        )
+        try:
+            note = create_note(
+                conn,
+                title=payload.get("title", ""),
+                folder=payload.get("folder", "default"),
+                content=payload.get("content", ""),
+                agent_id=agent_id,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         return {"ok": True, "note": note}
     elif action == "update":
-        note = update_note(conn, payload.get("note_id", ""), payload.get("content", ""))
+        try:
+            note = update_note(
+                conn,
+                payload.get("note_id", ""),
+                payload.get("content", ""),
+                title=payload.get("title"),
+                folder=payload.get("folder"),
+                agent_id=agent_id,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         return {"ok": True, "note": note} if note else {"ok": False, "error": "Note not found"}
     elif action == "delete":
-        delete_note(conn, payload.get("note_id", ""))
-        return {"ok": True}
+        deleted = delete_note(conn, payload.get("note_id", ""), agent_id)
+        return {"ok": deleted, "error": "Note not found"} if not deleted else {"ok": True}
     elif action == "search":
-        notes = search_notes(conn, payload.get("query", ""))
+        notes = search_notes(conn, payload.get("query", ""), agent_id)
         return {"ok": True, "notes": notes}
     elif action == "links":
-        notes = get_linked_notes(conn, payload.get("note_id", ""))
+        notes = get_linked_notes(conn, payload.get("note_id", ""), agent_id)
         return {"ok": True, "notes": notes}
     else:
         return {"error": f"unknown knowledge action: {action}"}

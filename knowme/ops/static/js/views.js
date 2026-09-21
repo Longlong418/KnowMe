@@ -603,8 +603,12 @@ const VIEWS = {
     return h;
   },
   knowledge(d){
-    const notes = d.notes || [];
-    const folders = d.folders || [];
+    const kb = d.knowledge_info || {};
+    const selectedFolder = localStorage.getItem("knowme_kb_folder") || "";
+    const agentNotes = (kb.notes || []).filter(n => (n.agent_id || "default") === ACTIVE_AGENT);
+    const notes = agentNotes.filter(n => !selectedFolder || n.folder === selectedFolder);
+    const folders = (kb.all_folders || kb.folders || []).filter((folder, index, all) =>
+      all.indexOf(folder) === index && agentNotes.some(n => n.folder === folder));
     let h = `<div class="meta" style="margin-bottom:12px"><b>知识库</b> — 双向链接笔记系统，支持 [[WikiLink]] 语法。</div>`;
     // Create note form
     h += `<div class="card" style="margin-bottom:16px">
@@ -620,7 +624,7 @@ const VIEWS = {
         <b>文件夹：</b>
         <select id="kb-folder-filter" onchange="filterKnowledgeNotes()">
           <option value="">所有文件夹</option>
-          ${folders.map(f => `<option value="${f}">${f}</option>`).join('')}
+          ${folders.map(f => `<option value="${esc(f)}" ${f === selectedFolder ? "selected" : ""}>${esc(f)}</option>`).join('')}
         </select>
       </div>`;
     }

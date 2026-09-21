@@ -95,7 +95,8 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
 
     # Knowledge base tools — Sapphire-style notes with [[wiki-links]].
     from knowme.tools.knowledge import make_knowledge_tools
-    for tool in make_knowledge_tools(conn).values():
+    knowledge_agent_id = getattr(memory, "agent_id", "default")
+    for tool in make_knowledge_tools(conn, knowledge_agent_id).values():
         registry.register(tool)
 
     return registry
