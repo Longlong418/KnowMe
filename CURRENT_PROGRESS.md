@@ -1,5 +1,13 @@
 # KnowMe 实现进度更新
 
+## Phase 11: Reader 上传链路修复（2026-09-22）
+- ✅ 保持现有“两栏布局”：左侧 Agent/应用，右侧对话或当前应用，不做大规模重构
+- ✅ 修复 Dashboard 空响应和非法 JSON 导致的 `Unexpected end of JSON input`
+- ✅ 文档库上传、列表、搜索、打开、删除失败时显示可读错误和重试入口
+- ✅ PDF 原始文件接口继续返回真实 PDF，Reader 仍使用 pdf.js 渲染，文本提取用于搜索和 Agent
+- ✅ 删除左侧重复的“记忆数据”入口，避免和“记忆管理”显示同一页
+- ✅ 相关改动已提交：`6ee4900`、`e270b53`
+
 ## Phase 1: Reader 应用增强 ✅ 完成
 - ✅ 修复文件上传 bug：currentDoc 变量持久化，5秒刷新不丢失
 - ✅ 新增 `renderReaderContent()` 刷新时恢复文档显示
