@@ -57,14 +57,33 @@
   `test_reader_frontend.py`（node 桩）锁住行为；基线 588 passed / 3 failed / 62 skipped
 
 ### 界面优化
-1. **Agent 视图**：左侧 Agent 列表，支持分支 ✅（本轮完成）
-2. **SmartReader 风格**：文件上传 + URL 粘贴 + 继续阅读卡片（下一轮）
+1. **Agent 视图**：左侧 Agent 列表，支持分支 ✅（已完成）
+2. **SmartReader 风格**：文件上传 + URL 粘贴 + 继续阅读卡片 ✅（已完成，见 Phase 10）
 3. **Sapphire 知识库**：双栏布局，左侧文件夹右侧笔记列表
 
 ### 后端改进
 - 继续完善知识库功能
 - 添加文件树视图
 - 改进 PDF/EPUB 解析
+
+## Phase 5: 文档库 + PDF 渲染 + Reader Agent ✅ 完成（2026-09-21）
+- ✅ `applications/library.py`：每份文档存**原文**（`home/documents/<uuid4><后缀>`，
+  绝不用上传的文件名）和**抽取的文本**（SQLite），sha256 去重
+- ✅ 中文可用的搜索：**LIKE 而不是 FTS5**——实测 FTS5 默认分词器对中文静默零命中，
+  trigram 又搜不到两字词（详见 DEVELOPMENT.md Phase 10 的对照表）
+- ✅ vendor pdf.js 6.3.289（Apache-2.0）进 `static/vendor/pdfjs/`，带 cmaps 和标准字体；
+  选 6.x 是因为 4.2.67 以下有 CVE-2024-4367
+- ✅ 阅读器重写：文档库列表 + 渲染的正文（Markdown 真的渲染了 / PDF 用 pdf.js 画，
+  带文字层所以能选中）+ 内嵌 Reader Agent 问答面板
+- ✅ `tools/documents.py`：list / search / **分窗口** open / fetch，整本书不进上下文
+- ✅ 扫描版 PDF 存下来并标注「无文字层」，不再当成错误拒绝
+- ✅ `pypdf` 升级为基础依赖（之前没声明，所以 PDF 分支永远报「请先安装 pypdf」）
+- ✅ 前端拆分：阅读器 → `reader.js`，知识库 → `knowledge.js`，`main.js` 回归纯循环
+
+### 下一轮候选
+- EPUB / Office 格式
+- 知识库的文件树 + 双栏编辑（Sapphire 风格）
+- 阅读器：目录导航、阅读进度、在 PDF 上做笔记
 
 ## 代码可读性
 - 所有函数都有中文注释

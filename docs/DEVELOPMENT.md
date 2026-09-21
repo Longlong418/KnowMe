@@ -136,6 +136,78 @@ Agent 的对话，浏览器地址变成 `#agent/coding` 这种形式，**后退�
 40 步上限和截断；`test_knowme_facade.py` 锁 meta 的键集合。基线变成
 **588 passed / 3 failed / 62 skipped**（3 个失败仍是原来那三个）。
 
+### Phase 10：文档库 + 真的能看 PDF（2026-09-21）
+
+**改了什么**：阅读器从「一个文本预览框」变成**文档库**：左边是文档列表 + 搜索，
+右边是渲染好的正文，最右边是可以随时提问的 Reader Agent。
+
+**三个原始投诉，各自的根因**：
+1. **「上传文件他不给我保存」** —— 文档只存在浏览器变量里，页面一刷新就没了。
+   现在存在服务端的文档库里（`applications/library.py`）。
+2. **「markdown 也渲染不了」** —— 原来的代码把文本按空行切开、每段包一个 `<p>`，
+   markdown 变成了「关于它自己的散文」。现在调 `renderMarkdown()`，
+   而且**必须包在 `<div class="r">` 里**——`style.css` 里所有 `.md*` 规则都挂在 `.r` 下面，
+   少一层包裹，标题/列表/表格就全部没有样式，看起来就是「没渲染」。
+3. **「PDF 也不支持」** —— `pypdf` 是个**没有声明的可选依赖**，
+   所以 `reader.py` 的 PDF 分支在任何没碰巧装上它的环境里都报「请先安装 pypdf」。
+   现在它是 `pyproject.toml` 的基础依赖，并且 vendor 了 pdf.js 做真正渲染。
+
+**每份文档存两样东西（这是有意的）**：
+- **原文**放在 `<home>/documents/<uuid4><后缀>`。浏览器要渲染 PDF 就得拿到真文件
+  （插图、排版、可选中的文字层），抽出来的文本给不了这些。
+  存盘**绝不用上传的文件名**——文件名是攻击者可控的输入，不能由它决定文件落在哪。
+- **抽出的文本**存 SQLite，搜索和 Agent 读的都是它，不用每轮重新解析 PDF。
+
+**搜索结果为什么是 LIKE 而不是 FTS5**（这是实测推翻的设计）：
+先按 `db.py` 的 `facts_fts` 那套做了 FTS5 索引，然后量了一下：
+
+| 分词器 | 「检索门控」| 「门控」| 英文 |
+|---|---|---|---|
+| `unicode61`（FTS5 默认）| 0 命中 | 0 命中 | ✅ |
+| `trigram` | 1 命中 | 0 命中 | ✅（≥3 字符）|
+
+`unicode61` 没有中文词边界，**一整句中文是一个 token**，句子里任何查询都匹配不到；
+`trigram` 修好了但要求三个字符，于是所有两字中文词（门控、记忆、文档）静默匹配不到。
+**搜索框悄悄搜不到东西，比慢 20ms 糟糕得多。** 所以改用 LIKE 扫描，
+语言无关、任意长度都正确，和 `tools/knowledge.py` 的 `search_notes` 一致，
+还去掉了 FTS 表和三个触发器——这个模块比之前更短了。
+摘要的裁剪放在 SQL 里做，4MB 的文档不会为了显示 80 个字符而整个进 Python。
+
+**扫描版 PDF 会被存下来**：没有文字层的 PDF 不是错误，只是里面是文字的图像。
+拒绝它等于「扫描件不支持」——而它渲染得好好的，只是搜索和引用看不见内容。
+所以：存下来，并在列表里标「无文字层」、在阅读区说明清楚。真正解析不了的文件才会报错。
+
+**Reader Agent**（`agents/catalog.py`）：`list_documents` / `search_documents` /
+`open_document` / `fetch_document` 四个工具。核心约束是**窗口**：
+`open_document` 一次返回约 `settings.tool_result_budget` 字符，并把下一个 `offset` 一起给它，
+所以 50 万字的书可以分段读、永远不会整个进上下文。这个数字选得刚好——
+它同时也是「后续轮次里工具结果被压缩」的阈值。
+**故意没有 `search_web`**：它的本分是你面前的材料，能跑去上网的 Agent 就会从别处回答。
+**故意没有 `get_current_document`**：Context Bridge 已经把打开的文档和它的 id
+放进这一轮了（`Application state: doc_id=…`），Agent 直接用那个 id 调 `open_document` 就能往下读。
+
+**内嵌问答面板**：把 `sendChat` 从「写死四个全局变量」改成
+`sendChatTo(target, input)`，target 是 `{chat, agentId, repaint}`——
+消息放哪、谁回答、怎么重绘。主对话是一个 target，阅读器的问答面板是另一个。
+两个容易忽略的冲突都做了双向检查：
+- 面板的日志 class 是 `.asklog`，**不能是 `.chatlog`**，因为 `syncChatLogs()` 按 class 扇出，
+  同名会把**主对话**的消息画进阅读区。`body.no-tele` 也要为它补一条对应规则。
+- 面板用自己的 `#amsg`/`#asend`，复用 `#dmsg`/`#dsend` 会让两个输入框抢同一个节点。
+
+**pdf.js 的浏览器下限**（`static/vendor/pdfjs/README.md` 有完整说明）：
+它用 `Uint8Array.prototype.toHex` 算文档指纹，那是 `getDocument` 做的第一件事，
+所以缺这个 API 的浏览器**每个 PDF 都会失败**，而且抛的是 `n.toHex is not a function`。
+这些 API 是 2025 年才 Baseline 的（Chrome/Edge 140、Firefox 133、Safari 18.2）。
+`reader.js` 在下载 1.7MB 渲染器**之前**先检测，直接说明缺什么、哪个浏览器有。
+如果真有人卡在下限以下，换成 legacy 构建即可（README 里写了怎么换、代价是什么）。
+
+**验证方式**（这轮学到的）：起了真实的 dashboard 用 curl 验，比只跑测试多抓到两个问题。
+改 `.py` 之后**必须重启**才生效（README 早就写了，这次亲自踩到）。
+无头 Chrome 在本机沙箱里跑不起来，所以 **PDF 在浏览器里的实际渲染我没能在这里执行验证**——
+能验证到的是：vendored 的 pdf.js 在 node 里加载正常、`getDocument`/`TextLayer` 都在、
+`/api/library/file` 返回的字节和上传的**完全一致**且 Content-Type 是 `application/pdf`、
+`.mjs` 以 `text/javascript` 送达。
+
 ## 两栏布局设计
 
 ```
@@ -166,13 +238,19 @@ knowme/
 static/
 ├── index.html           # 主页面（侧边栏 + 一块全宽面板）
 ├── style.css            # 样式
-└── js/
-    ├── main.js          # render/refresh 循环 + Reader 加载
-    ├── views.js         # 视图函数
-    ├── chat.js          # 对话视图（VIEWS.agent）+ 会话/历史/模型芯片
-    ├── trace.js         # 每轮的步骤时间线
-    └── ...              # 其他模块
+├── js/
+│   ├── main.js          # render/refresh 循环 + 启动（必须最后加载）
+│   ├── views.js         # 视图函数
+│   ├── chat.js          # 对话视图（VIEWS.agent）+ 会话/历史/模型芯片
+│   ├── trace.js         # 每轮的步骤时间线
+│   ├── reader.js        # 文档库 + 阅读区 + 内嵌问答面板
+│   ├── knowledge.js     # 知识库
+│   └── ...              # 其他模块
+└── vendor/pdfjs/        # vendor 进来的 pdf.js（唯一不是自己写的代码）
 ```
+注：`main.js` 是**循环**，不是放应用代码的地方——各个应用的辅助函数放各自的文件。
+`VIEWS.*` 如果在两个文件里都定义，**后加载的那个会静默胜出**，这正是
+`test_reader_frontend.py` 在防的事。
 
 ## 使用示例
 
@@ -185,11 +263,11 @@ cd D:\LLM\Agent\knowme-agent
 访问 http://localhost:8888
 
 ### MVP 流程
-1. 左侧选择 **Learning Agent**（右侧变成它的对话页）
-2. 点 **阅读器** → 加载文档（现在全宽）
-3. 回到对话页提问 → 文档自动进入上下文
-4. 选中文本 → 「发送给 Agent」
-5. 展开回合头上的时间线，看这轮到底经历了哪些步骤
+1. 点左侧 **阅读器 · 文档库** → 「+ 添加文件」选一份 md 或 PDF（或粘贴 URL）
+2. 正文渲染出来；用左边的搜索框搜内容，点列表切换文档
+3. 右边「问 Agent」面板直接针对这份材料提问（Reader Agent 看得到打开的文档）
+4. 在正文里选中文本 → 「发送给 Agent」→ 填进对话输入框
+5. 左侧点某个 Agent → 右侧全宽对话；展开回合头上的时间线看这轮经历了什么步骤
 
 ## 代码维护说明
 
@@ -211,7 +289,14 @@ cd D:\LLM\Agent\knowme-agent
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 dashboard**。
 - **已知失败的 3 个测试**（动手前先看一眼，别把它们算到自己头上）：
   `test_delegate_env.py` ×2、`test_packaging.py::test_the_bundled_skills_are_findable`。
-  干净工作区就失败，与前端无关。当前基线：**588 passed / 3 failed / 62 skipped**。
+  干净工作区就失败，与前端无关。当前基线：**605 passed / 3 failed / 62 skipped**。
+- **改完 `.py` 一定要重启 dashboard**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
+  硬刷新就能看到；但 `dashboard.py` 及其 import 的一切都在内存里。
+  （2026-09-21 亲自踩到：改了 `library.py` 后接口还是旧行为，以为改错了。）
+- **改了接口/后端，建议起真实服务用 curl 验一遍**，比只跑测试多抓到问题——
+  文档库那两个 bug（拒绝扫描件、`.mjs` 的 MIME）都是这样发现的。
+  端口被系统保留时换一个高的：`KNOWME_DASHBOARD_PORT=31236`。
+- `evals/*` 被 gitignore，但开发中新增的回归锁测试要 `git add -f` 进库。
 - `test_static_assets.py` 里那个"剥工具块"的测试，会**从 `render.js` 里抽出**
   `stripTools` 用到的正则，再拿去跑后端真实产出的字符串——因为这条逻辑跨了
   JS 和 Python 两边，没有测试看着的话，格式一变就会静默失效（聊天卡片里
