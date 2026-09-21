@@ -30,7 +30,8 @@ const PDF_MAX_PAGES = 60;       // a 900-page PDF must not try to draw itself
 const PDF_PAGES_PER_BATCH = 8;
 
 VIEWS.reader = function(){
-  return `<section class="reader-shell">
+  const askOpen = askPanelOpen();
+  return `<section class="reader-shell${askOpen ? " ask-open" : ""}">
     <aside class="reader-library">
       <div class="rl-head">
         <span class="reader-kicker">文档库 · ${esc(ACTIVE_AGENT || "general")}</span>
@@ -50,6 +51,8 @@ VIEWS.reader = function(){
       <div class="reader-paper-head">
         <span id="rc-title">当前文档</span>
         <span class="meta" id="rc-meta">选中文本后可发送给 Agent</span>
+        <button class="sessbtn ask-toggle" onclick="toggleAskPanel()"
+                title="随时就正在读的内容提问">${askOpen ? "收起提问" : "问 Agent"}</button>
       </div>
       <div id="rc-content"><p class="empty">从左边选一份文档，或先添加一份。</p></div>
       <div id="rc-selection" class="reader-selection">
@@ -60,8 +63,75 @@ VIEWS.reader = function(){
         </div>
       </div>
     </div>
+    ${askOpen ? askPanelHTML() : ""}
   </section>`;
 };
+
+// --- the ask panel: the Reader agent, next to the document --------------------
+//
+// Same chat machine as the conversation view (sendChatTo in render.js), pointed
+// at its own message list and its own agent. It is NOT a second copy of the
+// chat: this file supplies three things — where the messages live (ASK), who
+// answers (ASK_AGENT), and how to repaint (.asklog) — and reuses everything
+// else, including the timeline cards.
+//
+// The log element carries `.asklog`, deliberately NOT `.chatlog`: syncChatLogs()
+// fans out to every `.chatlog` in the document, so a shared class name would
+// paint the MAIN conversation's messages into this panel. The stats toggle is
+// therefore wired to `.asklog` as well (style.css).
+const ASK_AGENT = "reader";
+const ASK = [];
+let askLoaded = false;
+
+function askPanelOpen(){
+  const saved = localStorage.getItem("knowme_ask_open");
+  return saved === null ? true : saved === "1";   // on by default: it is the point
+}
+function toggleAskPanel(){
+  localStorage.setItem("knowme_ask_open", askPanelOpen() ? "0" : "1");
+  render();                                        // the panel is part of the view
+}
+function askPanelHTML(){
+  return `<aside class="reader-ask">
+    <div class="ra-head">
+      <span class="reader-kicker">提问 · READER AGENT</span>
+      <span class="meta">${esc(currentDoc ? currentDoc.title : "还没有打开文档")}</span>
+    </div>
+    <div class="asklog"></div>
+    <div class="chatbar">
+      <input id="amsg" placeholder="就这份材料提问…" autocomplete="off">
+      <button id="asend">发送</button>
+    </div>
+  </aside>`;
+}
+
+const ASK_CHAT = {chat: ASK, agentId: () => ASK_AGENT,
+                  repaint: () => syncLogClass("asklog", ASK, ASK_EMPTY)};
+const ASK_EMPTY = "问点什么吧——这个 Agent 看得到你正在读的文档，也能自己查文档库。";
+
+// Called by wireChat() alongside the main composer. Re-binding on every rebuild
+// is required because the panel's markup is generated.
+function wireAsk(){
+  const b = document.getElementById("asend"), i = document.getElementById("amsg");
+  if (!b && !i) return;
+  if (b) b.onclick = () => sendChatTo(ASK_CHAT, i);
+  if (i) i.onkeydown = e => { if (e.key === "Enter") sendChatTo(ASK_CHAT, i); };
+  if (!askLoaded) loadAskThread();
+  syncLogClass("asklog", ASK, ASK_EMPTY);
+}
+
+// Show the reader agent's current thread. Read-only: it loads the agent's
+// existing session without touching the main conversation's SESSION, and the
+// next question continues it (sending with agent_id=reader appends server-side).
+async function loadAskThread(){
+  askLoaded = true;
+  const sid = (D && D.current_sessions && D.current_sessions[ASK_AGENT]) || "default";
+  const r = await postJSON("/api/session", {action: "history", id: sid, agent_id: ASK_AGENT});
+  if (!r.ok) return;
+  ASK.length = 0;
+  (r.history || []).map(histItem).forEach(m => ASK.push(m));
+  syncLogClass("asklog", ASK, ASK_EMPTY);
+}
 
 // --- the library list --------------------------------------------------------
 

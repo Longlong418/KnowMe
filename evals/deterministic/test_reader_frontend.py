@@ -63,8 +63,9 @@ const assert = (ok, msg) => {
   const window = { addEventListener() {}, getSelection: () => ({ toString: () => "" }) };
   const esc = s => String(s);
   const location = { hash: "#reader" };
-  let restoreCalls = 0;
+  let restoreCalls = 0, wireCalls = 0;
   function restoreReaderState() { restoreCalls++; }
+  function wireChat() { wireCalls++; }
   function syncAgentChrome() {}
   eval(renderFn);
 
@@ -76,6 +77,8 @@ const assert = (ok, msg) => {
          "a poll does NOT rebuild the reader (the file input survives)");
   assert(restoreCalls === 1,
          "a poll still calls restoreReaderState() (the document stays painted)");
+  assert(wireCalls === 1,
+         "a poll still wires the Reader's ask panel (its composer is generated markup)");
 
   render(); render();
   assert(els["view"].innerHTML === "<rendered>", "repeated polls still do not rebuild");

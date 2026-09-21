@@ -157,25 +157,33 @@ const historicalCard = m => `<div class="card">
   <div class="r">${renderMarkdown(stripTools(m.reply))}</div>
 </div>`;
 
-function renderChatLog(){
-  if (!CHAT.length)
-    return `<div class="empty" style="padding:6px 2px">你可以在任意标签页从这里给 KnowMe 发消息。打开“总览”可观察消息流经运行框架，打开“网关”可汇总查看所有渠道的消息。</div>`;
-  return CHAT.map(m => m.role==="user"
+function renderChatLogFor(chat, emptyText){
+  if (!chat.length)
+    return `<div class="empty" style="padding:6px 2px">${emptyText}</div>`;
+  return chat.map(m => m.role==="user"
       ? `<div class="bubble">${esc(m.text)}</div>`
       : m.pending ? streamingCard(m)
       : m.historical ? historicalCard(m)
       : chatTurnCard(m)).join("");
 }
+function renderChatLog(){ return renderChatLogFor(CHAT, CHAT_EMPTY); }
 
-function syncChatLogs(){
-  // Fan out by CLASS, not by id: the conversation panel is generated markup, and
-  // there is exactly one .chatlog in the document at a time now. The scroll-to-
-  // bottom is what makes a streaming reply feel live.
-  document.querySelectorAll(".chatlog").forEach(el => {
-    el.innerHTML = renderChatLog();
-    el.scrollTop = el.scrollHeight;
+// Repaint every element carrying `cls` with `chat`. Fanning out by CLASS (not
+// by id) is what lets the same chat machine drive more than one surface — the
+// conversation panel, and the Reader's ask panel, which has its own log element
+// and its own message list.
+function syncLogClass(cls, chat, emptyText){
+  document.querySelectorAll("." + cls).forEach(el => {
+    el.innerHTML = renderChatLogFor(chat, emptyText);
+    el.scrollTop = el.scrollHeight;   // scroll-to-bottom is what makes streaming feel live
   });
 }
+const CHAT_EMPTY = "你可以在任意标签页从这里给 KnowMe 发消息。打开“总览”可观察消息流经运行框架，打开“网关”可汇总查看所有渠道的消息。";
+
+// The main conversation (#agent/<id>): its log elements carry .chatlog, which
+// body.no-tele keys on to hide per-turn telemetry — so that class name is
+// load-bearing (see style.css).
+function syncChatLogs(){ syncLogClass("chatlog", CHAT, CHAT_EMPTY); }
 
 // One streamed harness event updates the live card in place.
 function applyStreamEvent(pending, ev){
@@ -252,21 +260,29 @@ function applyStreamEvent(pending, ev){
   }
 }
 
-async function sendChat(fromInput){
+// Where a conversation lives, which agent answers it, and how it repaints. The
+// main conversation and the Reader's ask panel are the SAME machine pointed at
+// different state — that is the whole reason this is a parameter and not
+// globals (which is what it used to be, and why the Reader needed its own copy).
+const MAIN_CHAT = {chat: CHAT, agentId: () => ACTIVE_AGENT, repaint: syncChatLogs};
+
+async function sendChat(fromInput){ return sendChatTo(MAIN_CHAT, fromInput); }
+
+async function sendChatTo(target, fromInput){
   const input = fromInput || document.getElementById("dmsg");
   const text = (input && input.value || "").trim();
   if (!text) return;
   input.value = "";
-  CHAT.push({role:"user", text});
+  target.chat.push({role:"user", text});
   const pending = {role:"knowme", pending:true, stream:"", started: Date.now()};
-  CHAT.push(pending);
-  syncChatLogs();
+  target.chat.push(pending);
+  target.repaint();
   // tick the elapsed counter while we wait for the first token
-  const ticker = setInterval(() => { if (pending.pending && !pending.stream) syncChatLogs(); }, 1000);
+  const ticker = setInterval(() => { if (pending.pending && !pending.stream) target.repaint(); }, 1000);
   try {
     const res = await fetch("/api/chat/stream", {method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({message:text, agent_id:ACTIVE_AGENT})});
+      body:JSON.stringify({message:text, agent_id:target.agentId()})});
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
     for (;;){
@@ -278,13 +294,13 @@ async function sendChat(fromInput){
         const line = buf.slice(0, i); buf = buf.slice(i + 2);
         if (!line.startsWith("data:")) continue;
         try { applyStreamEvent(pending, JSON.parse(line.slice(5).trim())); } catch(e){}
-        syncChatLogs();
+        target.repaint();
       }
     }
   } catch(e){ Object.assign(pending, {pending:false, reply:"错误："+e}); }
   clearInterval(ticker);
   if (pending.pending) pending.pending = false;   // stream ended without a 'done'
-  syncChatLogs();
+  target.repaint();
   input.focus();
 }
 // Bind the conversation panel's input + repaint its log. Called from render()
@@ -296,4 +312,8 @@ function wireChat(){
   if (b) b.onclick = () => sendChat(i);
   if (i) i.onkeydown = e => { if (e.key==="Enter") sendChat(i); };
   syncChatLogs();
+  // The Reader's ask panel is a second surface on the same machine, so it is
+  // wired wherever the first one is. It is defined in reader.js; the guard keeps
+  // this file from depending on that one having loaded.
+  if (typeof wireAsk === "function") wireAsk();
 }

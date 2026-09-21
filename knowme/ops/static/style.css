@@ -132,6 +132,10 @@
      read it, without a round trip through a menu. */
   .reader-shell{display:grid;grid-template-columns:264px minmax(0,1fr);gap:18px;
                 align-items:start;min-height:calc(100vh - 150px)}
+  /* Three columns only while the ask panel is open: reading wants width, so the
+     panel is a deliberate choice rather than a permanent tax. */
+  .reader-shell.ask-open{grid-template-columns:240px minmax(0,1fr) 340px}
+  @media (max-width:1500px){.reader-shell.ask-open{grid-template-columns:220px minmax(0,1fr) 300px}}
   .reader-kicker{color:var(--accent);font:600 10px/1.4 var(--mono);letter-spacing:.12em}
   .reader-library{position:sticky;top:96px;display:flex;flex-direction:column;gap:8px;
                   max-height:calc(100vh - 140px);overflow-y:auto;padding-right:2px}
@@ -190,6 +194,20 @@
   .reader-selection #rc-text{margin:6px 0;color:var(--accent);word-break:break-word;
       max-height:82px;overflow:auto;font-size:12.5px}
   .rs-actions{display:flex;gap:8px;align-items:center}
+  /* the ask panel: the Reader agent beside the document, same chat machine */
+  .ask-toggle{margin-left:auto}
+  .reader-ask{position:sticky;top:96px;display:flex;flex-direction:column;
+              height:calc(100vh - 150px);background:var(--panel);
+              border:1px solid var(--line);border-radius:12px;padding:0 14px}
+  .ra-head{display:flex;flex-direction:column;gap:2px;padding:14px 0 10px;
+           border-bottom:1px solid var(--line)}
+  .ra-head .meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* .asklog, NOT .chatlog: syncChatLogs() fans out to every .chatlog, so a shared
+     class would paint the main conversation into this panel. The stats toggle
+     below is the matching rule for this surface. */
+  .asklog{flex:1;overflow-y:auto;padding:12px 2px;display:flex;flex-direction:column;gap:10px}
+  body.no-tele .asklog .tele{display:none}
+  .reader-ask .chatbar{border-top:1px solid var(--line)}
   .chatlog .historical-card{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:10px}.chatlog .tool-output{display:none}
   /* rendered markdown in chat replies (blocks handle their own spacing, so
      they read as normal HTML, not pre-wrapped source) */

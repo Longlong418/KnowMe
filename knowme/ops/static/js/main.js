@@ -84,11 +84,12 @@ function render(){
   document.getElementById("n-tools").textContent = D.calendar.length + D.outbox.length;
   document.getElementById("n-db").textContent = (D.db && D.db.all_tables.length) || "";
   document.getElementById("n-ops").textContent = D.stats.tool_errors || (D.eval_report ? "" : "!");
-  // Restore reader state if on reader view
-  if (view === "reader") restoreReaderState();
+  // Restore reader state if on reader view. Its ask panel rides on the chat
+  // machine, so the same rebuild needs its composer bound — wireChat() also
+  // wires the reader panel (wireAsk) for exactly this reason.
+  if (view === "reader"){ restoreReaderState(); wireChat(); }
   // The conversation markup is generated, so its input and log have to be
-  // (re)bound and repainted after every rebuild — the same reason the Reader
-  // needs restoreReaderState().
+  // (re)bound and repainted after every rebuild.
   if (view === "agent") wireChat();
 }
 let lastFetch = Date.now();
