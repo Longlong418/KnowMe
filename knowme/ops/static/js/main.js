@@ -60,7 +60,7 @@ function render(){
     // would wipe all three mid-sentence. Navigations still rebuild (subChanged),
     // and the thread itself is repainted from CHAT by wireChat() below — which
     // is the part that actually needs to track the poll.
-  } else if ((view === "memory" || view === "settings" || view === "database" || view === "models" || view === "connections") && editing && !subChanged){
+  } else if ((view === "memory" || view === "settings" || view === "database" || view === "models" || view === "connections" || view === "knowledge") && editing && !subChanged){
     // don't wipe an in-progress edit on the 5s refresh — but DO switch sub-tabs
   } else {
     editing = false;

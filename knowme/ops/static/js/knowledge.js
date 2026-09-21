@@ -35,7 +35,7 @@ async function createKnowledgeNote(){
     const res = await postJSON("/api/knowledge", {
       action: "create", title, folder, content, agent_id: ACTIVE_AGENT
     });
-    if (res.ok) location.hash = "#knowledge";
+    if (res.ok) { editing = false; location.hash = "#knowledge"; }
     else alert(res.error || "创建笔记失败");
   } catch (error) { alert("创建笔记失败：" + (error.message || error)); }
 }
@@ -76,7 +76,7 @@ async function saveKnowledgeNote(){
     const res = await postJSON("/api/knowledge", {
       action: "update", note_id: id, content, title, folder, agent_id: ACTIVE_AGENT
     });
-    if (res.ok) location.hash = "#knowledge";
+    if (res.ok) { editing = false; location.hash = "#knowledge"; }
     else alert(res.error || "保存笔记失败");
   } catch (error) { alert("保存笔记失败：" + (error.message || error)); }
 }
@@ -89,6 +89,7 @@ async function deleteKnowledgeNote(){
       action: "delete", note_id: currentNoteId, agent_id: ACTIVE_AGENT
     });
     if (!res.ok) return alert(res.error || "删除笔记失败");
+    editing = false;
     closeKnowledgeDetail();
     location.hash = "#knowledge";
   } catch (error) { alert("删除笔记失败：" + (error.message || error)); }

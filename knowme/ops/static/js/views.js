@@ -623,21 +623,21 @@ const VIEWS = {
           </div>
           <div id="kb-note-detail" class="kb-detail" style="display:none">
             <div class="kb-detail-head">
-              <div><span class="reader-kicker">NOTE</span><input id="kb-edit-title" class="kb-title-input"></div>
+              <div><span class="reader-kicker">NOTE</span><input id="kb-edit-title" class="kb-title-input" onfocus="markEditing()"></div>
               <div class="kb-detail-actions"><button class="save" onclick="saveKnowledgeNote()">保存</button>
                 <button class="sessbtn" onclick="closeKnowledgeDetail()">关闭</button>
                 <button class="sessbtn kb-delete" onclick="deleteKnowledgeNote()">删除</button></div>
             </div>
-            <input id="kb-edit-folder" class="kb-folder-input" placeholder="文件夹">
-            <textarea id="kb-edit-content" class="kb-editor-text" oninput="renderKnowledgePreview()"></textarea>
+            <input id="kb-edit-folder" class="kb-folder-input" placeholder="文件夹" onfocus="markEditing()">
+            <textarea id="kb-edit-content" class="kb-editor-text" onfocus="markEditing()" oninput="markEditing();renderKnowledgePreview()"></textarea>
             <div class="kb-preview-label">预览</div><div id="kb-preview" class="kb-preview"></div>
             <div class="kb-links-box"><b>链接到这条笔记</b><div id="kb-links"></div></div>
           </div>
           <div id="kb-create-editor" class="kb-create-editor">
             <div class="reader-kicker">NEW NOTE</div><h2>创建新笔记</h2>
-            <input id="kb-title" class="kb-title-input" placeholder="笔记标题">
-            <input id="kb-folder" class="kb-folder-input" placeholder="文件夹（默认 default）">
-            <textarea id="kb-content" class="kb-editor-text" placeholder="写下内容，也可以使用 [[另一条笔记]]"></textarea>
+            <input id="kb-title" class="kb-title-input" placeholder="笔记标题" onfocus="markEditing()">
+            <input id="kb-folder" class="kb-folder-input" placeholder="文件夹（默认 default）" onfocus="markEditing()">
+            <textarea id="kb-content" class="kb-editor-text" placeholder="写下内容，也可以使用 [[另一条笔记]]" onfocus="markEditing()"></textarea>
             <button class="save" onclick="createKnowledgeNote()">创建笔记</button>
           </div>
         </section>
