@@ -579,10 +579,79 @@ const VIEWS = {
     return h + memOverview(d);
   },
   reader(d){
-    let h = `<div class="meta" style="margin-bottom:12px"><b>阅读器</b> — 从左侧文件输入或拖拽文档进入读取状态。选中文本会自动注入到聊天上下文。</div>`;
-    h += `<div style="margin-bottom:16px"><input type="file" id="rc-file-input" accept=".md,.txt,.py,.json,.csv,.html" style="margin-bottom:8px"><button class="save" onclick="readerLoad()">加载选中文件</button></div>`;
-    h += `<div id="rc-content" style="min-height:200px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:16px;"><p style="color:var(--ink2)">从输入框选择文件或拖拽文档进入阅读...</p></div>`;
-    h += `<div id="rc-selection" style="margin-top:16px;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;display:none"><div style="font-size:13px;color:var(--ink2);margin-bottom:8px"><b>选中文本：</b>已捕获</div><div id="rc-text" style="background:var(--accent-soft);padding:8px;border-radius:6px;color:var(--accent);margin-bottom:8px"></div><button class="save" onclick="rcSend()">注入到聊天</button></div>`;
+    let h = `<div class="meta" style="margin-bottom:12px">
+      <b>阅读器</b> — 加载本地文件或粘贴 URL，选中文本自动注入上下文
+    </div>`;
+    h += `<div style="display:flex;gap:8px;margin-bottom:16px">
+      <input type="file" id="rc-file-input" accept=".md,.txt,.py,.json,.csv,.html,.pdf" style="flex:1">
+      <button class="save" onclick="readerLoad()">加载</button>
+    </div>`;
+    h += `<div style="margin-bottom:8px">
+      <div style="display:flex;gap:8px">
+        <input type="text" id="rc-url-input" placeholder="粘贴 URL 或文件路径..." style="flex:1;padding:8px;border:1px solid var(--line);border-radius:6px">
+        <button class="save" onclick="handleUrlInput()" style="flex:0">加载URL</button>
+      </div>
+    </div>`;
+    h += `<div id="rc-content" style="min-height:200px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:16px;">
+      <p style="color:var(--ink2)">从左侧文件输入、拖拽文档或粘贴 URL 进入阅读...</p>
+    </div>`;
+    h += `<div id="rc-selection" style="margin-top:16px;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;display:none">
+      <div style="font-size:13px;color:var(--ink2);margin-bottom:8px"><b>选中文本：</b>已捕获</div>
+      <div id="rc-text" style="background:var(--accent-soft);padding:8px;border-radius:6px;color:var(--accent);margin-bottom:8px;word-break:break-word"></div>
+      <button class="save" onclick="rcSend()">注入到聊天</button>
+    </div>`;
+    return h;
+  },
+  knowledge(d){
+    const notes = d.notes || [];
+    const folders = d.folders || [];
+    let h = `<div class="meta" style="margin-bottom:12px"><b>知识库</b> — 双向链接笔记系统，支持 [[WikiLink]] 语法。</div>`;
+    // Create note form
+    h += `<div class="card" style="margin-bottom:16px">
+      <div class="meta" style="margin-bottom:8px">创建新笔记</div>
+      <input type="text" id="kb-title" placeholder="笔记标题..." style="width:100%;padding:8px;margin-bottom:8px;border:1px solid var(--line);border-radius:4px">
+      <input type="text" id="kb-folder" placeholder="文件夹 (默认: default)" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid var(--line);border-radius:4px">
+      <textarea id="kb-content" placeholder="使用 [[笔记标题]] 创建双向链接..." style="width:100%;height:120px;padding:8px;border:1px solid var(--line);border-radius:4px"></textarea>
+      <button class="save" onclick="createKnowledgeNote()" style="margin-top:8px">创建笔记</button>
+    </div>`;
+    // Folder filter
+    if (folders.length > 1){
+      h += `<div style="margin-bottom:12px">
+        <b>文件夹：</b>
+        <select id="kb-folder-filter" onchange="filterKnowledgeNotes()">
+          <option value="">所有文件夹</option>
+          ${folders.map(f => `<option value="${f}">${f}</option>`).join('')}
+        </select>
+      </div>`;
+    }
+    // Notes list
+    h += `<h3>笔记列表 (${notes.length})</h3>`;
+    if (!notes.length) h += '<div class="card empty">还没有笔记——在上方创建第一条。</div>';
+    else {
+      h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
+      for (const n of notes){
+        const preview = (n.content || '').slice(0, 200);
+        h += `<div class="card" style="cursor:pointer" onclick="viewKnowledgeNote('${n.id}')">
+          <div style="font-weight:bold;margin-bottom:4px">${esc(n.title)}</div>
+          <div class="meta" style="margin-bottom:8px"><small>${esc(n.folder)}</small></div>
+          <div style="font-size:13px;color:var(--ink2)">${esc(preview)}${n.content.length > 200 ? '...' : ''}</div>
+        </div>`;
+      }
+      h += '</div>';
+    }
+    // Note detail panel (hidden by default)
+    h += `<div id="kb-note-detail" style="margin-top:16px;display:none">
+      <div class="card">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input type="text" id="kb-edit-title" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:4px">
+          <button class="save" onclick="saveKnowledgeNote()">保存</button>
+          <button class="save" style="background:var(--danger)" onclick="deleteKnowledgeNote()">删除</button>
+          <button class="save" onclick="closeKnowledgeDetail()">关闭</button>
+        </div>
+        <textarea id="kb-edit-content" style="width:100%;height:300px;padding:8px;border:1px solid var(--line);border-radius:4px;font-family:monospace"></textarea>
+        <div id="kb-preview" style="margin-top:12px;padding:12px;background:var(--bg);border-radius:8px"></div>
+      </div>
+    </div>`;
     return h;
   },
   settings(d){

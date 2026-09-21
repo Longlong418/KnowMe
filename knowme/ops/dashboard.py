@@ -943,6 +943,45 @@ def extras_action(payload: dict) -> dict:
     }
 
 
+def knowledge_action(payload: dict) -> dict:
+    """Store, retrieve, and delete knowledge notes with [[links]] support."""
+    from knowme.tools.knowledge import (
+        create_note, delete_note, get_note, get_linked_notes,
+        list_folders, list_notes, search_notes, update_note
+    )
+
+    action = payload.get("action", "")
+
+    if action == "list":
+        notes = list_notes(payload.get("folder"))
+        folders = list_folders()
+        return {"ok": True, "notes": notes, "folders": folders}
+    elif action == "get":
+        note = get_note(payload.get("note_id", ""))
+        return {"ok": True, "note": note} if note else {"ok": False, "error": "Note not found"}
+    elif action == "create":
+        note = create_note(
+            title=payload.get("title", ""),
+            folder=payload.get("folder", "default"),
+            content=payload.get("content", "")
+        )
+        return {"ok": True, "note": note}
+    elif action == "update":
+        note = update_note(payload.get("note_id", ""), payload.get("content", ""))
+        return {"ok": True, "note": note} if note else {"ok": False, "error": "Note not found"}
+    elif action == "delete":
+        delete_note(payload.get("note_id", ""))
+        return {"ok": True}
+    elif action == "search":
+        notes = search_notes(payload.get("query", ""))
+        return {"ok": True, "notes": notes}
+    elif action == "links":
+        notes = get_linked_notes(payload.get("note_id", ""))
+        return {"ok": True, "notes": notes}
+    else:
+        return {"error": f"unknown knowledge action: {action}"}
+
+
 
 
 def events_since(cursor):
@@ -1073,6 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         routes = {"/api/chat": None, "/api/memory": memory_action, "/api/settings": apply_settings,
                   "/api/query": run_query, "/api/session": session_action, "/api/pin": pin_action,
+                  "/api/knowledge": knowledge_action,
                   "/api/connections": None, "/api/connections/test": None,
                   "/api/providers": None, "/api/extras": extras_action}
         if self.path not in routes:

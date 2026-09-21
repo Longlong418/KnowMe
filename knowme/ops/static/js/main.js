@@ -10,7 +10,7 @@ let activeView = null, activeSub = null;
 // which is a behaviour, not a setting.
 const TITLES = {chat:"聊天与观察", overview:"总览", gateway:"网关", loop:"循环",
                 memory:"记忆", tools:"工具", models:"模型", connections:"连接",
-                ops:"LLM 运维", reader:"阅读器",
+                ops:"LLM 运维", reader:"阅读器", knowledge:"知识库",
                 graph:"图工作流——为循环提供结构",
                 settings:"行为——每轮对话如何运行",
                 database:"数据库——KnowMe 在 state.db 中保存的一切"};
@@ -52,6 +52,8 @@ function render(){
   document.getElementById("n-tools").textContent = D.calendar.length + D.outbox.length;
   document.getElementById("n-db").textContent = (D.db && D.db.all_tables.length) || "";
   document.getElementById("n-ops").textContent = D.stats.tool_errors || (D.eval_report ? "" : "!");
+  // Restore reader state if on reader view
+  if (view === "reader") restoreReaderState();
 }
 let lastFetch = Date.now();
 function tickLive(){
@@ -122,6 +124,26 @@ pollEvents(); setInterval(pollEvents, 450);   // live harness animation
 // Reader App helpers
 let currentDoc = null;
 
+function renderReaderContent(){
+  const contentEl = document.getElementById("rc-content");
+  const selEl = document.getElementById("rc-selection");
+  if (!contentEl || !selEl) return;
+  if (currentDoc){
+    contentEl.innerHTML = "<pre>" + esc(currentDoc.content) + "</pre>";
+    contentEl.dataset.path = currentDoc.name;
+  } else {
+    contentEl.innerHTML = '<p style="color:var(--ink2)">从左侧文件输入、拖拽文档或粘贴 URL 进入阅读...</p>';
+    delete contentEl.dataset.path;
+  }
+  if (window.getSelection().toString().trim()){
+    const text = window.getSelection().toString();
+    document.getElementById("rc-text").textContent = text;
+    selEl.style.display = "block";
+  } else {
+    selEl.style.display = "none";
+  }
+}
+
 function readerLoad(){
   const input = document.getElementById("rc-file-input");
   if (!input.files || !input.files[0]) { alert("请选择一个文件"); return; }
@@ -129,11 +151,25 @@ function readerLoad(){
   const reader = new FileReader();
   reader.onload = e => {
     currentDoc = { name: file.name, content: e.target.result };
-    document.getElementById("rc-content").innerHTML = "<pre>" + esc(e.target.result) + "</pre>";
-    document.getElementById("rc-content").dataset.path = file.name;
+    renderReaderContent();
     publishReaderContext({selection: ""});
   };
   reader.readAsText(file);
+}
+
+function handleUrlInput(){
+  const input = document.getElementById("rc-url-input");
+  if (!input || !input.value.trim()) return;
+  const url = input.value.trim();
+  const isFile = url.match(/\.(md|txt|py|json|csv|html)$/i);
+  if (isFile){
+    currentDoc = { name: url.split("/").pop(), content: "" };
+    publishReaderContext({selection: ""});
+    renderReaderContent();
+  } else {
+    publishReaderContext({selection: ""});
+    renderReaderContent();
+  }
 }
 
 function publishReaderContext(extra = {}){
@@ -160,4 +196,68 @@ function rcSend(){
       alert("注入失败：" + (res.error || "未知错误"));
     }
   }).catch(err => alert("网络错误：" + err));
+}
+
+// Restore reader state on render (called at end of render() in main.js)
+function restoreReaderState(){
+  renderReaderContent();
+}
+
+// Knowledge Base helpers
+let currentNoteId = null;
+let currentNoteContent = "";
+
+async function createKnowledgeNote(){
+  const title = document.getElementById("kb-title")?.value?.trim();
+  const folder = document.getElementById("kb-folder")?.value?.trim() || "default";
+  const content = document.getElementById("kb-content")?.value || "";
+  if (!title) return alert("请输入笔记标题");
+  const res = await postJSON("/api/knowledge", {action: "create", title, folder, content});
+  if (res.ok) location.hash = "#knowledge";
+}
+
+async function viewKnowledgeNote(noteId){
+  currentNoteId = noteId;
+  const res = await postJSON("/api/knowledge", {action: "get", note_id: noteId});
+  if (res.ok){
+    document.getElementById("kb-note-detail").style.display = "block";
+    document.getElementById("kb-edit-title").value = res.note?.title || "";
+    document.getElementById("kb-edit-content").value = res.note?.content || "";
+    renderKnowledgePreview();
+  }
+}
+
+async function saveKnowledgeNote(){
+  const id = currentNoteId;
+  const content = document.getElementById("kb-edit-content")?.value || "";
+  const title = document.getElementById("kb-edit-title")?.value?.trim();
+  if (!id) return;
+  const res = await postJSON("/api/knowledge", {action: "update", note_id: id, content, title});
+  if (res.ok) location.hash = "#knowledge";
+}
+
+async function deleteKnowledgeNote(){
+  if (!currentNoteId) return;
+  if (!confirm("确定删除这条笔记吗？此操作不可撤销。")) return;
+  const res = await postJSON("/api/knowledge", {action: "delete", note_id: currentNoteId});
+  closeKnowledgeDetail();
+  location.hash = "#knowledge";
+}
+
+function closeKnowledgeDetail(){
+  currentNoteId = null;
+  currentNoteContent = "";
+  document.getElementById("kb-note-detail").style.display = "none";
+}
+
+function renderKnowledgePreview(){
+  const content = document.getElementById("kb-edit-content")?.value || "";
+  const html = content
+    .replace(/!\?\[([^\]]*)\]/g, "<mark>$1</mark>")
+    .replace(/\[\[([^\]]+)\]\]/g, '<a href="#knowledge" onclick="showBacklinks(this)" style="color:var(--accent)">[$1]</a>');
+  document.getElementById("kb-preview").innerHTML = "<pre>" + esc(html) + "</pre>";
+}
+
+function filterKnowledgeNotes(){
+  location.hash = "#knowledge"; // Will refresh and filter
 }
