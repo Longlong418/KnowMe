@@ -98,7 +98,13 @@ def load_upload(name: str, data_url: str) -> dict[str, str]:
     return {"name": name, "content": parse_bytes(name, raw, header)}
 
 
-def load_url(url: str) -> dict[str, str]:
+def fetch_url(url: str) -> dict:
+    """Download a URL and hand back the RAW bytes plus what they claim to be.
+
+    Split out of ``load_url`` because the library stores originals: it needs
+    the bytes to keep, not only the text. ``load_url`` is this plus a parse, so
+    the size limit and the scheme check exist in exactly one place.
+    """
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ReaderError("只支持 http(s) URL")
@@ -112,4 +118,11 @@ def load_url(url: str) -> dict[str, str]:
     if len(raw) > MAX_BYTES:
         raise ReaderError("远程文件太大（最多 4 MB）")
     name = PurePosixPath(parsed.path).name or parsed.netloc
-    return {"name": name, "content": parse_bytes(name, raw, content_type), "source": url}
+    return {"name": name, "raw": raw, "content_type": content_type, "source": url}
+
+
+def load_url(url: str) -> dict[str, str]:
+    fetched = fetch_url(url)
+    return {"name": fetched["name"],
+            "content": parse_bytes(fetched["name"], fetched["raw"], fetched["content_type"]),
+            "source": url}

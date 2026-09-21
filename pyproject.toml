@@ -20,6 +20,11 @@ dependencies = [
     "openai>=1.50",      # openai wire format: OpenAI, Gemini, DeepSeek (and embeddings)
     "python-dotenv>=1.0",
     "rich>=13.0",
+    # The Reader's PDF branch. It used to be an undeclared optional import, so
+    # it raised "请先安装 pypdf" in every install that did not happen to have it
+    # — the document library needs the extracted text of a PDF, not just its
+    # bytes, so this is a real dependency now rather than a hopeful one.
+    "pypdf>=5.0",
 ]
 
 [project.scripts]

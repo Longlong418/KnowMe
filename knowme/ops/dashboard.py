@@ -1010,6 +1010,103 @@ def extras_action(payload: dict) -> dict:
     }
 
 
+def library_action(payload: dict) -> dict:
+    """The document library: add, list, open, search, delete.
+
+    ``open`` returns the extracted TEXT (what the reader shows for markdown and
+    text) and the ``file_url`` the browser should fetch for the ORIGINAL when
+    it can render it better than we can — a PDF goes to pdf.js, which needs the
+    real bytes, not our text.
+
+    Documents are workspace-level (see applications/library.py), so there is no
+    agent filter here. ``added_by`` is stamped from the payload for provenance.
+    """
+    import base64
+    import binascii
+
+    from knowme.applications.library import (
+        delete_document,
+        get_document,
+        list_documents,
+        parse_and_save,
+        search_documents,
+        text_window,
+    )
+    from knowme.applications.reader import ReaderError, fetch_url
+    from knowme.db import connect
+
+    settings = load_settings()
+    settings.ensure_home()
+    conn = connect(settings.home)
+    agent_id = payload.get("agent_id") or "default"
+    get_profile(agent_id)
+    action = payload.get("action", "")
+
+    if action == "list":
+        return {"ok": True, "documents": list_documents(conn, limit=200)}
+    if action == "search":
+        return {"ok": True, "results": search_documents(conn, str(payload.get("query", "")))}
+    if action in {"open", "text"}:
+        row = get_document(conn, str(payload.get("doc_id", "")))
+        if row is None:
+            return {"ok": False, "error": "文档不存在"}
+        window = text_window(row["content"], payload.get("offset", 0),
+                             payload.get("limit", 400000))
+        return {"ok": True, "document": {
+            "id": row["id"], "title": row["title"], "kind": row["kind"],
+            "suffix": row["suffix"], "source": row["source"],
+            "chars": row["chars"], "bytes": row["bytes"],
+            "created_at": row["created_at"],
+        }, "text": window["text"], "has_more": window["has_more"],
+            "file_url": f"/api/library/file?id={row['id']}"}
+    if action == "delete":
+        gone = delete_document(conn, settings.home, str(payload.get("doc_id", "")))
+        return {"ok": gone} if gone else {"ok": False, "error": "文档不存在"}
+    if action in {"upload", "url"}:
+        try:
+            if action == "url":
+                fetched = fetch_url(str(payload.get("url", "")).strip())
+                name = fetched["name"]
+                # Keep the source URL so the library shows where it came from;
+                # give the download a suffix when the URL path had none, so the
+                # stored original is served with the right content type.
+                content_type = fetched["content_type"]
+                if not os.path.splitext(name)[1]:
+                    name += {"application/pdf": ".pdf", "text/html": ".html",
+                             "text/markdown": ".md"}.get(
+                                 content_type.split(";")[0].strip(), ".txt")
+                raw, source = fetched["raw"], fetched["source"]
+            else:
+                name = str(payload.get("name", ""))
+                data_url = str(payload.get("data", ""))
+                if not name or not data_url.startswith("data:") or "," not in data_url:
+                    raise ReaderError("上传数据格式无效")
+                header, encoded = data_url.split(",", 1)
+                try:
+                    raw = base64.b64decode(encoded, validate=True)
+                except (ValueError, binascii.Error) as exc:
+                    raise ReaderError("上传数据不是有效的 base64 文件") from exc
+                content_type, source = header, name
+            doc = parse_and_save(conn, settings.home, name=name, raw=raw,
+                                 content_type=content_type, source=source,
+                                 added_by=agent_id)
+        except ReaderError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "document": doc}
+    return {"error": f"unknown action {action}"}
+
+
+def library_file(conn, home, doc_id: str):
+    """The ORIGINAL bytes of a document, for the browser to render itself."""
+    from knowme.applications.library import file_path, get_document
+
+    target = file_path(conn, home, doc_id)
+    if target is None:
+        return None, None, None
+    row = get_document(conn, doc_id)
+    return target.read_bytes(), row["kind"], row["suffix"]
+
+
 def knowledge_action(payload: dict) -> dict:
     """Store, retrieve, and delete knowledge notes with [[links]] support."""
     from knowme.db import connect
@@ -1161,6 +1258,26 @@ class Handler(BaseHTTPRequestHandler):
 
             rel = unquote(parse_qs(urlparse(self.path).query).get("path", [""])[0])
             self._send(json.dumps(reveal_path(rel)).encode(), "application/json")
+        elif self.path.startswith("/api/library/file"):
+            # The ORIGINAL bytes of a library document. pdf.js needs the real
+            # file — our extracted text has no figures and no layout — so the
+            # browser fetches it here rather than re-uploading it.
+            from urllib.parse import parse_qs, urlparse
+
+            from knowme.db import connect
+
+            doc_id = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+            settings = load_settings()
+            settings.ensure_home()
+            body, kind, suffix = library_file(connect(settings.home), settings.home, doc_id)
+            if body is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            ctype = {".pdf": "application/pdf", ".html": "text/html; charset=utf-8",
+                     ".htm": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8"
+                     }.get(suffix, "text/plain; charset=utf-8")
+            self._send(body, ctype, no_cache=True)
         elif self.path.startswith("/static/"):
             self._serve_static(self.path)
         else:
@@ -1222,6 +1339,7 @@ class Handler(BaseHTTPRequestHandler):
         routes = {"/api/chat": None, "/api/memory": memory_action, "/api/settings": apply_settings,
                   "/api/query": run_query, "/api/session": session_action, "/api/pin": pin_action,
                   "/api/knowledge": knowledge_action,
+                  "/api/library": library_action,
                   "/api/workspace": workspace_action,
                   "/api/reader": None,
                   "/api/connections": None, "/api/connections/test": None,
