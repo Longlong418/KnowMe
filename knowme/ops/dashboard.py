@@ -32,6 +32,7 @@ from pathlib import Path
 
 from knowme.agents import get_profile, list_profiles
 from knowme.applications import ApplicationContextBridge
+from knowme.applications.reader import ReaderError, load_upload, load_url
 from knowme.config import load_settings
 from knowme.db import connect
 from knowme.integrations import (
@@ -1219,6 +1220,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/query": run_query, "/api/session": session_action, "/api/pin": pin_action,
                   "/api/knowledge": knowledge_action,
                   "/api/workspace": workspace_action,
+                  "/api/reader": None,
                   "/api/connections": None, "/api/connections/test": None,
                   "/api/providers": None, "/api/extras": extras_action}
         if self.path not in routes:
@@ -1234,6 +1236,13 @@ class Handler(BaseHTTPRequestHandler):
                 }
             elif self.path == "/api/extras":
                 out = extras_action(payload)
+            elif self.path == "/api/reader":
+                if payload.get("action") == "url":
+                    out = {"ok": True, "document": load_url(str(payload.get("url", "")).strip())}
+                elif payload.get("action") == "upload":
+                    out = {"ok": True, "document": load_upload(str(payload.get("name", "")), str(payload.get("data", "")))}
+                else:
+                    raise ReaderError("Reader action 必须是 url 或 upload")
             elif self.path == "/api/connections":
                 result = apply_integration(payload.get("key", ""), payload.get("values") or {},
                                            tuple(payload.get("clear") or ()), force=bool(payload.get("force")))

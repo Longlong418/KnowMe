@@ -118,6 +118,22 @@
   .pill.skip{background:var(--accent-soft);color:var(--accent)}
   .u{font-weight:550}
   .r{color:var(--ink2);white-space:pre-wrap;margin-top:6px}
+
+  /* Focused workspace shell: operational pages remain deep-linkable, but do
+     not compete with the four agents and four applications in the sidebar. */
+  nav a[href="#gateway"],nav a[href="#loop"],nav a[href="#graph"],
+  nav a[href="#tools"],nav a[href="#database"],nav a[href="#models"],
+  nav a[href="#connections"]{display:none}
+  nav > .grp:nth-of-type(4),nav > .grp:nth-of-type(5){display:none}
+  .reader-hero{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin:4px auto 18px;max-width:880px}
+  .reader-kicker{color:var(--accent);font:600 10px/1.4 var(--mono);letter-spacing:.12em}
+  .reader-hero h2{margin:8px 0 4px;text-transform:none;letter-spacing:0;font-size:26px;color:var(--ink)}
+  .reader-hero p{color:var(--ink2);max-width:620px;margin-bottom:20px}
+  .reader-actions{display:flex;gap:10px;flex-wrap:wrap}.reader-drop{display:flex;align-items:center;gap:10px;border:1px dashed var(--line2);border-radius:9px;padding:10px 14px;cursor:pointer}
+  .reader-drop input{display:none}.reader-drop span{font-weight:600}.reader-drop small{color:var(--ink3);font-size:11px}.reader-url{display:flex;gap:8px;flex:1;min-width:260px}.reader-url input{min-width:0;flex:1;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  .reader-paper{max-width:880px;margin:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px}.reader-paper-head{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:10px;font-weight:600}.reader-paper #rc-content{min-height:260px;padding:18px 2px;color:var(--ink2);line-height:1.8}.reader-paper #rc-content p{margin:0 0 14px}
+  .reader-selection{max-width:880px;margin:12px auto 0;padding:12px 16px;background:var(--accent-soft);border:1px solid var(--line);border-radius:10px;display:none}.reader-selection #rc-text{margin:8px 0;color:var(--accent);word-break:break-word}
+  .chatlog .historical-card{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:10px}.chatlog .tool-output{display:none}
   /* rendered markdown in chat replies (blocks handle their own spacing, so
      they read as normal HTML, not pre-wrapped source) */
   .r .mdp,.r .mdh,.r .mdlist,.r .mdtable{white-space:normal}

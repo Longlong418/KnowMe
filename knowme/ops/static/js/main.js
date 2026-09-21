@@ -125,12 +125,25 @@ pollEvents(); setInterval(pollEvents, 450);   // live harness animation
 // Reader App helpers
 let currentDoc = null;
 
+// The Reader is intentionally a focused workspace, not another admin form.
+// Keep this view close to its interaction code so adding a new document format
+// does not require hunting through the larger diagnostics view file.
+VIEWS.reader = function(){
+  return `<section class="reader-hero"><div class="reader-kicker">READING ROOM · ${esc(ACTIVE_AGENT || "general")}</div>
+    <h2>把一份材料带进来</h2><p>上传文本或粘贴公开 URL。解析后的内容会同步给当前 Agent，方便提问、摘录和做笔记。</p>
+    <div class="reader-actions"><label class="reader-drop"><input type="file" id="rc-file-input" accept=".md,.txt,.py,.json,.csv,.html,.htm,.xml,.pdf" onchange="readerLoad()"><span>选择文件</span><small>MD · TXT · HTML · PDF</small></label>
+    <div class="reader-url"><input type="url" id="rc-url-input" placeholder="https://example.com/article"><button class="save" onclick="handleUrlInput()">读取 URL</button></div></div></section>
+    <section class="reader-paper"><div class="reader-paper-head"><span>当前文档</span><span class="meta">选中文本后可发送给 Agent</span></div><div id="rc-content"><p class="empty">还没有文档。先选择文件或读取 URL。</p></div></section>
+    <div id="rc-selection" class="reader-selection"><div><b>选中文本</b> · 已捕获</div><div id="rc-text"></div><button class="save" onclick="rcSend()">发送给 Agent</button></div>`;
+};
+
 function renderReaderContent(){
   const contentEl = document.getElementById("rc-content");
   const selEl = document.getElementById("rc-selection");
   if (!contentEl || !selEl) return;
   if (currentDoc){
-    contentEl.innerHTML = "<pre>" + esc(currentDoc.content) + "</pre>";
+    const paragraphs = currentDoc.content.split(/\n{2,}/).filter(Boolean);
+    contentEl.innerHTML = paragraphs.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
     contentEl.dataset.path = currentDoc.name;
   } else {
     contentEl.innerHTML = '<p style="color:var(--ink2)">从左侧文件输入、拖拽文档或粘贴 URL 进入阅读...</p>';
@@ -150,12 +163,16 @@ function readerLoad(){
   if (!input.files || !input.files[0]) { alert("请选择一个文件"); return; }
   const file = input.files[0];
   const reader = new FileReader();
-  reader.onload = e => {
-    currentDoc = { name: file.name, content: e.target.result };
-    renderReaderContent();
-    publishReaderContext({selection: ""});
+  reader.onload = async e => {
+    try {
+      const response = await postJSON("/api/reader", {action: "upload", name: file.name, data: e.target.result});
+      if (!response.ok) throw new Error(response.error || "文件解析失败");
+      currentDoc = response.document;
+      renderReaderContent();
+      await publishReaderContext({selection: ""});
+    } catch (error) { alert("文件加载失败：" + error.message); }
   };
-  reader.readAsText(file);
+  reader.readAsDataURL(file);
 }
 
 function handleUrlInput(){
@@ -164,13 +181,10 @@ function handleUrlInput(){
   const url = input.value.trim();
   // Browser fetch keeps the MVP dependency-free. Public pages must allow CORS;
   // when they do not, the error tells the user to download the file instead.
-  fetch(url)
+  postJSON("/api/reader", {action: "url", url})
     .then(response => {
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.text();
-    })
-    .then(content => {
-      currentDoc = {name: url.split("/").pop() || url, content};
+      if (!response.ok) throw new Error(response.error || "URL 解析失败");
+      currentDoc = response.document;
       renderReaderContent();
       return publishReaderContext({selection: ""});
     })
