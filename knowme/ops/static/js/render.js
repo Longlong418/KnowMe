@@ -19,15 +19,16 @@ const toolRow = x => `<div class="tool ${x.status||"ok"}">
 </div>`;
 
 // A stored history row -> a CHAT item. Assistant rows with saved telemetry
-// (meta: gate/latency/iterations/tools) render as the FULL turn card, so a
-// reopened thread looks just like when it was live. Rows without meta (from
+// (meta: gate/latency/iterations/tools/steps) render as the FULL turn card, so
+// a reopened thread looks just like when it was live. Rows without meta (from
 // before this was saved, or another gateway) fall back to a plain card.
 function histItem(m){
   if (m.role === "user") return {role:"user", text:m.content};
   if (m.meta) return {role:"knowme", reply:m.content, gate:m.meta.gate,
                       graph:m.meta.graph,
                       context:m.meta.context,
-                      tools:m.meta.tools, iterations:m.meta.iterations,
+                      tools:m.meta.tools, steps:m.meta.steps,
+                      iterations:m.meta.iterations,
                       latency_ms:m.meta.latency_ms, model:m.meta.model};
   return {role:"knowme", reply:m.content, historical:true};
 }
@@ -35,7 +36,7 @@ function histItem(m){
 const turnCard = t => `<div class="card">
   <div class="u">${esc(t.user_message)}</div>
   <div class="meta" style="margin-top:4px">${gateBadge(t.gate)}</div>
-  ${(t.tools||[]).map(toolRow).join("")}
+  ${turnTimeline({steps: stepsFromTurn(t)})}
   <div class="r">${renderMarkdown(t.reply)}</div>
   <div class="meta">${esc((t.ts||"").replace("T"," ").slice(0,19))} · ${secs(t.latency_ms)} · ${t.iterations??"?"} 次迭代 · ${money(t.cost||0)}${t.consolidation?` · 整理出 ${t.consolidation.new_facts} 条事实`:""}</div>
 </div>`;
@@ -67,6 +68,10 @@ const CHAT = [];
 // (gate flips to done once decided, reply "on" once text streams); otherwise
 // every stage is done and the strip carries the .tele class (hidden by the
 // stats toggle). (.stages is flexbox, so inter-span whitespace is irrelevant.)
+//
+// LEGACY PATH: this renders only while a turn is too young to have steps (the
+// first SSE event hasn't landed) and for turns saved before meta.steps existed
+// — their chips can't be backfilled, because the trace files roll daily.
 function stagesRow(t, live){
   const gateCls = live ? (t.gate ? "done" : "on") : "done";
   const replyCls = live ? (t.stream ? "on" : "") : "done";
@@ -89,12 +94,17 @@ const teleFooter = t => `<div class="meta tele">${secs(t.latency_ms)} · ${t.ite
     ? ` · 压缩：${esc(t.context.compaction.join(" → "))}`:""}${
   t.consolidation?` · 整理出 ${t.consolidation.new_facts} 条事实`:""}</div>`;
 
-const chatTurnCard = t => `<div class="card">
-  <button class="msg-copy" onclick="copyMsg(this)" data-text="${esc(t.reply)}" title="复制回复">复制</button>
-  ${(t.context||t.gate||t.graph)?`${stagesRow(t, false)}
+// The pre-timeline trace block: chips + node chips + tool rows. Kept for turns
+// with no steps (see stagesRow's note) so an old thread still reads exactly as
+// it did the day it was saved.
+const legacyTrace = t => `${(t.context||t.gate||t.graph)?`${stagesRow(t, false)}
     <div class="meta tele" style="margin:0 0 6px">${esc((t.gate&&t.gate.reason)||(t.graph&&t.graph.reason)||"")}</div>`:""}
   ${nodesRow(t)}
-  ${(t.tools||[]).length?`<div class="tele">${(t.tools||[]).map(toolRow).join("")}</div>`:""}
+  ${(t.tools||[]).length?`<div class="tele">${(t.tools||[]).map(toolRow).join("")}</div>`:""}`;
+
+const chatTurnCard = t => `<div class="card">
+  <button class="msg-copy" onclick="copyMsg(this)" data-text="${esc(t.reply)}" title="复制回复">复制</button>
+  ${turnTimeline(t) || legacyTrace(t)}
   <div class="r" style="margin-top:8px">${renderMarkdown(t.reply)}</div>
   ${teleFooter(t)}
 </div>`;
@@ -115,10 +125,8 @@ const nodesRow = m => {
 };
 
 const streamingCard = m => `<div class="card">
-  ${stagesRow(m, true)}
+  ${turnTimeline(m) || `${stagesRow(m, true)}${(m.tools||[]).map(toolRow).join("")}`}
   ${nodesRow(m)}
-  ${m.gate&&m.gate.reason?`<div class="meta" style="margin:0 0 6px">${esc(m.gate.reason)}</div>`:""}
-  ${(m.tools||[]).map(toolRow).join("")}
   ${m.stream
      ? `<div class="r" style="margin-top:8px">${renderMarkdown(m.stream)}<span class="caret"></span></div>`
      : `<div class="meta" style="margin:0">思考中&hellip;${m.started?` ${Math.round((Date.now()-m.started)/1000)} 秒`:""}${
@@ -186,29 +194,61 @@ function applyStreamEvent(pending, ev){
   } else if (ev.kind === "node_end"){
     (pending.nodes = pending.nodes || {})[ev.node] =
       {status: ev.error ? "error" : "done", ms: ev.ms};
+    pushStep(pending, "node", ev.node,
+             [ ...(ev.keys||[]).map(k => `wrote ${k}`),
+               ...(ev.error ? [`error ${ev.error}`] : []) ].join(", "),
+             ev.ms, ev.error ? "error" : "ok");
+  } else if (ev.kind === "graph_end"){
+    // the engine already measured the whole run — its ms is the graph's own
+    pushStep(pending, "graph",
+             `${ev.workflow} · ${(ev.path||[]).join(" → ")}`,
+             [`steps=${ev.steps}`, `error=${ev.error}`].join(", "),
+             ev.ms, ev.error ? "error" : "ok");
   }
-  if (ev.kind === "gate") pending.gate = {decision: ev.decision, reason: ev.reason};
-  else if (ev.kind === "context") pending.context = {
-    application_chars: ev.application_chars,
-    history_messages: ev.history_messages,
-    sent_messages: ev.sent_messages,
-    compaction: ev.compaction || []
-  };
-  else if (ev.kind === "route")
+  if (ev.kind === "gate"){
+    pending.gate = {decision: ev.decision, reason: ev.reason};
+    pushStep(pending, "gate", ev.decision, ev.reason, Date.now()-pending.started);
+  } else if (ev.kind === "context"){
+    pending.context = {
+      application_chars: ev.application_chars,
+      history_messages: ev.history_messages,
+      sent_messages: ev.sent_messages,
+      compaction: ev.compaction || []
+    };
+    pushStep(pending, "context",
+      `${ev.history_messages}→${ev.sent_messages} msg`,
+      [`app=${ev.application_chars} chars`,
+       ...(ev.compaction || []).map(c => `compact ${c}`)].join(", "),
+      Date.now()-pending.started);
+  } else if (ev.kind === "route"){
     pending.graph = {route: ev.target === "quick_reply" ? "quick" : "full",
                      reason: (pending.graph || {}).reason};
-  else if (ev.kind === "triage") (pending.graph = pending.graph || {}).reason = ev.reason;
-  else if (ev.kind === "text") pending.stream = (pending.stream || "") + (ev.delta || "");
-  else if (ev.kind === "tool"){
+    pushStep(pending, "route", `${ev.workflow || "graph"} → ${ev.target}`,
+             ev.reason, Date.now()-pending.started);
+  } else if (ev.kind === "triage"){
+    (pending.graph = pending.graph || {}).reason = ev.reason;
+  } else if (ev.kind === "text"){
+    pending.stream = (pending.stream || "") + (ev.delta || "");
+  } else if (ev.kind === "llm"){
+    // The one the chips could never show: which iteration, why it stopped, and
+    // the tokens it burned — the guts of "what did the agent actually do".
+    const u = ev.usage || {};
+    pushStep(pending, "llm", `iter ${ev.iteration} · ${ev.stop_reason}`,
+             `tokens ${u.in}→${u.out}`, Date.now()-pending.started);
+  } else if (ev.kind === "tool"){
+    const ok = !(ev.output||"").toLowerCase().startsWith("error");
     (pending.tools = pending.tools || []).push({
       tool: ev.tool, args: ev.args, output: ev.output,
-      status: (ev.output||"").toLowerCase().startsWith("error") ? "error" : "ok",
+      status: ok ? "ok" : "error",
       summary: (ev.output || "").split(". ")[0].slice(0,120)});
+    pushStep(pending, "tool", ev.tool, ev.output, Date.now()-pending.started, ok ? "ok" : "error");
     pending.stream = "";   // a new assistant turn begins after the tool result
+  } else if (ev.kind === "consolidation"){
+    pushStep(pending, "consolidation", `+${ev.new_facts} facts`, "", Date.now()-pending.started);
   } else if (ev.kind === "done"){
     pending.pending = false; pending.stream = "";
     if (ev.error) pending.reply = "错误：" + ev.error;
-    else Object.assign(pending, ev);   // reply, tools, gate, iterations, latency_ms, consolidation
+    else Object.assign(pending, ev);   // reply, tools, steps, gate, iterations, latency_ms…
   }
 }
 

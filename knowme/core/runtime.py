@@ -12,7 +12,7 @@ connection, a memory, a tool registry and a tracer once, and then runs any
            ├─ session.build_turn_context(message, extra=...)     volatile
            ├─ spec.context_policy.fit(history)                   fit the window
            └─ run_loop(...)                                      THE loop
-      ├─ meta: gate / graph / iterations / latency / tools / model
+      ├─ meta: gate / graph / iterations / latency / tools / steps / model
       ├─ session.add_exchange   memory.maybe_consolidate   memory.export_markdown
       └─ tracer.end_turn
 
@@ -45,6 +45,16 @@ from knowme.core.tools import ToolRegistry
 FrontDoor = Callable[[str, Observer, bool], "LoopResult | None"]
 ContextFor = Callable[[str, str], int]   # (provider, model) → window in tokens
 
+# meta.steps is a bounded transcript of WHAT happened during a turn, in order —
+# the timeline the conversation view draws from. It cannot grow with the turn:
+# a 40-step cap and truncated strings keep a chat_log row small no matter how
+# wild the loop got, and the kinds below are a closed set the frontend knows.
+STEP_KINDS = frozenset({"gate", "context", "route", "graph", "node",
+                        "llm", "tool", "consolidation"})
+MAX_STEPS = 40
+_STEP_LABEL_MAX = 80
+_STEP_DETAIL_MAX = 400
+
 
 @dataclass
 class TurnResult:
@@ -61,6 +71,27 @@ class TurnResult:
 def _status(output: str) -> str:
     low = (output or "").lower()
     return "error" if ("failed" in low or "timed out" in low or low.startswith("error")) else "ok"
+
+
+def record_step(steps: list, t0: float, kind: str, label: str, detail,
+                ms: int | None = None, status: str = "ok") -> None:
+    """Append one timeline step (module-level so the bounds are testable — a
+    real turn can only reach ~2·max_iterations steps, never the cap).
+
+    `detail` may be a list of facts; it joins into one line. Arrival time
+    within the turn becomes the step's ms unless the event measured itself.
+    """
+    if len(steps) >= MAX_STEPS:
+        return
+    if isinstance(detail, (list, tuple)):
+        detail = ", ".join(str(x) for x in detail)
+    steps.append({
+        "kind": kind,
+        "label": str(label)[:_STEP_LABEL_MAX],
+        "ms": ms if ms is not None else int((time.perf_counter() - t0) * 1000),
+        "detail": str(detail)[:_STEP_DETAIL_MAX],
+        "status": status,
+    })
 
 
 class AgentRuntime:
@@ -84,9 +115,16 @@ class AgentRuntime:
         text token by token to the observer. Everything that happens is both
         shown (observer) and recorded (tracer)."""
         resolved = resolve(spec, self.settings)
+        t0 = time.perf_counter()
         # capture the gate + graph decisions as they flow by, so we can persist
-        # them with the turn (the reopened-thread telemetry the dashboard shows)
+        # them with the turn (the reopened-thread telemetry the dashboard shows),
+        # and append a bounded step per event for the turn timeline.
         captured: dict = {}
+        steps: list[dict] = []
+
+        def _step(kind: str, label: str, ev: dict, ms: int | None = None,
+                  status: str = "ok"):
+            record_step(steps, t0, kind, label, ev.get("_detail", ""), ms, status)
 
         def _capture(kind, ev):
             if kind == "context":
@@ -96,20 +134,46 @@ class AgentRuntime:
                     "sent_messages": ev.get("sent_messages", 0),
                     "compaction": ev.get("compaction", []),
                 }
+                _step("context",
+                      f"{ev.get('history_messages', 0)}→{ev.get('sent_messages', 0)} msg",
+                      {"_detail": [f"app={ev.get('application_chars', 0)} chars",
+                                   *(f"compact {c}" for c in ev.get("compaction") or [])]})
             if kind == "gate":
                 captured["gate"] = {"decision": ev.get("decision"), "reason": ev.get("reason")}
+                _step("gate", str(ev.get("decision") or ""),
+                      {"_detail": ev.get("reason") or ""})
             if kind == "route":
                 captured["graph_route"] = {"target": ev.get("target"), "reason": ev.get("reason")}
+                _step("route", f"{ev.get('workflow') or 'graph'} → {ev.get('target')}",
+                      {"_detail": ev.get("reason") or ""})
             if kind == "triage":
                 captured["triage_reason"] = ev.get("reason")
             if kind == "graph_end":
                 captured["graph_path"] = ev.get("path")
+                _step("graph", f"{ev.get('workflow')} · {' → '.join(ev.get('path') or [])}",
+                      {"_detail": [f"steps={ev.get('steps')}", f"error={ev.get('error')}"]},
+                      ms=ev.get("ms"))
+            if kind == "node_end":
+                detail = [f"wrote {k}" for k in ev.get("keys") or []]
+                if ev.get("error"):
+                    detail.append(f"error {ev.get('error')}")
+                _step("node", str(ev.get("node") or ""), {"_detail": detail},
+                      ms=ev.get("ms"), status="error" if ev.get("error") else "ok")
+            if kind == "llm":
+                usage = ev.get("usage") or {}
+                _step("llm", f"iter {ev.get('iteration')} · {ev.get('stop_reason')}",
+                      {"_detail": f"tokens {usage.get('in', '?')}→{usage.get('out', '?')}"})
+            if kind == "tool":
+                _step("tool", str(ev.get("tool") or ""),
+                      {"_detail": ev.get("output") or ""},
+                      status=_status(ev.get("output")))
+            if kind == "consolidation":
+                _step("consolidation", f"+{ev.get('new_facts', 0)} facts", {})
         notify = compose(observer, self.tracer.event, _capture)
         # turn_start/end are already written by Tracer.turn/end_turn.  Send
         # them only to the live observer + capture path here, otherwise each
         # boundary appears twice in JSONL and splits one run into two cards.
         live_notify = compose(observer, _capture)
-        t0 = time.perf_counter()
 
         identity = {
             "agent_id": resolved.name,
@@ -147,6 +211,9 @@ class AgentRuntime:
                 "latency_ms": int((time.perf_counter() - t0) * 1000),
                 "tools": [{"tool": c["tool"], "status": _status(c["output"])}
                           for c in result.tool_calls],
+                # the ordered, bounded timeline the conversation view draws —
+                # same shape the live SSE path builds in the browser.
+                "steps": steps,
                 # which brain answered this turn — so a reopened thread (or a
                 # thread you switched models mid-way) shows it per card. A quick
                 # graph turn was answered by the small model; say so honestly.

@@ -147,6 +147,9 @@ def chat_stream(message: str, emit, agent_id: str = "default") -> None:
         "consolidation": {"new_facts": cons["new_facts"]} if cons else None,
         "iterations": result.iterations,
         "latency_ms": latency_ms,
+        # the ordered timeline (meta.steps) so the live card ends up with exactly
+        # what a reloaded historical card renders — one shape, two paths.
+        "steps": result.meta.get("steps") or [],
         # which brain answered — shown per card; a quick graph turn was the small model
         "model": agent.settings.small_model if quick else agent.settings.model,
     })

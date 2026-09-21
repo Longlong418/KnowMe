@@ -26,6 +26,7 @@ runs the bootstrap and must load last**.
 | `memory.js`  | inline Memory / SOUL / skill editing actions |
 | `models.js`  | `applyModel` (the one `/api/settings` writer), model picker / catalog / pins |
 | `render.js`  | formatters + chat card renderers (`stagesRow`/`teleFooter`) + chatlog + streaming + `sendChat` |
+| `trace.js`   | the turn timeline (`turnTimeline`/`pushStep`/`stepsFromTurn`) — what the agent did, in order |
 | `diagram.js` | `archSVG` (the architecture chart) **and** its live animation (`STAGE`/`hot`/`pollEvents`) |
 | `graph.js`   | graph workflows: data-driven topology chart (`graphSVG` from `d.graph.workflows`), the Overview panel (`graphPanel`), and `animateGraphStage` for `graph_*`/`route` events |
 | `views.js`   | subtab/db helpers, SQL console, Memory/Tools sub-views, the `VIEWS` router object |
