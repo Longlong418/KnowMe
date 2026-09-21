@@ -9,13 +9,10 @@ Phase 2 implementation:
 
 from __future__ import annotations
 
-import json
 import re
+import sqlite3
 from datetime import datetime
-from pathlib import Path
 from typing import TypedDict
-
-from knowme.db import connect
 
 
 class Note(TypedDict):
@@ -26,6 +23,21 @@ class Note(TypedDict):
     content: str
     created_at: str
     updated_at: str
+
+
+def _ensure_table(conn: sqlite3.Connection):
+    """Create notes table if not exists."""
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS notes (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        folder TEXT DEFAULT 'default',
+        content TEXT DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """)
+    conn.commit()
 
 
 def parse_links(content: str) -> list[str]:
@@ -41,10 +53,10 @@ def linkify_content(content: str) -> str:
     return re.sub(r'\[\[([^\]]+)\]\]', replace_link, content)
 
 
-def get_note(note_id: str) -> Note | None:
+def get_note(conn: sqlite3.Connection, note_id: str) -> Note | None:
     """Get a note by ID."""
-    db = connect()
-    cursor = db.execute(
+    _ensure_table(conn)
+    cursor = conn.execute(
         "SELECT id, title, folder, content, created_at, updated_at "
         "FROM notes WHERE id = ?",
         (note_id,)
@@ -62,17 +74,17 @@ def get_note(note_id: str) -> Note | None:
     })
 
 
-def create_note(title: str, folder: str = "default", content: str = "") -> Note:
+def create_note(conn: sqlite3.Connection, title: str, folder: str = "default", content: str = "") -> Note:
     """Create a new note."""
+    _ensure_table(conn)
     now = datetime.utcnow().isoformat()
     note_id = f"{now.replace(':', '-')}-{abs(hash(title)) % 10000}"
 
-    db = connect()
-    db.execute(
+    conn.execute(
         "INSERT INTO notes (id, title, folder, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
         (note_id, title, folder, content, now, now)
     )
-    db.commit()
+    conn.commit()
 
     return Note({
         "id": note_id,
@@ -84,56 +96,55 @@ def create_note(title: str, folder: str = "default", content: str = "") -> Note:
     })
 
 
-def update_note(note_id: str, content: str) -> Note | None:
+def update_note(conn: sqlite3.Connection, note_id: str, content: str) -> Note | None:
     """Update a note's content."""
-    note = get_note(note_id)
+    note = get_note(conn, note_id)
     if not note:
         return None
 
-    db = connect()
-    db.execute(
+    conn.execute(
         "UPDATE notes SET content = ?, updated_at = ? WHERE id = ?",
         (content, datetime.utcnow().isoformat(), note_id)
     )
-    db.commit()
+    conn.commit()
 
     return {**note, "content": content, "updated_at": datetime.utcnow().isoformat()}
 
 
-def delete_note(note_id: str) -> bool:
+def delete_note(conn: sqlite3.Connection, note_id: str) -> bool:
     """Delete a note."""
-    db = connect()
-    db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
-    db.commit()
+    _ensure_table(conn)
+    conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    conn.commit()
     return True
 
 
-def list_notes(folder: str | None = None) -> list[Note]:
+def list_notes(conn: sqlite3.Connection, folder: str | None = None) -> list[Note]:
     """List all notes, optionally filtered by folder."""
-    db = connect()
+    _ensure_table(conn)
     if folder:
-        cursor = db.execute(
+        cursor = conn.execute(
             "SELECT id, title, folder, content, created_at, updated_at FROM notes WHERE folder = ?",
             (folder,)
         )
     else:
-        cursor = db.execute(
+        cursor = conn.execute(
             "SELECT id, title, folder, content, created_at, updated_at FROM notes ORDER BY updated_at DESC"
         )
     return [Note(row) for row in cursor.fetchall()]
 
 
-def list_folders() -> list[str]:
+def list_folders(conn: sqlite3.Connection) -> list[str]:
     """List all folders with notes."""
-    db = connect()
-    cursor = db.execute("SELECT DISTINCT folder FROM notes")
+    _ensure_table(conn)
+    cursor = conn.execute("SELECT DISTINCT folder FROM notes")
     return [row["folder"] for row in cursor.fetchall()]
 
 
-def search_notes(query: str) -> list[Note]:
+def search_notes(conn: sqlite3.Connection, query: str) -> list[Note]:
     """Search notes by title or content."""
-    db = connect()
-    cursor = db.execute(
+    _ensure_table(conn)
+    cursor = conn.execute(
         "SELECT id, title, folder, content, created_at, updated_at FROM notes "
         "WHERE title LIKE ? OR content LIKE ? ORDER BY updated_at DESC",
         (f"%{query}%", f"%{query}%")
@@ -141,16 +152,15 @@ def search_notes(query: str) -> list[Note]:
     return [Note(row) for row in cursor.fetchall()]
 
 
-def get_linked_notes(note_id: str) -> list[Note]:
+def get_linked_notes(conn: sqlite3.Connection, note_id: str) -> list[Note]:
     """Get notes that link TO this note."""
-    note = get_note(note_id)
+    note = get_note(conn, note_id)
     if not note:
         return []
 
-    # Find all notes that have [[note_title]] in their content
-    db = connect()
+    _ensure_table(conn)
     pattern = f"%[[{note['title']}]]%"
-    cursor = db.execute(
+    cursor = conn.execute(
         "SELECT id, title, folder, content, created_at, updated_at FROM notes "
         "WHERE content LIKE ? AND id != ?",
         (pattern, note_id)
@@ -158,9 +168,9 @@ def get_linked_notes(note_id: str) -> list[Note]:
     return [Note(row) for row in cursor.fetchall()]
 
 
-def make_knowledge_tools() -> dict:
+def make_knowledge_tools(conn: sqlite3.Connection) -> dict:
     """Return a dict of knowledge-tool-name -> Tool instance."""
-    from knowme.tools.registry import Tool
+    from knowme.core.tools import Tool
 
     return {
         "get_note": Tool(
@@ -174,7 +184,7 @@ def make_knowledge_tools() -> dict:
                 },
                 "required": ["note_id"],
             },
-            fn=lambda note_id, **_: get_note(note_id) or {"error": "Note not found"},
+            fn=lambda note_id, **_: get_note(conn, note_id) or {"error": "Note not found"},
         ),
         "create_note": Tool(
             name="create_note",
@@ -189,7 +199,7 @@ def make_knowledge_tools() -> dict:
                 },
                 "required": ["title"],
             },
-            fn=lambda title, folder="default", content="", **_: create_note(title, folder, content),
+            fn=lambda title, folder="default", content="", **_: create_note(conn, title, folder, content),
         ),
         "update_note": Tool(
             name="update_note",
@@ -203,7 +213,7 @@ def make_knowledge_tools() -> dict:
                 },
                 "required": ["note_id", "content"],
             },
-            fn=lambda note_id, content, **_: update_note(note_id, content) or {"error": "Note not found"},
+            fn=lambda note_id, content, **_: update_note(conn, note_id, content) or {"error": "Note not found"},
         ),
         "delete_note": Tool(
             name="delete_note",
@@ -216,7 +226,7 @@ def make_knowledge_tools() -> dict:
                 },
                 "required": ["note_id"],
             },
-            fn=lambda note_id, **_: {"deleted": delete_note(note_id)},
+            fn=lambda note_id, **_: {"deleted": delete_note(conn, note_id)},
         ),
         "list_notes": Tool(
             name="list_notes",
@@ -228,7 +238,7 @@ def make_knowledge_tools() -> dict:
                     "folder": {"type": "string", "description": "Filter by folder."},
                 },
             },
-            fn=lambda folder=None, **_: list_notes(folder),
+            fn=lambda folder=None, **_: list_notes(conn, folder),
         ),
         "search_notes": Tool(
             name="search_notes",
@@ -241,14 +251,14 @@ def make_knowledge_tools() -> dict:
                 },
                 "required": ["query"],
             },
-            fn=lambda query, **_: search_notes(query),
+            fn=lambda query, **_: search_notes(conn, query),
         ),
         "list_folders": Tool(
             name="list_folders",
             description="List all folders that contain notes. "
                         "Use when the user wants to see their organization structure.",
             input_schema={"type": "object", "properties": {}},
-            fn=lambda **_: list_folders(),
+            fn=lambda **_: list_folders(conn),
         ),
         "get_linked_notes": Tool(
             name="get_linked_notes",
@@ -261,7 +271,7 @@ def make_knowledge_tools() -> dict:
                 },
                 "required": ["note_id"],
             },
-            fn=lambda note_id, **_: get_linked_notes(note_id),
+            fn=lambda note_id, **_: get_linked_notes(conn, note_id),
         ),
         "parse_links": Tool(
             name="parse_links",
@@ -277,26 +287,3 @@ def make_knowledge_tools() -> dict:
             fn=lambda content, **_: parse_links(content),
         ),
     }
-
-
-# Auto-registration
-_knowledge_tools = make_knowledge_tools()
-__all__ = [
-    "create_note", "delete_note", "get_note", "get_linked_notes",
-    "list_folders", "list_notes", "linkify_content", "make_knowledge_tools",
-    "parse_links", "search_notes", "update_note",
-]
-
-# Register in database schema if not exists
-_connect = connect()
-_connect.execute("""
-CREATE TABLE IF NOT EXISTS notes (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    folder TEXT DEFAULT 'default',
-    content TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-)
-""")
-_connect.commit()

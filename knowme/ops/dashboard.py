@@ -546,6 +546,7 @@ def collect() -> dict:
         "db": db_info,
         "settings": info,
         "providers": [asdict(view) for view in list_providers()],
+        "knowledge_info": knowledge_info(),
         "connections": [asdict(view) for view in list_connections()],
         "tools": tools_info(),
         "usage": usage_summary(home),
@@ -618,6 +619,16 @@ def _tool_source(name: str, mcp_servers: list[str]) -> str:
     if any(name.startswith(f"{s}_") for s in mcp_servers):
         return "mcp"
     return "other"
+
+
+def knowledge_info() -> dict:
+    """Return knowledge base overview: notes count and folders."""
+    from knowme.tools.knowledge import list_notes, list_folders
+    settings = load_settings()
+    conn = connect(settings.home)
+    notes = list_notes(conn)
+    folders = list_folders(conn)
+    return {"notes_count": len(notes), "folders": folders}
 
 
 def tools_info() -> dict:
@@ -945,38 +956,43 @@ def extras_action(payload: dict) -> dict:
 
 def knowledge_action(payload: dict) -> dict:
     """Store, retrieve, and delete knowledge notes with [[links]] support."""
+    from knowme.db import connect
     from knowme.tools.knowledge import (
         create_note, delete_note, get_note, get_linked_notes,
         list_folders, list_notes, search_notes, update_note
     )
 
+    settings = load_settings()
+    conn = connect(settings.home)
+
     action = payload.get("action", "")
 
     if action == "list":
-        notes = list_notes(payload.get("folder"))
-        folders = list_folders()
+        notes = list_notes(conn, payload.get("folder"))
+        folders = list_folders(conn)
         return {"ok": True, "notes": notes, "folders": folders}
     elif action == "get":
-        note = get_note(payload.get("note_id", ""))
+        note = get_note(conn, payload.get("note_id", ""))
         return {"ok": True, "note": note} if note else {"ok": False, "error": "Note not found"}
     elif action == "create":
         note = create_note(
+            conn,
             title=payload.get("title", ""),
             folder=payload.get("folder", "default"),
             content=payload.get("content", "")
         )
         return {"ok": True, "note": note}
     elif action == "update":
-        note = update_note(payload.get("note_id", ""), payload.get("content", ""))
+        note = update_note(conn, payload.get("note_id", ""), payload.get("content", ""))
         return {"ok": True, "note": note} if note else {"ok": False, "error": "Note not found"}
     elif action == "delete":
-        delete_note(payload.get("note_id", ""))
+        delete_note(conn, payload.get("note_id", ""))
         return {"ok": True}
     elif action == "search":
-        notes = search_notes(payload.get("query", ""))
+        notes = search_notes(conn, payload.get("query", ""))
         return {"ok": True, "notes": notes}
     elif action == "links":
-        notes = get_linked_notes(payload.get("note_id", ""))
+        notes = get_linked_notes(conn, payload.get("note_id", ""))
         return {"ok": True, "notes": notes}
     else:
         return {"error": f"unknown knowledge action: {action}"}
