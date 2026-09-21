@@ -39,13 +39,26 @@ def _format_listing(rows: list[dict]) -> str:
         return "文档库是空的。让用户在阅读器里添加一份文件，或粘贴一个 URL。"
     lines = [f"文档库里有 {len(rows)} 份文档："]
     for d in rows:
+        # A zero-char document is flagged in the listing: it is readable by the
+        # user but invisible to search, and finding that out mid-answer is worse
+        # than knowing it up front.
+        note = "  ← 没有文字层（扫描件），不能检索或引用" if not d["chars"] else ""
         lines.append(f"- {d['title']}  [id={d['id']}]  {d['kind']} · {d['chars']} 字"
-                     f" · 加入于 {d['created_at'][:10]}")
+                     f" · 加入于 {d['created_at'][:10]}{note}")
     return "\n".join(lines)
+
+
+NO_TEXT = ("《{title}》 [id={id}] 没有可提取的文字（{chars} 字）——它多半是扫描件，"
+           "里面是文字的图像而不是文字本身。用户可以正常阅读它，但你不能引用或检索它的内容。"
+           "如果需要它的内容，请说明这一点，让用户提供带文字层的版本，或由用户选中文字发给你。")
 
 
 def _format_window(row: sqlite3.Row, window: dict) -> str:
     """One window of a document, with the coordinates to ask for the next one."""
+    if not window["chars"]:
+        # Say WHY it is empty instead of returning an empty string, which the
+        # model would have to guess about (and would probably guess wrong).
+        return NO_TEXT.format(title=row["title"], id=row["id"], chars=0)
     end = window["offset"] + window["limit"]
     head = (f"《{row['title']}》 [id={row['id']}] {row['kind']} · 全文 {window['chars']} 字"
             f" · 本次返回第 {window['offset']}–{end} 字")

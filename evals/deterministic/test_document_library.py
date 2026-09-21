@@ -141,22 +141,41 @@ def test_text_window_never_returns_a_whole_document(tmp_path):
     assert doc["chars"] == 1000
 
 
-def test_pdf_text_is_extracted_so_a_pdf_is_searchable(tmp_path):
-    """A real PDF round-trip: the point of declaring pypdf as a dependency."""
+def test_a_real_pdf_round_trips_through_the_stored_bytes(tmp_path):
+    """The point of declaring pypdf as a dependency: pdf.js renders the file we
+    kept, and pypdf reads the text out of the same bytes."""
     pypdf = pytest.importorskip("pypdf")
     writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=300, height=300)
     page = writer.add_blank_page(width=300, height=300)
-    # blank pages carry no text, so this asserts the PATH, not a lucky parse:
-    # a PDF with no text layer is refused with a readable message rather than
-    # stored as an empty document.
     buffer = io.BytesIO()
     writer.write(buffer)
 
-    from knowme.applications.reader import ReaderError
+    conn = connect(tmp_path)
+    doc = parse_and_save(conn, tmp_path, name="blank.pdf", raw=buffer.getvalue())
+    assert doc["kind"] == "pdf"
+    assert doc["bytes"] == len(buffer.getvalue())
 
-    with pytest.raises(ReaderError, match="没有文本内容"):
-        parse_and_save(conn := connect(tmp_path), tmp_path, name="blank.pdf",
-                       raw=buffer.getvalue())
+    stored = file_path(conn, tmp_path, doc["id"])
+    assert stored is not None and stored.read_bytes() == buffer.getvalue()
+    assert pypdf.PdfReader(io.BytesIO(stored.read_bytes())).get_num_pages() == 2
+
+
+def test_a_scan_with_no_text_layer_is_kept_but_flagged(tmp_path):
+    """A scanned PDF has no characters in it, only an image of them. It is still
+    worth storing — the user can read it — but search and quoting cannot see
+    inside it, and pretending otherwise would fail silently later."""
+    pypdf = pytest.importorskip("pypdf")
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=300, height=300)      # an image-only page
+    buffer = io.BytesIO()
+    writer.write(buffer)
+
+    conn = connect(tmp_path)
+    doc = parse_and_save(conn, tmp_path, name="scan.pdf", raw=buffer.getvalue())
+    assert doc["chars"] == 0                          # stored, not refused
+    assert file_path(conn, tmp_path, doc["id"]) is not None  # the page is readable
+    assert search_documents(conn, "扫描") == []        # and honestly unfindable
 
 
 def test_kind_drives_which_renderer_the_frontend_picks(tmp_path):

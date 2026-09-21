@@ -23,6 +23,32 @@ requirement it adds is server-side: `dashboard.py::_serve_static` must send
 `.mjs` as `text/javascript`, because a browser refuses to evaluate a module
 served as `application/octet-stream`.
 
+## The browser floor (read this before "PDF 打不开")
+
+This build needs JavaScript that only landed in **2025**:
+`Uint8Array.prototype.toHex` / `fromBase64`, which pdf.js uses to compute a
+document's fingerprint. That is the FIRST thing `getDocument` does, so a browser
+without them fails on **every** PDF — and the error it throws is the unhelpful
+`n.toHex is not a function`.
+
+| browser | minimum |
+|---------|---------|
+| Chrome / Edge | 140 (Sep 2025) |
+| Firefox | 133 (Nov 2024) |
+| Safari / iOS | 18.2 (Dec 2024) |
+
+`js/reader.js` checks for those two methods BEFORE loading the renderer and says
+so in plain language, and any other pdf.js failure still falls back to the
+extracted text rather than a blank pane. So the worst case is "you get the text
+instead of the page", never a mystery.
+
+**If a real user is below this floor, the fix is the legacy build**, which exists
+for exactly this: swap `build/pdf.min.mjs` + `build/pdf.worker.min.mjs` for
+`legacy/build/pdf.min.mjs` + `legacy/build/pdf.worker.min.mjs` (about 100 KB
+larger each) and change the two paths in `js/reader.js`. That is a deliberate
+trade — bigger and slightly slower, but a much wider browser floor — so make it
+if someone actually hits the wall, not pre-emptively.
+
 ## What is here
 
 | path | what it is |

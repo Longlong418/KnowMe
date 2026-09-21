@@ -176,7 +176,10 @@ const kindBadge = kind => ({pdf: "PDF", markdown: "MD", html: "HTML", csv: "CSV"
   json: "JSON", code: "COD", text: "TXT"}[kind] || "TXT");
 
 function documentMeta(d){
-  const size = d.chars >= 1000 ? `${Math.round(d.chars / 1000)}k 字` : `${d.chars} 字`;
+  // 0 chars is not "0 字" — it is a scan, and it is worth saying so in the list
+  // rather than letting it look like an empty file until you open it.
+  const size = d.chars ? (d.chars >= 1000 ? `${Math.round(d.chars / 1000)}k 字` : `${d.chars} 字`)
+                       : "无文字层";
   return `${size} · ${(d.created_at || "").slice(0, 10)}`;
 }
 
@@ -288,6 +291,14 @@ function renderReaderText(contentEl){
   contentEl.dataset.pdf = "";
   contentEl.classList.remove("reader-pdfwrap");
   const total = currentDoc.text.length;
+  // A document with no extractable text is not a bug to report as one: a
+  // scanned PDF renders fine, it just has no characters for us to search or
+  // quote. Saying which it is beats showing an empty pane.
+  if (!total){
+    contentEl.innerHTML = `<p class="empty">这份文档没有可提取的文字（可能是扫描件，
+      里面是文字的图像而不是文字）。你可以正常阅读它，但搜索和「发送给 Agent」都看不到它的内容。</p>`;
+    return;
+  }
   const shown = Math.min(total, readerShown);
   const body = renderMarkdown(readerChunk(currentDoc.text, shown));
   // Rendered markdown must live inside .r: every .md* style in style.css is
@@ -331,6 +342,18 @@ function loadPdfLib(){
   }).catch(err => { pdfLibPromise = null; throw err; });   // retry on a later open
   return pdfLibPromise;
 }
+
+// pdf.js 6 computes a document fingerprint with Uint8Array.prototype.toHex, so
+// on a browser without it EVERY pdf fails — not an edge case, the first thing
+// getDocument does. Those APIs are from 2025 (Chrome/Edge 140, Firefox 133,
+// Safari 18.2). Checking here, before 1.7 MB of renderer is fetched, turns an
+// internal "n.toHex is not a function" into a sentence that names the fix.
+function pdfUnsupportedReason(){
+  const missing = ["toHex", "fromBase64"].filter(m => typeof Uint8Array.prototype[m] !== "function");
+  if (!missing.length) return "";
+  return "当前浏览器缺少 PDF 渲染需要的新 JavaScript 特性（Uint8Array." + missing.join("/") +
+         "）。Chrome/Edge 140+、Firefox 133+、Safari 18.2+ 才有；升级浏览器即可。";
+}
 // pdf.js's defaults assume a bundler, so every asset path is given explicitly.
 // Without cmaps a Chinese or Japanese PDF renders as blank pages, which is the
 // failure that looks most like "PDF 不支持".
@@ -341,18 +364,30 @@ const PDF_ASSETS = {
   iccUrl: "/static/vendor/pdfjs/iccs/",
 };
 
+// The PDF branch could not render. Fall back to the extracted text when there
+// is any, and say plainly when there is not (a scan has nothing to fall back to).
+function pdfFallback(contentEl, message){
+  contentEl.classList.remove("reader-pdfwrap");
+  contentEl.innerHTML = currentDoc.text
+    ? `<div class="meta">${message}。下面是从文件中抽取的文字。</div>
+       <pre class="pdf-fallback">${esc(currentDoc.text.slice(0, READER_CHUNK))}</pre>`
+    : `<div class="meta">${message}。</div>
+       <p class="empty">这份 PDF 也没有可提取的文字，所以没有可以退而求其次显示的正文。</p>`;
+}
+
 async function renderReaderPdf(contentEl){
   contentEl.innerHTML = `<div class="meta">正在加载 PDF…</div>`;
   contentEl.classList.add("reader-pdfwrap");
+  const unsupported = pdfUnsupportedReason();
+  if (unsupported){ pdfFallback(contentEl, unsupported); return; }
   let lib;
   try {
     lib = await loadPdfLib();
   } catch (error) {
-    // pdf.js missing or blocked — the extracted text is still here, so the
-    // document stays readable instead of becoming an error page.
-    contentEl.classList.remove("reader-pdfwrap");
-    contentEl.innerHTML = `<div class="meta">PDF 渲染器加载失败（${esc(String(error))}）。
-      下面是从文件中抽取的文字。</div><pre class="pdf-fallback">${esc(currentDoc.text.slice(0, READER_CHUNK))}</pre>`;
+    // pdf.js missing or blocked. The extracted text is still here, so show it
+    // rather than an error page — and when there is no text either (a scan),
+    // say what happened instead of rendering an empty box.
+    pdfFallback(contentEl, `PDF 渲染器加载失败（${esc(String(error))}）`);
     return;
   }
   try {
@@ -361,9 +396,7 @@ async function renderReaderPdf(contentEl){
       pdfSession = {docId: currentDoc.id, doc, lib, rendered: 0};
     }
   } catch (error) {
-    contentEl.classList.remove("reader-pdfwrap");
-    contentEl.innerHTML = `<div class="meta">PDF 打不开：${esc(String(error))}</div>
-      <pre class="pdf-fallback">${esc(currentDoc.text.slice(0, READER_CHUNK))}</pre>`;
+    pdfFallback(contentEl, `PDF 打不开：${esc(String(error))}`);
     return;
   }
   contentEl.innerHTML = "";

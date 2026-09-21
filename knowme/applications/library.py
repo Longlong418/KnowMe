@@ -278,9 +278,15 @@ def parse_and_save(conn: sqlite3.Connection, home: Path, *, name: str, raw: byte
 
     One entry point for every way a document arrives (file upload, URL fetch,
     drag-and-drop), so the stored text can never depend on which door was used.
+
+    A document with NO extractable text is still stored, with ``chars=0``. That
+    is the scanned-PDF case: there are no characters in the file, only an image
+    of them. Refusing it would mean "scanned documents are not supported", when
+    the original renders perfectly well — the honest version is to keep the file,
+    render it, and say plainly that search and quoting cannot see inside it
+    (``tools/documents.py`` reads ``chars`` and says so). Only a genuinely
+    unreadable file raises: that is a parse error, not a missing text layer.
     """
     text = parse_bytes(name, raw, content_type)
-    if not text.strip():
-        raise ReaderError("文档解析后没有文本内容（可能是扫描版 PDF 或空文件）")
     return save_document(conn, home, name=name, raw=raw, text=text,
                          source=source, added_by=added_by)
