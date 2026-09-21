@@ -591,53 +591,57 @@ const VIEWS = {
     const notes = agentNotes.filter(n => !selectedFolder || n.folder === selectedFolder);
     const folders = (kb.all_folders || kb.folders || []).filter((folder, index, all) =>
       all.indexOf(folder) === index && agentNotes.some(n => n.folder === folder));
-    let h = `<div class="meta" style="margin-bottom:12px"><b>知识库</b> — 双向链接笔记系统，支持 [[WikiLink]] 语法。</div>`;
-    // Create note form
-    h += `<div class="card" style="margin-bottom:16px">
-      <div class="meta" style="margin-bottom:8px">创建新笔记</div>
-      <input type="text" id="kb-title" placeholder="笔记标题..." style="width:100%;padding:8px;margin-bottom:8px;border:1px solid var(--line);border-radius:4px">
-      <input type="text" id="kb-folder" placeholder="文件夹 (默认: default)" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid var(--line);border-radius:4px">
-      <textarea id="kb-content" placeholder="使用 [[笔记标题]] 创建双向链接..." style="width:100%;height:120px;padding:8px;border:1px solid var(--line);border-radius:4px"></textarea>
-      <button class="save" onclick="createKnowledgeNote()" style="margin-top:8px">创建笔记</button>
-    </div>`;
-    // Folder filter
-    if (folders.length > 1){
-      h += `<div style="margin-bottom:12px">
-        <b>文件夹：</b>
-        <select id="kb-folder-filter" onchange="filterKnowledgeNotes()">
-          <option value="">所有文件夹</option>
-          ${folders.map(f => `<option value="${esc(f)}" ${f === selectedFolder ? "selected" : ""}>${esc(f)}</option>`).join('')}
-        </select>
+    let h = `<div class="meta kb-intro"><b>知识库</b> — 用文件夹整理笔记，用 <code>[[笔记标题]]</code> 连接想法。</div>
+      <div class="kb-shell">
+        <aside class="kb-sidebar">
+          <div class="kb-sidebar-head"><b>笔记</b><span class="meta">${notes.length} 条</span>
+            <button class="sessbtn" onclick="newKnowledgeNote()">＋ 新建</button></div>
+          <input id="kb-search" class="kb-search" placeholder="搜索标题或内容…" oninput="searchKnowledgeNotes()">
+          <select id="kb-folder-filter" class="kb-folder-filter" onchange="filterKnowledgeNotes()">
+            <option value="">所有文件夹</option>
+            ${folders.map(f => `<option value="${esc(f)}" ${f === selectedFolder ? "selected" : ""}>${esc(f)}</option>`).join("")}
+          </select>
+          <div class="kb-note-list">`;
+    for (const n of notes){
+      const preview = (n.content || "").replace(/\s+/g, " ").trim();
+      const searchText = esc(`${n.title} ${n.folder} ${preview}`.toLowerCase());
+      h += `<button class="kb-note-card" data-search="${searchText}" onclick="viewKnowledgeNote('${esc(n.id)}')">
+        <span class="kb-note-title">${esc(n.title)}</span>
+        <span class="kb-note-folder">${esc(n.folder)}</span>
+        <span class="kb-note-preview">${esc(preview.slice(0, 100))}${preview.length > 100 ? "…" : ""}</span>
+      </button>`;
+    }
+    h += `<div id="kb-search-empty" class="empty" style="display:${notes.length ? "none" : "block"}">
+            ${notes.length ? "没有匹配的笔记" : "还没有笔记，先新建一条"}</div>
+          </div>
+        </aside>
+        <section class="kb-editor">
+          <div id="kb-empty-editor" class="kb-empty-editor">
+            <div class="kb-empty-icon">✎</div><h2>从一条笔记开始</h2>
+            <p>把读到的内容、想法和项目资料放在这里。笔记之间可以用 WikiLink 互相连接。</p>
+            <button class="save" onclick="newKnowledgeNote()">新建笔记</button>
+          </div>
+          <div id="kb-note-detail" class="kb-detail" style="display:none">
+            <div class="kb-detail-head">
+              <div><span class="reader-kicker">NOTE</span><input id="kb-edit-title" class="kb-title-input"></div>
+              <div class="kb-detail-actions"><button class="save" onclick="saveKnowledgeNote()">保存</button>
+                <button class="sessbtn" onclick="closeKnowledgeDetail()">关闭</button>
+                <button class="sessbtn kb-delete" onclick="deleteKnowledgeNote()">删除</button></div>
+            </div>
+            <input id="kb-edit-folder" class="kb-folder-input" placeholder="文件夹">
+            <textarea id="kb-edit-content" class="kb-editor-text" oninput="renderKnowledgePreview()"></textarea>
+            <div class="kb-preview-label">预览</div><div id="kb-preview" class="kb-preview"></div>
+            <div class="kb-links-box"><b>链接到这条笔记</b><div id="kb-links"></div></div>
+          </div>
+          <div id="kb-create-editor" class="kb-create-editor">
+            <div class="reader-kicker">NEW NOTE</div><h2>创建新笔记</h2>
+            <input id="kb-title" class="kb-title-input" placeholder="笔记标题">
+            <input id="kb-folder" class="kb-folder-input" placeholder="文件夹（默认 default）">
+            <textarea id="kb-content" class="kb-editor-text" placeholder="写下内容，也可以使用 [[另一条笔记]]"></textarea>
+            <button class="save" onclick="createKnowledgeNote()">创建笔记</button>
+          </div>
+        </section>
       </div>`;
-    }
-    // Notes list
-    h += `<h3>笔记列表 (${notes.length})</h3>`;
-    if (!notes.length) h += '<div class="card empty">还没有笔记——在上方创建第一条。</div>';
-    else {
-      h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
-      for (const n of notes){
-        const preview = (n.content || '').slice(0, 200);
-        h += `<div class="card" style="cursor:pointer" onclick="viewKnowledgeNote('${n.id}')">
-          <div style="font-weight:bold;margin-bottom:4px">${esc(n.title)}</div>
-          <div class="meta" style="margin-bottom:8px"><small>${esc(n.folder)}</small></div>
-          <div style="font-size:13px;color:var(--ink2)">${esc(preview)}${n.content.length > 200 ? '...' : ''}</div>
-        </div>`;
-      }
-      h += '</div>';
-    }
-    // Note detail panel (hidden by default)
-    h += `<div id="kb-note-detail" style="margin-top:16px;display:none">
-      <div class="card">
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <input type="text" id="kb-edit-title" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:4px">
-          <button class="save" onclick="saveKnowledgeNote()">保存</button>
-          <button class="save" style="background:var(--danger)" onclick="deleteKnowledgeNote()">删除</button>
-          <button class="save" onclick="closeKnowledgeDetail()">关闭</button>
-        </div>
-        <textarea id="kb-edit-content" style="width:100%;height:300px;padding:8px;border:1px solid var(--line);border-radius:4px;font-family:monospace"></textarea>
-        <div id="kb-preview" style="margin-top:12px;padding:12px;background:var(--bg);border-radius:8px"></div>
-      </div>
-    </div>`;
     return h;
   },
   settings(d){

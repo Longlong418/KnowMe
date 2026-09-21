@@ -234,13 +234,48 @@
                transition:color .15s,border-color .15s,background .15s}
   .mdcode-copy:hover{color:var(--accent);border-color:var(--accent)}
 /* Knowledge base (Sapphire) styling */
- #kb-edit-content{resize:vertical}
+ .kb-intro{margin-bottom:12px}
+ .kb-shell{display:grid;grid-template-columns:270px minmax(0,1fr);gap:16px;min-height:calc(100vh - 170px)}
+ .kb-sidebar,.kb-editor{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+ .kb-sidebar{padding:12px;display:flex;flex-direction:column;gap:10px;min-height:520px}
+ .kb-sidebar-head{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding-bottom:10px}
+ .kb-sidebar-head .meta{margin:0}
+ .kb-sidebar-head .sessbtn{margin-left:auto}
+ .kb-search,.kb-folder-filter,.kb-title-input,.kb-folder-input{width:100%;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);padding:8px 10px;outline:none;font:inherit}
+ .kb-search:focus,.kb-folder-filter:focus,.kb-title-input:focus,.kb-folder-input:focus{border-color:var(--accent)}
+ .kb-note-list{display:flex;flex-direction:column;gap:4px;overflow:auto}
+ .kb-note-card{display:grid;grid-template-columns:minmax(0,1fr) auto;text-align:left;gap:2px 8px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--ink);padding:9px;cursor:pointer;font:inherit}
+ .kb-note-card:hover{background:var(--bg);border-color:var(--line)}
+ .kb-note-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .kb-note-folder{color:var(--accent);font:10px var(--mono);text-transform:uppercase;letter-spacing:.04em}
+ .kb-note-preview{grid-column:1/3;color:var(--ink3);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .kb-editor{padding:22px;min-width:0}
+ .kb-empty-editor,.kb-create-editor{max-width:760px;margin:10vh auto 0;text-align:center}
+ .kb-empty-editor p{color:var(--ink2);max-width:480px;margin:8px auto 18px}
+ .kb-empty-icon{font-size:32px;color:var(--accent);margin-bottom:8px}
+ .kb-create-editor{text-align:left;margin-top:4vh}
+ .kb-create-editor h2{margin:4px 0 18px;color:var(--ink);font-size:20px;text-transform:none;letter-spacing:0}
+ .kb-create-editor .kb-title-input,.kb-create-editor .kb-folder-input{margin-bottom:10px}
+ .kb-editor-text{width:100%;min-height:260px;resize:vertical;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);padding:12px;font:13px/1.7 var(--mono);outline:none;margin-bottom:12px}
+ .kb-editor-text:focus{border-color:var(--accent)}
+ .kb-detail-head{display:flex;align-items:flex-end;gap:12px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:10px}
+ .kb-detail-head>div:first-child{flex:1;min-width:0}
+ .kb-detail-head .kb-title-input{border:0;background:transparent;padding:3px 0 0;font-size:22px;font-weight:650}
+ .kb-detail-actions{display:flex;gap:6px;flex-shrink:0}
+ .kb-delete{color:var(--bad);border-color:var(--bad)}
+ .kb-folder-input{max-width:240px;margin-bottom:10px}
+ .kb-preview-label{color:var(--ink3);font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;margin:12px 0 6px}
+ .kb-preview{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:14px;min-height:90px}
+ .kb-preview .mdp{margin:0 0 8px}.kb-preview .mdh{color:var(--ink);font-weight:650;margin:10px 0 5px}
+ .kb-links-box{border-top:1px solid var(--line);margin-top:16px;padding-top:12px;font-size:12px}
+ .kb-backlink{display:inline-block;margin:8px 8px 0 0;padding:3px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);text-decoration:none}
  .kb-link{background:var(--accent-soft);border:1px solid var(--accent);
           border-radius:4px;padding:2px 6px;color:var(--accent);cursor:pointer}
  .kb-link:hover{background:var(--accent);color:var(--panel)}
  /* Knowledge note list tiles */
  .kb-note{border:1px solid var(--line);border-radius:6px;padding:12px;transition:box-shadow .15s}
  .kb-note:hover{box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer}
+ @media(max-width:900px){.kb-shell{grid-template-columns:1fr}.kb-sidebar{min-height:240px}.kb-editor{min-height:560px}}
   .mdcode-copy.copied{color:var(--good);border-color:var(--good);background:var(--good-soft)}
   .mdcode pre{margin:0;padding:12px 14px;overflow-x:auto;font-family:var(--mono);
               font-size:12.5px;line-height:1.65;color:var(--ink2);white-space:pre}
