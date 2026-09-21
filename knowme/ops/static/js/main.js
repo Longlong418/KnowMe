@@ -252,9 +252,7 @@ function closeKnowledgeDetail(){
 
 function renderKnowledgePreview(){
   const content = document.getElementById("kb-edit-content")?.value || "";
-  const html = content
-    .replace(/!\?\[([^\]]*)\]/g, "<mark>$1</mark>")
-    .replace(/\[\[([^\]]+)\]\]/g, '<a href="#knowledge" onclick="showBacklinks(this)" style="color:var(--accent)">[$1]</a>');
+  const html = content.replace(/\[\[([^\]]+)\]\]/g, '<a href="#knowledge" style="color:var(--accent)">[$1]</a>');
   document.getElementById("kb-preview").innerHTML = "<pre>" + esc(html) + "</pre>";
 }
 
