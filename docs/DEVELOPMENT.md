@@ -148,6 +148,15 @@ cd D:\LLM\Agent\knowme-agent
   都不能每 5 秒重建一次，否则用户正在输入或正在选的内容会被清掉。
   加视图时照着 `render()` 里已有的分支写。
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 dashboard**。
+- **已知失败的 3 个测试**（动手前先看一眼，别把它们算到自己头上）：
+  `test_delegate_env.py` ×2、`test_packaging.py::test_the_bundled_skills_are_findable`。
+  干净工作区就失败，与前端无关。当前基线：**586 passed / 3 failed / 62 skipped**。
+- `test_static_assets.py` 里那个"剥工具块"的测试，会**从 `render.js` 里抽出**
+  `stripTools` 用到的正则，再拿去跑后端真实产出的字符串——因为这条逻辑跨了
+  JS 和 Python 两边，没有测试看着的话，格式一变就会静默失效（聊天卡片里
+  直接显示整段工具输出）。所以：**改那条正则会被它抓到，改函数的写法不会**。
+  2026-09-21 已把提取方式从"锚定函数写法"改成"锚定 `tools used` 标记"，
+  以后重构 `stripTools` 不会再误报。
 
 ## 下期计划
 
