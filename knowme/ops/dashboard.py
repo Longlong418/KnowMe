@@ -932,6 +932,12 @@ def memory_action(payload: dict) -> dict:
         return {"error": "bad id"}
     if action == "update_fact":
         return {"ok": facts.update(rid, payload.get("content", ""), payload.get("subject") or None)}
+    if action == "merge_fact":
+        try:
+            target_id = int(payload.get("target_id", 0))
+        except (TypeError, ValueError):
+            return {"error": "bad target id"}
+        return {"ok": facts.merge(rid, target_id)}
     if action == "delete_fact":
         return {"ok": facts.delete(rid)}
     if action == "delete_episode":

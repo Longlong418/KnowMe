@@ -38,6 +38,11 @@
 - ✅ 未知 Agent 在数据接口和 Workspace API 中都会被拒绝
 - ✅ 新增 Dashboard 隔离回归测试
 
+### Phase 6：Memory Manager 合并
+- ✅ Semantic facts 可以在同一 Agent 内合并，目标事实保留、来源事实删除
+- ✅ Agent 工具 `manage_memory(action="merge")` 和 Dashboard UI 共用同一个 Store 方法
+- ✅ 合并操作失败时不会跨 Agent 修改数据
+
 ## 四栏布局设计
 
 ```

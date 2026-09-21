@@ -16,6 +16,16 @@ async function saveFact(id){
   await postJSON("/api/memory", {action:"update_fact", id, content:v, agent_id:ACTIVE_AGENT});
   editing = false; refresh();
 }
+async function mergeFact(sourceId){
+  const targetId = prompt("把这条事实合并到哪个事实 ID？");
+  if (!targetId || !/^\d+$/.test(targetId) || Number(targetId) === Number(sourceId)) return;
+  if (!confirm(`确认把事实 #${sourceId} 合并到 #${targetId} 吗？`)) return;
+  const r = await postJSON("/api/memory", {
+    action:"merge_fact", id:sourceId, target_id:Number(targetId), agent_id:ACTIVE_AGENT
+  });
+  if (!r.ok) alert(r.error || "合并失败");
+  refresh();
+}
 async function delMem(action, id){
   if(!confirm("确定要从记忆中删除吗？")) return;
   await postJSON("/api/memory", {action, id, agent_id:ACTIVE_AGENT});

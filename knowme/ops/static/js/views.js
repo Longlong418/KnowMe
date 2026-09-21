@@ -95,7 +95,7 @@ function memSemantic(d){
       <td><code>${esc(f.subject)}</code></td>
       <td class="fc">${esc(f.content)}</td>
       <td class="meta">${esc({user:"用户",consolidation:"记忆整理"}[f.source] || f.source)}</td>
-      <td style="white-space:nowrap"><a class="reveal" onclick="editFact(${f.id})">编辑</a> · <a class="reveal del" onclick="delMem('delete_fact',${f.id})">删除</a></td>
+      <td style="white-space:nowrap"><a class="reveal" onclick="editFact(${f.id})">编辑</a> · <a class="reveal" onclick="mergeFact(${f.id})">合并</a> · <a class="reveal del" onclick="delMem('delete_fact',${f.id})">删除</a></td>
     </tr>`).join("")}</table></div>`;
   return h;
 }

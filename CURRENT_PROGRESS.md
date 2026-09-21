@@ -43,6 +43,7 @@
 - ✅ Dashboard 数据按 `agent_id` 查询，Memory、聊天、Trace 和数据库样本不再跨 Agent 返回
 - ✅ 切换 Agent 后重新拉取对应 Dashboard 数据
 - ✅ 新增 `evals/deterministic/test_dashboard_agent_scope.py`
+- ✅ Memory Manager 支持同一 Agent 内合并事实；跨 Agent 合并会被拒绝
 
 ### 界面优化
 1. **Agent 视图**：左侧 Agent 列表，支持分支

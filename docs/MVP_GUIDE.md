@@ -15,6 +15,8 @@
 
 Dashboard 的 Memory、聊天、Trace 和数据库预览也按当前 Agent 拉取；切换左侧 Agent 会重新请求对应范围的数据。
 
+Memory Manager 支持编辑、删除和合并事实。合并时保留目标事实、删除来源事实，且只能操作当前 Agent 的记录。
+
 它们不是四套重复代码。四个 Agent 都运行同一个 `AgentRuntime` 和同一个 Agent Loop，区别只是：
 
 ```text

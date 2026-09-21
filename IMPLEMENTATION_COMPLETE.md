@@ -44,9 +44,14 @@
 - ✅ 路径穿越、敏感配置和生成目录被拒绝
 - ✅ 编辑器、Terminal 和变更审阅仍明确留到后续阶段
 
+### ✅ Phase 4：Memory Manager 合并闭环
+- ✅ Semantic FactStore 支持同一 Agent 内原子合并事实
+- ✅ Agent 的 `manage_memory` 工具支持 `merge`
+- ✅ Dashboard Memory 页面增加“合并”操作，并保留跨 Agent 边界
+
 ## 测试结果
 - Knowledge Base / Reader / Agent 隔离定向回归：**14 passed**
-- 全量确定性套件（排除两个已知基线测试）：**568 passed, 62 skipped**
+- 全量确定性套件（排除两个已知基线测试）：**571 passed, 62 skipped**
 - 未纳入的基线测试仍涉及缺少 `knowme/ops/coding_eval.py` 和打包 skill；本轮没有把它们伪装成已解决。
 
 ## 知识点

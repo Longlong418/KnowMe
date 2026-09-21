@@ -129,6 +129,40 @@ class SqliteFactStore:
         self.conn.commit()
         return cur.rowcount > 0
 
+    def merge(self, source_id: int, target_id: int) -> bool:
+        """Append one fact to another, then remove the source atomically."""
+        if source_id == target_id:
+            return False
+        rows = self.conn.execute(
+            "SELECT id, subject, content FROM facts "
+            "WHERE id IN (?, ?) AND agent_id = ?",
+            (source_id, target_id, self.agent_id),
+        ).fetchall()
+        by_id = {row["id"]: row for row in rows}
+        source, target = by_id.get(source_id), by_id.get(target_id)
+        if source is None or target is None:
+            return False
+        addition = source["content"]
+        if source["subject"] != target["subject"]:
+            addition = f"{source['subject']}: {addition}"
+        merged = target["content"]
+        if addition and addition not in merged:
+            merged = f"{merged}\n{addition}" if merged else addition
+        try:
+            self.conn.execute(
+                "UPDATE facts SET content=? WHERE id=? AND agent_id=?",
+                (merged, target_id, self.agent_id),
+            )
+            self.conn.execute(
+                "DELETE FROM facts WHERE id=? AND agent_id=?",
+                (source_id, self.agent_id),
+            )
+            self.conn.commit()
+        except sqlite3.Error:
+            self.conn.rollback()
+            raise
+        return True
+
     def settle(self, timeout: float = 120.0) -> bool:
         """Already settled. The row and its FTS5 index land in one transaction,
         so a fact is searchable the instant add() returns. The hosted backends

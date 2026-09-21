@@ -32,7 +32,8 @@ def make_manage_memory_tool(memory) -> Tool:
     episodes = memory.episodes
 
     def manage_memory(action: str, kind: str = "fact", id: int = 0,
-                      query: str = "", content: str = "", subject: str = "") -> str:
+                      query: str = "", content: str = "", subject: str = "",
+                      source_id: int = 0, target_id: int = 0) -> str:
         action = (action or "").lower()
         if action == "search":
             if kind == "episode":
@@ -61,25 +62,33 @@ def make_manage_memory_tool(memory) -> Tool:
                 rid = int(id) if str(id).isdigit() else str(id)
                 return f"Deleted episode #{id}." if episodes.delete(rid) else f"No episode with id {id}."
             return f"Deleted fact #{id}." if facts.delete(int(id)) else f"No fact with id {id}."
-        return "action must be one of: search, update, delete"
+        if action == "merge":
+            if kind != "fact":
+                return "Only facts can be merged (episodes are historical)."
+            ok = facts.merge(int(source_id), int(target_id))
+            return (f"Merged fact #{source_id} into #{target_id}." if ok
+                    else "Both fact ids must belong to this Agent and be different.")
+        return "action must be one of: search, update, delete, merge"
 
     return Tool(
         name="manage_memory",
         description=(
-            "Search, correct, or delete the user's long-term memory (facts and episodes). "
+            "Search, correct, delete, or merge the user's long-term memory (facts and episodes). "
             "ALWAYS search first to get the id, then update or delete that id. "
             "Use when the user says something you remember is wrong or should be forgotten."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["search", "update", "delete"]},
+                "action": {"type": "string", "enum": ["search", "update", "delete", "merge"]},
                 "kind": {"type": "string", "enum": ["fact", "episode"], "description": "default fact"},
                 "id": {"type": ["integer", "string"],
                        "description": "row id (from a prior search); a number for sqlite, a page id string when the notion backend is active"},
                 "query": {"type": "string", "description": "keywords for search"},
                 "content": {"type": "string", "description": "new text for update"},
                 "subject": {"type": "string", "description": "optional new subject for a fact update"},
+                "source_id": {"type": "integer", "description": "fact to absorb when merging"},
+                "target_id": {"type": "integer", "description": "fact to keep when merging"},
             },
             "required": ["action"],
         },
