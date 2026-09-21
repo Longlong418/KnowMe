@@ -22,15 +22,21 @@ from pathlib import Path
 
 import pytest
 
-MAIN_JS = (Path(__file__).resolve().parents[2]
-           / "knowme" / "ops" / "static" / "js" / "main.js")
+JS = (Path(__file__).resolve().parents[2]
+      / "knowme" / "ops" / "static" / "js")
+MAIN_JS = JS / "main.js"
+# The Reader moved out of main.js into its own file when it grew a document
+# library and a PDF renderer. render() stayed put — the harness slices it out of
+# main.js by shape — but the reader's own functions are read from reader.js.
+READER_JS = JS / "reader.js"
 
 # The harness reads main.js, lifts out the functions under test, and drives them
 # on stubs.  It prints one PASS/FAIL line per claim and exits non-zero if any
 # failed, so a failure here shows the user which claim broke, in English.
 HARNESS = r"""
 const fs = require("fs");
-const src = fs.readFileSync(process.argv[2], "utf8");
+const src = fs.readFileSync(process.argv[2], "utf8");        // main.js: the loop
+const readerSrc = fs.readFileSync(process.argv[3], "utf8");  // reader.js: the app
 let failures = 0;
 const assert = (ok, msg) => {
   if (!ok) failures++;
@@ -84,80 +90,136 @@ const assert = (ok, msg) => {
   assert(els["view"].innerHTML === "<reader>", "navigating back rebuilds the reader");
 })();
 
-// ---- renderReaderContent(): repaint only when the document changed ----------
-(function testContent() {
-  const fn = src.match(/function renderReaderContent\(\)\{[\s\S]*?\n\}/)[0];
-  const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-  let els, paints;
+// ---- the Reader: repaint only when the document or its length changed -------
+// Runs the REAL reader.js against a DOM stub rather than slicing a function out
+// of it. The reader now collaborates with the library list, the chunker and a
+// PDF branch, so driving it end to end proves more than lifting one function
+// would -- and it does not break every time a helper is renamed.
+const pendingTests = [];
+pendingTests.push((function testReaderPane() {
+  let els, paints, fetches = 0;
   function watch(el) {
     let v = el.innerHTML;
     Object.defineProperty(el, "innerHTML", { get: () => v, set(nv) { v = nv; paints++; } });
   }
   function reset() {
     els = {};
-    for (const id of ["rc-content", "rc-selection", "rc-text"])
-      els[id] = { id, innerHTML: "", dataset: {}, style: {}, textContent: "" };
+    for (const id of ["rc-content", "rc-title", "rc-meta", "rc-selection", "rc-text",
+                      "rc-library", "rc-search", "rc-file-input", "rc-url-input"])
+      els[id] = { id, innerHTML: "", dataset: {}, style: {}, textContent: "", value: "",
+                  classList: { add() {}, remove() {}, toggle() {} },
+                  appendChild() {}, insertAdjacentHTML() {} };
+    // the library list is watched too: it must not flicker on the poll either
     paints = 0;
-    watch(els["rc-content"]); watch(els["rc-selection"]);
+    watch(els["rc-content"]); watch(els["rc-library"]);
   }
-  const document = { getElementById: id => els[id] || null };
-  const window = { getSelection: () => ({ toString: () => "" }) };
-  let currentDoc = null;
-  eval(fn);
+  const VIEWS = {};
+  const document = {
+    getElementById: id => els[id] || null,
+    createElement: () => ({ style: {}, append() {}, classList: { add() {} } }),
+  };
+  const window = { getSelection: () => ({ toString: () => "" }), devicePixelRatio: 1 };
+  const esc = s => String(s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  // markdown rendering is util.js's job and is tested by using the app; here it
+  // only has to be a pure function of the text so the stamps can be compared.
+  const renderMarkdown = t => `<md>${String(t)}</md>`;
+  const ACTIVE_AGENT = "default", SESSION = "s1", activeView = "reader";
+  const alert = m => { throw new Error("unexpected alert: " + m); };
+  const confirm = () => true;
+  const D = { current_sessions: {} };
+  let opened = null;
+  const postJSON = async (url, body) => {
+    fetches++;
+    if (body.action === "list") return { ok: true, documents: [
+      { id: "d1", title: "alpha", kind: "markdown", chars: 22, created_at: "2026-09-21" },
+      { id: "d2", title: "beta", kind: "text", chars: 5, created_at: "2026-09-21" }] };
+    if (body.action === "open") {
+      opened = body.doc_id;
+      return { ok: true, document: { id: body.doc_id, title: "alpha", kind: "markdown",
+                                     chars: 22, created_at: "2026-09-21" },
+               text: "para one\n\npara two", has_more: false,
+               file_url: "/api/library/file?id=" + body.doc_id };
+    }
+    return { ok: true };
+  };
+  eval(readerSrc);
 
   reset();
-  currentDoc = { name: "a.md", content: "para one\n\npara two" };
-  let n = paints;
-  renderReaderContent();
-  assert(paints === n + 1 && els["rc-content"].innerHTML.includes("para one"),
-         "loading a document paints it once");
+  return (async () => {
+    await readerOpen("d1");
+    assert(opened === "d1", "opening a document asks the server for it by id");
+    assert(els["rc-content"].innerHTML.includes("para one"),
+           "the document is painted from its extracted text");
+    assert(els["rc-title"].textContent === "alpha", "the pane header names the document");
+    await restoreReaderState();          // settle the one-time library fetch
 
-  // The one that matters: a poll must not touch innerHTML, or a text selection
-  // made with the mouse is dropped mid-drag.
-  n = paints;
-  renderReaderContent();
-  assert(paints === n, "a poll repaints NOTHING (a live selection survives)");
+    // The one that matters: a poll must not touch innerHTML, or a text selection
+    // made with the mouse is dropped mid-drag. This is the ORIGINAL bug, and the
+    // reason the reader has a stamp at all.
+    const painted = paints, fetched = fetches;
+    await restoreReaderState();
+    await restoreReaderState();
+    assert(paints === painted, "a poll repaints NOTHING (a live selection survives)");
+    assert(fetches === fetched, "a poll does not re-fetch the document it already has");
 
-  // A rebuilt view is a fresh element with no stamp -- it MUST repaint, or the
-  // document would silently go blank.
-  reset();
-  n = paints;
-  renderReaderContent();
-  assert(paints === n + 1 && els["rc-content"].innerHTML.includes("para one"),
-         "a rebuilt view (fresh element, no stamp) repaints the document");
+    // A rebuilt view is a FRESH element with no stamp -- it MUST repaint, or the
+    // document would silently go blank (which is how the last reader regressed).
+    // Note the elements are genuinely new: restoring the old ones would keep
+    // their stamps and quietly test nothing.
+    reset();
+    await restoreReaderState();
+    assert(paints > 0 && els["rc-content"].innerHTML.includes("para one"),
+           "a rebuilt view (fresh element, no stamp) repaints the document");
 
-  currentDoc = { name: "b.md", content: "something else" };
-  n = paints;
-  renderReaderContent();
-  assert(paints === n + 1 && els["rc-content"].innerHTML.includes("something else"),
-         "a different document repaints");
+    // A different document, and the same document made longer, both repaint:
+    // that second one is the 继续加载 button, and a stamp keyed on the id alone
+    // would silently swallow it.
+    await readerOpen("d2");
+    assert(els["rc-content"].innerHTML.includes("para one"), "a different document repaints");
+    const before = paints;
+    readerMore();
+    assert(paints > before, "continuing a long document repaints it");
 
-  currentDoc = null;
-  renderReaderContent();
-  assert(els["rc-content"].innerHTML.includes("还没有文档"), "the empty state is shown");
-  assert(els["rc-content"].dataset.stamp === undefined, "the empty state clears the stamp");
-})();
+    // Deleting the open document empties the pane -- and clears the stamp, so
+    // opening the SAME id again later still paints (a stale stamp would leave
+    // the pane blank for a document that had been re-added).
+    await readerDelete("d2");
+    assert(els["rc-content"].innerHTML.includes("选一份文档"), "the empty state is shown");
+    assert(els["rc-content"].dataset.stamp === "", "the empty state clears the stamp");
+  })();
+})());
 
 // ---- readerLoad(): reads the file off the event target ----------------------
 (function testReaderLoad() {
-  assert(/function readerLoad\(input\)/.test(src),
+  assert(/function readerLoad\(input\)/.test(readerSrc),
          "readerLoad takes the element the change event fired on");
-  assert(/input = input \|\| document\.getElementById\("rc-file-input"\)/.test(src),
+  assert(/input = input \|\| document\.getElementById\("rc-file-input"\)/.test(readerSrc),
          "readerLoad still falls back to looking the input up by id");
-  assert(/onchange="readerLoad\(this\)"/.test(src),
+  assert(/onchange="readerLoad\(this\)"/.test(readerSrc),
          "the markup passes `this` into readerLoad");
 })();
 
-// ---- only main.js defines VIEWS.reader -------------------------------------
+// ---- the Reader is defined exactly once, in its own file --------------------
 // A second definition in views.js used to shadow-override nothing (main.js
-// loads last, so IT won) and silently ate edits made in the wrong file.
+// loads last, so IT won) and silently ate edits made in the wrong file. The
+// same trap moved with the code: the reader now lives in reader.js, and a
+// stale copy left behind in main.js would win (it loads later).
 (function testSingleDefinition() {
-  const viewsJs = fs.readFileSync(
-    process.argv[2].replace(/main\.js$/, "views.js"), "utf8");
+  const dir = process.argv[2].replace(/main\.js$/, "");
+  const viewsJs = fs.readFileSync(dir + "views.js", "utf8");
   assert(!/^\s*reader\s*\(d\)\s*\{/m.test(viewsJs),
-         "views.js no longer defines a duplicate VIEWS.reader");
-  assert((src.match(/VIEWS\.reader\s*=/g) || []).length === 1,
-         "VIEWS.reader is assigned exactly once, in main.js");
+         "views.js does not define a duplicate VIEWS.reader");
+  assert((readerSrc.match(/VIEWS\.reader\s*=/g) || []).length === 1,
+         "VIEWS.reader is assigned exactly once, in reader.js");
+  assert(!/VIEWS\.reader\s*=/.test(src),
+         "main.js no longer carries a stale VIEWS.reader");
+  // the pages the reader opens with must exist in the shell, or the pane is
+  // built against ids nothing renders
+  const html = fs.readFileSync(dir + ".." + "/index.html", "utf8");
+  for (const id of ["rc-content", "rc-library", "rc-file-input"])
+    assert(html.includes('id="' + id + '"') || readerSrc.includes('id="' + id + '"'),
+           "the shell or the view markup provides #" + id);
 })();
 
 // ---- the conversation panel (#agent/<id>) -----------------------------------
@@ -255,7 +317,10 @@ const assert = (ok, msg) => {
          "openAgent routes to #agent/<id>");
 })();
 
-process.exit(failures ? 1 : 0);
+Promise.all(pendingTests)
+  .then(() => process.exit(failures ? 1 : 0))
+  .catch(err => { console.log("FAIL  the harness threw: " + (err && err.stack || err));
+                  process.exit(1); });
 """
 
 
@@ -268,12 +333,13 @@ def node():
 
 
 def test_reader_survives_the_five_second_refresh(node, tmp_path):
-    """The whole lock: render(), renderReaderContent() and readerLoad()."""
-    assert MAIN_JS.exists(), f"missing frontend source: {MAIN_JS}"
+    """The whole lock: render(), the reader pane and readerLoad()."""
+    for path in (MAIN_JS, READER_JS):
+        assert path.exists(), f"missing frontend source: {path}"
     harness = tmp_path / "reader_harness.js"
     harness.write_text(HARNESS, encoding="utf-8")
 
-    proc = subprocess.run([node, str(harness), str(MAIN_JS)],
+    proc = subprocess.run([node, str(harness), str(MAIN_JS), str(READER_JS)],
                           capture_output=True, text=True, encoding="utf-8",
                           timeout=60)
 

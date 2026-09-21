@@ -31,10 +31,21 @@ runs the bootstrap and must load last**.
 | `graph.js`   | graph workflows: data-driven topology chart (`graphSVG` from `d.graph.workflows`), the Overview panel (`graphPanel`), and `animateGraphStage` for `graph_*`/`route` events |
 | `views.js`   | subtab/db helpers, SQL console, Memory/Tools sub-views, the `VIEWS` router object |
 | `chat.js`    | `VIEWS.agent` + chat sessions/history (`loadThreadInto`), model chip, stats toggle |
+| `reader.js`  | `VIEWS.reader`: the document library list, the reading pane (markdown + pdf.js), selection → agent. Also the Coding Workspace helpers |
+| `knowledge.js` | the Knowledge Base actions (notes CRUD, preview, `[[links]]`) |
 | `main.js`    | `render`/`refresh` loop, resizers, and the bootstrap (**loads last**) |
 
+`vendor/pdfjs/` is the one thing here that is not ours — a pinned pdf.js build,
+checked in because there is no package manager. Its README records the version,
+why that version, and how to upgrade it. It is loaded by a dynamic `import()`
+from `reader.js` (native ES modules — still no bundler), so the `.mjs` MIME type
+in `dashboard.py::_serve_static` is load-bearing.
+
 `chat.js` was `dock.js` until the chat stopped being a dock — `git log --follow`
-across the rename.
+across the rename. `main.js` is the LOOP, not a home for app code: an app's
+helpers live in its own file, which is why the Reader and the Knowledge Base
+moved out of it. If a `VIEWS.*` definition ends up in two files, the one that
+loads LATER wins silently — that is what `test_reader_frontend.py` guards.
 
 Data flows one way: `refresh()` (main.js) fetches `/api/data` into the global
 `D`, then `render()` writes `VIEWS[hash](D)` into `#view`. Every mutation

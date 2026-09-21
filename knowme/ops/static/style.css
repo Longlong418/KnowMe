@@ -126,14 +126,70 @@
   nav a[href="#tools"],nav a[href="#database"],nav a[href="#models"],
   nav a[href="#connections"]{display:none}
   nav > .grp:nth-of-type(4),nav > .grp:nth-of-type(5){display:none}
-  .reader-hero{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin:4px auto 18px;max-width:880px}
+  /* --- Reader: a document library beside a reading pane, both full height ---
+     The pane was a centred 880px column before. Inside a full-width workspace a
+     library list on the left earns that width back: you pick a document, then
+     read it, without a round trip through a menu. */
+  .reader-shell{display:grid;grid-template-columns:264px minmax(0,1fr);gap:18px;
+                align-items:start;min-height:calc(100vh - 150px)}
   .reader-kicker{color:var(--accent);font:600 10px/1.4 var(--mono);letter-spacing:.12em}
-  .reader-hero h2{margin:8px 0 4px;text-transform:none;letter-spacing:0;font-size:26px;color:var(--ink)}
-  .reader-hero p{color:var(--ink2);max-width:620px;margin-bottom:20px}
-  .reader-actions{display:flex;gap:10px;flex-wrap:wrap}.reader-drop{display:flex;align-items:center;gap:10px;border:1px dashed var(--line2);border-radius:9px;padding:10px 14px;cursor:pointer}
-  .reader-drop input{display:none}.reader-drop span{font-weight:600}.reader-drop small{color:var(--ink3);font-size:11px}.reader-url{display:flex;gap:8px;flex:1;min-width:260px}.reader-url input{min-width:0;flex:1;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
-  .reader-paper{max-width:880px;margin:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px}.reader-paper-head{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:10px;font-weight:600}.reader-paper #rc-content{min-height:260px;padding:18px 2px;color:var(--ink2);line-height:1.8}.reader-paper #rc-content p{margin:0 0 14px}
-  .reader-selection{max-width:880px;margin:12px auto 0;padding:12px 16px;background:var(--accent-soft);border:1px solid var(--line);border-radius:10px;display:none}.reader-selection #rc-text{margin:8px 0;color:var(--accent);word-break:break-word}
+  .reader-library{position:sticky;top:96px;display:flex;flex-direction:column;gap:8px;
+                  max-height:calc(100vh - 140px);overflow-y:auto;padding-right:2px}
+  .rl-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .reader-drop{display:flex;align-items:center;gap:8px;border:1px dashed var(--line2);
+               border-radius:8px;padding:5px 10px;cursor:pointer;font-size:12.5px;font-weight:600}
+  .reader-drop:hover{border-color:var(--accent);color:var(--accent)}
+  .reader-drop input{display:none}
+  .reader-url{display:flex;gap:6px}
+  .reader-url input,.reader-search{min-width:0;flex:1;padding:7px 10px;font-size:12.5px;
+      border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);outline:none}
+  .reader-url input:focus,.reader-search:focus{border-color:var(--accent)}
+  /* min-height keeps the empty state from collapsing into a sliver of blank. */
+  .reader-docs{display:flex;flex-direction:column;gap:2px;min-height:80px}
+  .rdoc{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 8px;
+        align-items:baseline;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .rdoc:hover{background:var(--panel);border-color:var(--line)}
+  .rdoc.on{background:var(--accent-soft);border-color:var(--accent)}
+  .rdoc-kind{font:600 9.5px/1.5 var(--mono);letter-spacing:.06em;color:var(--accent);
+             border:1px solid var(--line2);border-radius:4px;padding:0 4px}
+  .rdoc-title{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rdoc-meta{grid-column:2/4;color:var(--ink3);font-size:11px}
+  .rdoc-snippet{grid-column:2/4;color:var(--ink2);font-size:11.5px;line-height:1.45;
+                display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .rdoc-del{position:absolute;top:6px;right:6px;background:none;border:none;color:var(--ink3);
+            cursor:pointer;font-size:14px;line-height:1;opacity:0;padding:0 3px}
+  .rdoc:hover .rdoc-del,.rdoc.on .rdoc-del{opacity:1}
+  .rdoc-del:hover{color:var(--bad)}
+  .reader-pane{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+               padding:16px 22px;min-height:calc(100vh - 150px)}
+  .reader-paper-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+                     border-bottom:1px solid var(--line);padding-bottom:10px;font-weight:600}
+  .reader-pane #rc-content{min-height:260px;padding:16px 2px;color:var(--ink2);line-height:1.8}
+  .reader-pane #rc-content p{margin:0 0 14px}
+  .reader-more{margin-top:18px;padding-top:12px;border-top:1px dashed var(--line2)}
+  /* a document that could not be rendered still has its text, so it stays
+     readable rather than turning into an error page */
+  .pdf-fallback{max-height:60vh;overflow:auto;white-space:pre-wrap;word-break:break-word;
+                font-size:12.5px;line-height:1.6;margin-top:10px}
+  /* PDF pages: a canvas with pdf.js's text layer on top, so the text in the PDF
+     is selectable and can be sent to the agent like any other text. */
+  .reader-pdfwrap{display:flex;flex-direction:column;align-items:center;gap:14px;
+                  background:var(--bg);border-radius:8px;padding:14px}
+  .pdf-page{position:relative;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.18);max-width:100%}
+  .pdf-page canvas{display:block;max-width:100%}
+  /* Transcribed from pdf.js's own web/pdf_viewer.css (Apache-2.0, like the
+     library). pdf.js positions each span absolutely to match the glyphs it drew
+     on the canvas; the text is transparent and only the SELECTION shows. */
+  .textLayer{position:absolute;inset:0;overflow:clip;line-height:1;text-align:initial;
+             text-size-adjust:none;forced-color-adjust:none;transform-origin:0 0;caret-color:CanvasText}
+  .textLayer span,.textLayer br{color:transparent;position:absolute;white-space:pre;
+             cursor:text;transform-origin:0% 0%}
+  .textLayer ::selection{background:rgba(79,90,220,.32)}
+  .reader-selection{position:sticky;bottom:0;margin-top:12px;padding:10px 14px;background:var(--accent-soft);
+      border:1px solid var(--accent);border-radius:10px;display:none;z-index:4}
+  .reader-selection #rc-text{margin:6px 0;color:var(--accent);word-break:break-word;
+      max-height:82px;overflow:auto;font-size:12.5px}
+  .rs-actions{display:flex;gap:8px;align-items:center}
   .chatlog .historical-card{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:10px}.chatlog .tool-output{display:none}
   /* rendered markdown in chat replies (blocks handle their own spacing, so
      they read as normal HTML, not pre-wrapped source) */

@@ -1290,8 +1290,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
-        ctype = {".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml",
-                 ".html": "text/html; charset=utf-8"}.get(target.suffix, "application/octet-stream")
+        # The MIME type has to be right, not just present: a browser refuses to
+        # EXECUTE a module served as application/octet-stream, so `.mjs` (the
+        # vendored pdf.js build) fails with a console error and no pdf at all.
+        # `.wasm` and the fonts are the same class of requirement.
+        ctype = {".css": "text/css", ".js": "text/javascript",
+                 ".mjs": "text/javascript",           # pdf.js ships ESM
+                 ".svg": "image/svg+xml",
+                 ".html": "text/html; charset=utf-8",
+                 ".wasm": "application/wasm",         # JBIG2/JPEG2000 decoders
+                 ".ttf": "font/ttf", ".pfb": "application/octet-stream",
+                 ".json": "application/json",
+                 }.get(target.suffix, "application/octet-stream")
         self._send(target.read_bytes(), ctype, no_cache=True)
 
     def do_POST(self):
