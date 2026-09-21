@@ -137,7 +137,13 @@ const streamingCard = m => `<div class="card">
 // one entry per line and NO closing bracket at all. Matching only the first
 // shape silently stopped stripping anything the day the format changed, and the
 // dashboard started showing whole tool outputs inside the chat bubble.
-const stripTools = t => (t || "").replace(/\s*\[tools used[\s\S]*$/, "").trim();
+const stripTools = t => {
+  const text = t || "";
+  // Older turns stored `[tools used: ...]`; newer turns put a marker on its
+  // own line and then streamed one bullet per tool.  Both are telemetry, not
+  // the assistant's answer, so keep them out of the readable reply card.
+  return text.replace(/\s*\[tools used(?:\s*:[^\]]*)?\][\s\S]*$/i, "").trim();
+};
 const historicalCard = m => `<div class="card">
   <button class="msg-copy" onclick="copyMsg(this)" data-text="${esc(stripTools(m.reply))}" title="复制回复">复制</button>
   <div class="r">${renderMarkdown(stripTools(m.reply))}</div>
