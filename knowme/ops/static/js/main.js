@@ -14,6 +14,7 @@ const TITLES = {chat:"聊天与观察", overview:"总览", gateway:"网关", loo
                 graph:"图工作流——为循环提供结构",
                 settings:"行为——每轮对话如何运行",
                 database:"数据库——KnowMe 在 state.db 中保存的一切"};
+TITLES.coding = "Coding Workspace";
 function render(){
   if (!D) return;
   const [v, subRaw] = (location.hash||"#overview").slice(1).split("/");
@@ -205,6 +206,34 @@ function rcSend(){
 // Restore reader state on render (called at end of render() in main.js)
 function restoreReaderState(){
   renderReaderContent();
+}
+
+// Coding Workspace keeps the selected file in the browser while the dashboard
+// polls. Opening a file is read-only, then publishes the same Context Bridge
+// snapshot used by Reader so the active Agent can discuss the code immediately.
+let currentCodingFile = "";
+let currentCodingContent = "";
+function openCodingFileEncoded(encoded){
+  openCodingFile(decodeURIComponent(encoded));
+}
+async function openCodingFile(path){
+  const res = await postJSON("/api/workspace", {
+    action: "read", path, agent_id: ACTIVE_AGENT
+  });
+  if (!res.ok) return alert("文件无法打开：" + (res.error || "未知错误"));
+  currentCodingFile = res.file.path;
+  currentCodingContent = res.file.content;
+  await postJSON("/api/extras", {
+    application: "coding", resource: currentCodingFile,
+    content: currentCodingContent, selection: "", agent_id: ACTIVE_AGENT,
+    session_id: SESSION || D?.current_sessions?.[ACTIVE_AGENT] || "default"
+  });
+  if (activeView === "coding") render();
+}
+function closeCodingFile(){
+  currentCodingFile = "";
+  currentCodingContent = "";
+  if (activeView === "coding") render();
 }
 
 // Knowledge Base helpers

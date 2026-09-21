@@ -25,6 +25,13 @@
 - ✅ 标题更新、UUID、空标题校验、删除结果和 wiki-link 转义
 - ✅ `evals/deterministic/test_knowledge_base.py` 覆盖核心行为
 
+### Phase 4：Coding Workspace 只读 MVP
+- ✅ 通过 `KNOWME_PROJECT_ROOT`（默认启动目录）选择项目根目录
+- ✅ `/api/workspace` 提供受限文件树和文本读取
+- ✅ 路径穿越、`.env`、`.git`、虚拟环境、缓存和二进制文件默认拒绝
+- ✅ 打开文件后通过 `application: coding` 写入 Context Bridge
+- ✅ 暂不开放任意写入和 Terminal；变更仍通过显式 `delegate_task(cwd=...)` 完成
+
 ## 四栏布局设计
 
 ```

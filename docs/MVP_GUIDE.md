@@ -87,7 +87,7 @@ cd D:\LLM\Agent\knowme-agent
 
 ## 明确留到后续的内容
 
-- 真正的 Coding Workspace（文件树、编辑器、终端和变更审阅）；
+- Coding Workspace 的编辑器、终端和变更审阅（当前 MVP 已支持安全只读文件树和文件上下文注入，详见 `docs/CODING_WORKSPACE_MVP.md`）；
 - 独立的知识库导入、搜索、关联和批量整理界面；
 - Agent 通过 Application 专用工具实时修改浏览器里的高亮和笔记；
 - PDF / EPUB 的完整解析与阅读进度；

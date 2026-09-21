@@ -37,9 +37,16 @@
 - ✅ 笔记编辑与管理：创建、编辑、删除、搜索
 - ✅ `/api/knowledge` 端点：完整 RESTful API
 
+### ✅ Phase 3：Coding Workspace 只读 MVP
+- ✅ 项目根目录可由 `KNOWME_PROJECT_ROOT` 配置
+- ✅ 文件树只展示受限范围内的常见文本文件
+- ✅ 点击文件可预览，并通过 `application: coding` 注入当前 Agent
+- ✅ 路径穿越、敏感配置和生成目录被拒绝
+- ✅ 编辑器、Terminal 和变更审阅仍明确留到后续阶段
+
 ## 测试结果
 - Knowledge Base / Reader / Agent 隔离定向回归：**14 passed**
-- 全量确定性套件（排除两个已知基线测试）：**561 passed, 62 skipped**
+- 全量确定性套件（排除两个已知基线测试）：**566 passed, 62 skipped**
 - 未纳入的基线测试仍涉及缺少 `knowme/ops/coding_eval.py` 和打包 skill；本轮没有把它们伪装成已解决。
 
 ## 知识点
@@ -50,5 +57,5 @@
 
 ## 下一步可选
 - PDF/EPUB 解析（需要第三方库）
-- 文件树视图
+- Coding Workspace 的编辑器、Terminal 和变更审阅
 - 更详细的任务调度可视化

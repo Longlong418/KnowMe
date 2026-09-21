@@ -544,6 +544,7 @@ def collect() -> dict:
                       "full": sum(1 for t in graph_routes if t == "full_agent")},
         },
         "db": db_info,
+        "workspace": workspace_info(),
         "settings": info,
         "providers": [asdict(view) for view in list_providers()],
         "knowledge_info": knowledge_info(),
@@ -647,6 +648,22 @@ def knowledge_info() -> dict:
         "notes": all_notes,
         "all_folders": sorted(all_folders),
     }
+
+
+def workspace_info(relative: str | None = None) -> dict:
+    """Return the safe, read-only Coding Workspace file tree."""
+    from knowme.applications.coding_workspace import workspace_info as build_info
+
+    return build_info(relative)
+
+
+def workspace_action(payload: dict) -> dict:
+    """Handle a read-only Coding Workspace request."""
+    from knowme.applications.coding_workspace import workspace_action as run_action
+
+    agent_id = payload.get("agent_id") or "default"
+    get_profile(agent_id)
+    return run_action(payload)
 
 
 def tools_info() -> dict:
@@ -1106,6 +1123,12 @@ class Handler(BaseHTTPRequestHandler):
             raw = parse_qs(urlparse(self.path).query).get("cursor", [None])[0]
             cursor = int(raw) if raw and raw.lstrip("-").isdigit() else None
             self._send(json.dumps(events_since(cursor)).encode(), "application/json")
+        elif self.path.startswith("/api/workspace"):
+            from urllib.parse import parse_qs, urlparse
+
+            relative = parse_qs(urlparse(self.path).query).get("path", [""])[0]
+            self._send(json.dumps(workspace_info(relative or None), default=str).encode(),
+                       "application/json")
         elif self.path.startswith("/api/reveal"):
             from urllib.parse import parse_qs, unquote, urlparse
 
@@ -1172,6 +1195,7 @@ class Handler(BaseHTTPRequestHandler):
         routes = {"/api/chat": None, "/api/memory": memory_action, "/api/settings": apply_settings,
                   "/api/query": run_query, "/api/session": session_action, "/api/pin": pin_action,
                   "/api/knowledge": knowledge_action,
+                  "/api/workspace": workspace_action,
                   "/api/connections": None, "/api/connections/test": None,
                   "/api/providers": None, "/api/extras": extras_action}
         if self.path not in routes:

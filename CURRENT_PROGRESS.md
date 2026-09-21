@@ -30,7 +30,13 @@
 - ✅ 标题更新、UUID、空标题校验、删除结果和 wiki-link 转义
 - ✅ 新增 `evals/deterministic/test_knowledge_base.py`
 
-## Phase 3: 多Agent增强 ⏳ 后续迭代
+## Phase 3: Coding Workspace 只读 MVP ✅ 完成
+- ✅ `KNOWME_PROJECT_ROOT` 选择项目根目录，默认使用启动目录
+- ✅ 只读文件树、文本预览和路径穿越保护
+- ✅ 打开代码文件后发布 `application: coding` Context Bridge
+- ✅ 暂不开放任意写入和 Terminal，保留给后续审批闭环
+
+## Phase 4: 多Agent增强 ⏳ 后续迭代
 基于用户分享的 Octopus 界面，计划：
 
 ### 界面优化
