@@ -77,16 +77,76 @@
 **回归测试**：`evals/deterministic/test_reader_frontend.py`，用 Node 跑真实前端源码
 （配一个最小 DOM 桩）锁住上面三条不变量。需要 node；没装就自动 skip，不影响 `make gate`。
 
-## 四栏布局设计
+### Phase 8：三栏改两栏——对话变成一个页面（2026-09-21）
+
+**改了什么**：左侧一条侧边栏 + 右侧一块全宽面板。原来固定在右边的聊天栏
+（`aside#dock`，380px）整个删掉；点侧边栏里的 Agent，右侧**全宽**显示这个
+Agent 的对话，浏览器地址变成 `#agent/coding` 这种形式，**后退键能用**，
+刷新后对话还在。Application（阅读器、知识库）也跟着变全宽——读长文档
+正是最需要宽度的时候。
+
+**为什么这么改**：
+1. 聊天栏永远占一竖条，不管你在不在聊天。读文档、看代码时白白少 380px。
+2. 点 Agent 只是换个全局变量，不是导航——没法全屏看某个 Agent 的对话，
+   后退键也没反应。
+3. `#agent/<id>` 是路由以后，「网关」收件箱点一条对话、历史菜单点一条对话，
+   都走同一条路：跳到那个 Agent 的对话页。
+
+**几个关键设计**（改前端时别踩）：
+
+- **路由是单向的，所以不会递归**。`openAgent(id)`（侧边栏按钮调它）只做一件事：
+  改 `location.hash`。`selectAgent(id)` 是纯状态切换，**不碰哈希**。`render()`
+  是唯一把两者对上的地方：发现哈希和 `ACTIVE_AGENT` 不一致才调 `selectAgent`。
+  改完两边一致了，这条链就停——不需要防递归标志。
+- **`render()` 多了一条 `view === "agent" && !subChanged` 分支**。和 Phase 7 的
+  阅读器是同一类坑：对话面板里有正在输入的草稿（`#dmsg`）、滚动位置、展开的
+  `<details>`，每 5 秒重建一次会全清掉。轮询时跳过重建，真正切换页面时照常重建。
+- **`.chatlog` 这个 class 不能改名**。`style.css` 里 `body.no-tele .chatlog .tele`
+  就是「统计」开关的全部机制——靠它把每轮的门控/耗时/迭代藏起来或显示出来。
+- 对话面板的 HTML 不在 `index.html` 里，是 `chat.js` 的 `VIEWS.agent` 生成的；
+  生成后由 `wireChat()` 绑定输入框、重绘消息列表（`render()` 每次都会调）。
+- `dock.js` 改名成了 `chat.js`（`git mv`，历史还在，`git log --follow` 能看到）。
+
+### Phase 9：每轮对话的「步骤时间线」（2026-09-21）
+
+**改了什么**：原来每个助手回合头上是一排小芯片（`门控 · 工具 · 回复`），
+看不出先后、耗时和参数。现在换成一棵**可展开的时间线**：每一步一个圆点，
+标签在左、耗时在右，点开「详情」看原文（工具输出、节点写了什么、token 数）。
+时间线跟着 `统计` 开关一起显隐。
+
+**步骤从哪来**（三处产同一种形状，一个渲染器通吃）：
+- **实时**：`applyStreamEvent`（render.js）边收 SSE 事件边 `pushStep`——
+  时间线跟着回合一起长出来。`llm` 事件（第几次迭代、stop_reason、token 进出）
+  和 `node_end`（keys/error）以前直接被丢掉，现在都记上——这两样恰恰是
+  「Agent 到底干了什么」的核心。
+- **历史**：`core/runtime.py` 把同样的步骤存进 `meta.steps`（跟着 chat_log 落库），
+  重开一个对话渲染出来的时间线和当时直播的一模一样。有界：最多 40 步、
+  每条 detail 截断，图再野也撑不大一行 chat_log。
+- **Loop 标签页**：那些行是从当天的 trace 文件重建的，没有 meta.steps，
+  `stepsFromTurn()`（trace.js）把 llm_calls/tools/gate 折成同样的步骤。
+
+**为什么用原生 `<details>` 做展开**：`syncChatLogs()` 每收到一个流事件就把整个
+消息列表 innerHTML 重写一遍。原生 `<details>` 的开合状态存在 DOM 里，重写后
+照样是开的；换成 JS 里存状态就会在重绘时被清掉。
+
+**旧对话怎么办**：steps 之前的回合没法补——trace 文件按天滚动，昨天的今天就
+没了。这些回合照旧渲染成原来的芯片行（`legacyTrace`），等它们自然沉底。
+
+**回归测试**：`test_turn_meta.py` 锁步骤的顺序、kind 闭合集合、五字段形状、
+40 步上限和截断；`test_knowme_facade.py` 锁 meta 的键集合。基线变成
+**588 passed / 3 failed / 62 skipped**（3 个失败仍是原来那三个）。
+
+## 两栏布局设计
 
 ```
-┌──────────────┬───────────────────────┬───────────────┬──────────────────┐
-│ Sidebar      │ Main Workspace        │ Agent Panel   │ Chat Dock        │
-│              │                       │               │                  │
-│ Agents       │ Reader                  │               │                  │
-│ Applications │ 知识库                   │               │                  │
-│ Manage       │ ...                     │               │                  │
-└──────────────┴───────────────────────┴───────────────┴──────────────────┘
+┌──────────────┬────────────────────────────────────────────┐
+│ Sidebar      │ 全宽面板（按路由切换）                        │
+│              │                                            │
+│ Agents       │  #agent/<id>   → 这个 Agent 的对话 + 时间线  │
+│ Applications │  #reader       → 阅读器（现在真的全宽了）     │
+│ Manage       │  #knowledge    → 知识库                     │
+│ 设置         │  其余          → 原来的诊断页，只是变宽了     │
+└──────────────┴────────────────────────────────────────────┘
 ```
 
 ## 核心文件
@@ -104,12 +164,13 @@ knowme/
 ### 前端
 ```
 static/
-├── index.html           # 主页面
+├── index.html           # 主页面（侧边栏 + 一块全宽面板）
 ├── style.css            # 样式
 └── js/
-    ├── main.js          # 主逻辑 + Reader 加载
+    ├── main.js          # render/refresh 循环 + Reader 加载
     ├── views.js         # 视图函数
-    ├── dock.js          # 聊天面板
+    ├── chat.js          # 对话视图（VIEWS.agent）+ 会话/历史/模型芯片
+    ├── trace.js         # 每轮的步骤时间线
     └── ...              # 其他模块
 ```
 
@@ -124,11 +185,11 @@ cd D:\LLM\Agent\knowme-agent
 访问 http://localhost:8888
 
 ### MVP 流程
-1. 左侧选择 **Learning Agent**
-2. 点击 **阅读器** → 加载文档
-3. 在右侧提问 → 文档自动进入上下文
-4. 选中文本 → "注入到聊天"
-5. 查看聊天卡片统计
+1. 左侧选择 **Learning Agent**（右侧变成它的对话页）
+2. 点 **阅读器** → 加载文档（现在全宽）
+3. 回到对话页提问 → 文档自动进入上下文
+4. 选中文本 → 「发送给 Agent」
+5. 展开回合头上的时间线，看这轮到底经历了哪些步骤
 
 ## 代码维护说明
 
@@ -150,7 +211,7 @@ cd D:\LLM\Agent\knowme-agent
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 dashboard**。
 - **已知失败的 3 个测试**（动手前先看一眼，别把它们算到自己头上）：
   `test_delegate_env.py` ×2、`test_packaging.py::test_the_bundled_skills_are_findable`。
-  干净工作区就失败，与前端无关。当前基线：**586 passed / 3 failed / 62 skipped**。
+  干净工作区就失败，与前端无关。当前基线：**588 passed / 3 failed / 62 skipped**。
 - `test_static_assets.py` 里那个"剥工具块"的测试，会**从 `render.js` 里抽出**
   `stripTools` 用到的正则，再拿去跑后端真实产出的字符串——因为这条逻辑跨了
   JS 和 Python 两边，没有测试看着的话，格式一变就会静默失效（聊天卡片里

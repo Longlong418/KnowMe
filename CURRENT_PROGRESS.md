@@ -45,9 +45,20 @@
 - ✅ 新增 `evals/deterministic/test_dashboard_agent_scope.py`
 - ✅ Memory Manager 支持同一 Agent 内合并事实；跨 Agent 合并会被拒绝
 
+### 布局重构 + 轨迹时间线（2026-09-21）
+- ✅ 三栏改两栏：删掉右侧聊天列，对话变成路由 `#agent/<id>`，右侧全宽
+- ✅ `dock.js` → `chat.js`，对话面板由 `VIEWS.agent` 生成；`openAgent`/`selectAgent`
+  单向路由（openAgent 只改哈希，selectAgent 只改状态），后退键可用
+- ✅ `render()` 增加 agent 分支：5 秒轮询不重建对话（草稿、滚动、展开状态不丢）
+- ✅ 每轮对话渲染步骤时间线：`core/runtime.py` 落库 `meta.steps`（≤40 步、截断），
+  SSE `done` 带同样的 steps，`trace.js` 统一渲染；`llm`/`node_end` 事件不再被丢弃
+- ✅ 旧回合（无 steps）照旧渲染芯片行，不需要迁移
+- ✅ `evals/deterministic/test_turn_meta.py`、`test_knowme_facade.py`、
+  `test_reader_frontend.py`（node 桩）锁住行为；基线 588 passed / 3 failed / 62 skipped
+
 ### 界面优化
-1. **Agent 视图**：左侧 Agent 列表，支持分支
-2. **SmartReader 风格**：文件上传 + URL 粘贴 + 继续阅读卡片
+1. **Agent 视图**：左侧 Agent 列表，支持分支 ✅（本轮完成）
+2. **SmartReader 风格**：文件上传 + URL 粘贴 + 继续阅读卡片（下一轮）
 3. **Sapphire 知识库**：双栏布局，左侧文件夹右侧笔记列表
 
 ### 后端改进
