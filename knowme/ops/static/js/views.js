@@ -578,30 +578,11 @@ const VIEWS = {
     if (sub==="consolidation") return h + memConsolidation(d);
     return h + memOverview(d);
   },
-  reader(d){
-    let h = `<div class="meta" style="margin-bottom:12px">
-      <b>阅读器</b> — 加载本地文件或粘贴 URL，选中文本自动注入上下文
-    </div>`;
-    h += `<div style="display:flex;gap:8px;margin-bottom:16px">
-      <input type="file" id="rc-file-input" accept=".md,.txt,.py,.json,.csv,.html,.pdf" style="flex:1">
-      <button class="save" onclick="readerLoad()">加载</button>
-    </div>`;
-    h += `<div style="margin-bottom:8px">
-      <div style="display:flex;gap:8px">
-        <input type="text" id="rc-url-input" placeholder="粘贴 URL 或文件路径..." style="flex:1;padding:8px;border:1px solid var(--line);border-radius:6px">
-        <button class="save" onclick="handleUrlInput()" style="flex:0">加载URL</button>
-      </div>
-    </div>`;
-    h += `<div id="rc-content" style="min-height:200px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:16px;">
-      <p style="color:var(--ink2)">从左侧文件输入、拖拽文档或粘贴 URL 进入阅读...</p>
-    </div>`;
-    h += `<div id="rc-selection" style="margin-top:16px;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;display:none">
-      <div style="font-size:13px;color:var(--ink2);margin-bottom:8px"><b>选中文本：</b>已捕获</div>
-      <div id="rc-text" style="background:var(--accent-soft);padding:8px;border-radius:6px;color:var(--accent);margin-bottom:8px;word-break:break-word"></div>
-      <button class="save" onclick="rcSend()">注入到聊天</button>
-    </div>`;
-    return h;
-  },
+  // `reader` is NOT defined here. main.js assigns VIEWS.reader (it loads last,
+  // so it wins) and keeps the markup next to the interaction code that owns it
+  // — the file picker, the URL box, the selection. A second copy used to live
+  // here and was silently dead: editing it changed nothing, which is exactly the
+  // kind of trap a "why doesn't my fix work" afternoon is made of.
   knowledge(d){
     const kb = d.knowledge_info || {};
     const selectedFolder = localStorage.getItem("knowme_kb_folder") || "";

@@ -29,6 +29,17 @@ function render(){
   if (view === "overview" || view === "graph"){
     // don't rebuild mid-animation or the glowing SVG gets wiped
     if (activeView !== view || !animating){ document.getElementById("view").innerHTML = VIEWS[view](D); }
+  } else if (view === "reader" && !subChanged){
+    // The Reader owns transient state the server knows nothing about: the open
+    // document, whatever you have typed into the URL box, and — the one that
+    // bit us — the <input type="file">'s FileList. Rebuilding this view on the
+    // 5s poll destroyed that input while the native file picker was still open,
+    // so choosing a file then alerted "请选择一个文件": readerLoad() re-queried
+    // the DOM by id and found the fresh, empty replacement. Same reason a URL
+    // you had typed but not yet submitted vanished. Repainting is also what
+    // cleared a mid-drag text selection in the document. There is nothing on
+    // this page that the poll refreshes, so skip the rebuild entirely and let
+    // restoreReaderState() below paint the document.
   } else if ((view === "memory" || view === "settings" || view === "database" || view === "models" || view === "connections") && editing && !subChanged){
     // don't wipe an in-progress edit on the 5s refresh — but DO switch sub-tabs
   } else {
@@ -131,7 +142,7 @@ let currentDoc = null;
 VIEWS.reader = function(){
   return `<section class="reader-hero"><div class="reader-kicker">READING ROOM · ${esc(ACTIVE_AGENT || "general")}</div>
     <h2>把一份材料带进来</h2><p>上传文本或粘贴公开 URL。解析后的内容会同步给当前 Agent，方便提问、摘录和做笔记。</p>
-    <div class="reader-actions"><label class="reader-drop"><input type="file" id="rc-file-input" accept=".md,.txt,.py,.json,.csv,.html,.htm,.xml,.pdf" onchange="readerLoad()"><span>选择文件</span><small>MD · TXT · HTML · PDF</small></label>
+    <div class="reader-actions"><label class="reader-drop"><input type="file" id="rc-file-input" accept=".md,.txt,.py,.json,.csv,.html,.htm,.xml,.pdf" onchange="readerLoad(this)"><span>选择文件</span><small>MD · TXT · HTML · PDF</small></label>
     <div class="reader-url"><input type="url" id="rc-url-input" placeholder="https://example.com/article"><button class="save" onclick="handleUrlInput()">读取 URL</button></div></div></section>
     <section class="reader-paper"><div class="reader-paper-head"><span>当前文档</span><span class="meta">选中文本后可发送给 Agent</span></div><div id="rc-content"><p class="empty">还没有文档。先选择文件或读取 URL。</p></div></section>
     <div id="rc-selection" class="reader-selection"><div><b>选中文本</b> · 已捕获</div><div id="rc-text"></div><button class="save" onclick="rcSend()">发送给 Agent</button></div>`;
@@ -142,12 +153,24 @@ function renderReaderContent(){
   const selEl = document.getElementById("rc-selection");
   if (!contentEl || !selEl) return;
   if (currentDoc){
-    const paragraphs = currentDoc.content.split(/\n{2,}/).filter(Boolean);
-    contentEl.innerHTML = paragraphs.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
-    contentEl.dataset.path = currentDoc.name;
+    // Repaint only when the document really changed. This runs on every 5s
+    // refresh, and rewriting innerHTML drops whatever the user had selected
+    // mid-drag — which broke the one flow this view exists for ("select text,
+    // send it to the Agent"). The stamp lives on the ELEMENT, not in a module
+    // variable, so a freshly rebuilt view has no stamp and always repaints.
+    const stamp = `${currentDoc.name}:${currentDoc.content.length}`;
+    if (contentEl.dataset.stamp !== stamp){
+      const paragraphs = currentDoc.content.split(/\n{2,}/).filter(Boolean);
+      contentEl.innerHTML = paragraphs.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
+      contentEl.dataset.path = currentDoc.name;
+      contentEl.dataset.stamp = stamp;
+    }
   } else {
-    contentEl.innerHTML = '<p style="color:var(--ink2)">从左侧文件输入、拖拽文档或粘贴 URL 进入阅读...</p>';
+    // The copy matches the hero's own empty state: this page has no left panel
+    // and no drag target, so the old text promised two things that don't exist.
+    contentEl.innerHTML = '<p class="empty">还没有文档。先选择文件或读取 URL。</p>';
     delete contentEl.dataset.path;
+    delete contentEl.dataset.stamp;
   }
   if (window.getSelection().toString().trim()){
     const text = window.getSelection().toString();
@@ -158,9 +181,14 @@ function renderReaderContent(){
   }
 }
 
-function readerLoad(){
-  const input = document.getElementById("rc-file-input");
-  if (!input.files || !input.files[0]) { alert("请选择一个文件"); return; }
+// `input` is the element the change event fired on (the markup passes `this`).
+// Reading the file off the event target instead of looking the input up by id
+// keeps this correct even if the view is rebuilt underneath us: the element
+// that actually received the pick still holds it. The id lookup remains as a
+// fallback for any caller that does not pass one.
+function readerLoad(input){
+  input = input || document.getElementById("rc-file-input");
+  if (!input || !input.files || !input.files[0]) { alert("请选择一个文件"); return; }
   const file = input.files[0];
   const reader = new FileReader();
   reader.onload = async e => {
