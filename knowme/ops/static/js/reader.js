@@ -382,16 +382,25 @@ function loadPdfLib(){
   return pdfLibPromise;
 }
 
-// pdf.js 6 computes a document fingerprint with Uint8Array.prototype.toHex, so
-// on a browser without it EVERY pdf fails — not an edge case, the first thing
-// getDocument does. Those APIs are from 2025 (Chrome/Edge 140, Firefox 133,
-// Safari 18.2). Checking here, before 1.7 MB of renderer is fetched, turns an
-// internal "n.toHex is not a function" into a sentence that names the fix.
+// pdf.js 6 computes a document fingerprint with Uint8Array.prototype.toHex
+// (pdf.worker.min.mjs, six call sites), so on a browser without it EVERY pdf
+// fails — not an edge case, it is the first thing getDocument does. toHex is
+// from 2025 (Chrome/Edge 140, Firefox 133, Safari 18.2). Checking here, before
+// 1.7 MB of renderer is fetched, turns an internal "n.toHex is not a function"
+// into a sentence that names the fix.
+//
+// toHex is the one and only hard requirement: it is asked for on every document.
+// Nothing else belongs in this check — an earlier version of it also demanded
+// Uint8Array.prototype.fromBase64, which does not exist because fromBase64 is a
+// STATIC method on the constructor (Uint8Array.fromBase64, used once in the
+// worker for base64-embedded content). Reading it off the prototype returned
+// undefined on every browser ever made, so that check refused to render ANY pdf,
+// everywhere, and looked exactly like "PDF 不支持". Ask for what the worker
+// really calls, on the object that really carries it.
 function pdfUnsupportedReason(){
-  const missing = ["toHex", "fromBase64"].filter(m => typeof Uint8Array.prototype[m] !== "function");
-  if (!missing.length) return "";
-  return "当前浏览器缺少 PDF 渲染需要的新 JavaScript 特性（Uint8Array." + missing.join("/") +
-         "）。Chrome/Edge 140+、Firefox 133+、Safari 18.2+ 才有；升级浏览器即可。";
+  if (typeof Uint8Array.prototype.toHex === "function") return "";
+  return "当前浏览器缺少 PDF 渲染需要的 JavaScript 特性（Uint8Array.toHex）。" +
+         "Chrome/Edge 140+、Firefox 133+、Safari 18.2+ 才有；升级浏览器即可。";
 }
 // pdf.js's defaults assume a bundler, so every asset path is given explicitly.
 // Without cmaps a Chinese or Japanese PDF renders as blank pages, which is the
