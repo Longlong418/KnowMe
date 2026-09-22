@@ -108,10 +108,11 @@ pendingTests.push((function testReaderPane() {
   function reset() {
     els = {};
     for (const id of ["rc-content", "rc-title", "rc-meta", "rc-selection", "rc-text",
-                      "rc-library", "rc-search", "rc-file-input", "rc-url-input"])
+                      "rc-library", "rc-search", "rc-file-input", "rc-url-input",
+                      "amsg"])
       els[id] = { id, innerHTML: "", dataset: {}, style: {}, textContent: "", value: "",
                   classList: { add() {}, remove() {}, toggle() {} },
-                  appendChild() {}, insertAdjacentHTML() {} };
+                  appendChild() {}, insertAdjacentHTML() {}, focus() {} };
     // the library list is watched too: it must not flicker on the poll either
     paints = 0;
     watch(els["rc-content"]); watch(els["rc-library"]);
@@ -169,6 +170,10 @@ pendingTests.push((function testReaderPane() {
   // ("class=rdoc on" is the only place the open document shows up in the list).
   const lit = html => (String(html).match(
     /class="rdoc on"\s+onclick="readerOpen\('([^']+)'\)/) || [])[1] || null;
+  // Spying on the router: quoting a sentence must NOT navigate away from the
+  // document (that is the bug the selection-send had).
+  let navigated = 0;
+  function openAgent() { navigated++; }
   eval(readerSrc);
 
   reset();
@@ -234,6 +239,26 @@ pendingTests.push((function testReaderPane() {
            "…and still under the active agent's thread (the 选中文字→发送 flow)");
     assert(extras.every(p => p.resource === "alpha" && p.content.includes("para one")),
            "both snapshots carry the document you just opened");
+
+    // Quoting a sentence asks in the panel on the right, not in the main
+    // conversation. The old code prefilled #dmsg and, when that was not on
+    // screen, navigated to #agent/<active> to go find it — so 发送给 Agent threw
+    // you out of the document you were reading, which is the opposite of what a
+    // reader view is for.
+    window.getSelection = () => ({ rangeCount: 1, toString: () => "para one" });
+    const sent = extras.length;
+    await rcSend();
+    // ...and drain one macrotask, so a future version that routes from inside
+    // the promise chain without returning it is still caught here.
+    await new Promise(r => setTimeout(r, 0));
+    assert(navigated === 0,
+           "quoting a sentence asks in the right-hand panel (it does NOT navigate away)");
+    assert(els["amsg"].value.startsWith("[选中文本] para one"),
+           "the quote lands in the ask panel's composer, ready for your question");
+    assert(extras.length > sent && extras.some(p => p.selection === "para one"),
+           "and the selection is published to the bridge (the agent reads it as context)");
+    assert(els["rc-selection"].style.display === "none",
+           "the 选中文本 box is dismissed once it has been handed over");
 
     // A different document, and the same document made longer, both repaint:
     // that second one is the 继续加载 button, and a stamp keyed on the id alone

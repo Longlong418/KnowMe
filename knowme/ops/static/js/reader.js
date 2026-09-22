@@ -57,7 +57,7 @@ VIEWS.reader = function(){
     <div class="reader-pane">
       <div class="reader-paper-head">
         <span id="rc-title">当前文档</span>
-        <span class="meta" id="rc-meta">选中文本后可发送给 Agent</span>
+        <span class="meta" id="rc-meta">选中文本后可在右侧提问</span>
         <button class="sessbtn ask-toggle" onclick="toggleAskPanel()"
                 title="随时就正在读的内容提问">${askOpen ? "收起提问" : "问 Agent"}</button>
       </div>
@@ -65,7 +65,7 @@ VIEWS.reader = function(){
       <div id="rc-selection" class="reader-selection">
         <div><b>选中文本</b> · 已捕获</div><div id="rc-text"></div>
         <div class="rs-actions">
-          <button class="save" onclick="rcSend()">发送给 Agent</button>
+          <button class="save" onclick="rcSend()">在右侧提问</button>
           <button class="sessbtn" onclick="rcClearSelection()">取消</button>
         </div>
       </div>
@@ -94,13 +94,14 @@ function askPanelOpen(){
   const saved = localStorage.getItem("knowme_ask_open");
   return saved === null ? true : saved === "1";   // on by default: it is the point
 }
-function toggleAskPanel(){
-  localStorage.setItem("knowme_ask_open", askPanelOpen() ? "0" : "1");
+function toggleAskPanel(){ setAskPanel(!askPanelOpen()); }
+function setAskPanel(open){
+  localStorage.setItem("knowme_ask_open", open ? "1" : "0");
   // The panel is part of the view markup, so it only follows this by being
   // REBUILT -- and a bare render() does not rebuild the Reader: the
   // `view === "reader" && !subChanged` branch skips the rebuild on purpose, so
   // the 5s poll cannot destroy the file input or a live text selection. That
-  // guard also swallowed this click, which is why 收起提问 did nothing.
+  // guard also swallowed the 收起提问 click, which is why it did nothing.
   // Clearing activeView makes render() see a view change, exactly as a
   // navigation would, so it rebuilds this one time and the poll stays quiet.
   activeView = null;
@@ -667,18 +668,27 @@ function rcSend(){
   const sel = window.getSelection();
   if (!sel.rangeCount || !sel.toString().trim()) { alert("请先在文档中选中文字"); return; }
   const text = sel.toString();
-  publishReaderContext({selection: text}).then(res => {
-    if (res.ok){
-      const box = document.getElementById("dmsg");
-      if (box) box.value = "[选中文本] " + text.substring(0, 200) + (text.length > 200 ? "..." : "");
-      const panel = document.getElementById("rc-selection");
-      if (panel) panel.style.display = "none";
-      // The composer lives in the #agent view; offer the way there rather than
-      // silently filling a box the reader cannot see.
-      if (!box && typeof openAgent === "function") openAgent(ACTIVE_AGENT);
-    } else {
-      alert("注入失败：" + (res.error || "未知错误"));
-    }
+  return publishReaderContext({selection: text}).then(res => {
+    if (!res.ok){ alert("注入失败：" + (res.error || "未知错误")); return; }
+    const panel = document.getElementById("rc-selection");
+    if (panel) panel.style.display = "none";
+    // It lands in the ask panel on the right, NOT in the main conversation.
+    // This used to prefill #dmsg and, when that was not on screen, navigate to
+    // #agent/<active> to go find it — so quoting a sentence threw you out of the
+    // document you were reading. The panel is already next to the document, and
+    // sending there is what the reader's own agent is for; the selection still
+    // reaches the main conversation, because publishReaderContext() above files
+    // it under BOTH agents.
+    //
+    // The panel's markup is generated, so a CLOSED panel has to be opened
+    // through a rebuild (see setAskPanel) -- and the box can only be filled
+    // after it, because the rebuild replaces it. An open panel is left alone:
+    // rebuilding it would throw away the text selection for nothing.
+    if (!askPanelOpen()) setAskPanel(true);
+    const box = document.getElementById("amsg");
+    if (!box) return;
+    box.value = "[选中文本] " + text.substring(0, 200) + (text.length > 200 ? "..." : "");
+    box.focus();
   }).catch(err => alert("网络错误：" + err));
 }
 
