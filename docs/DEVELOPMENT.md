@@ -46,6 +46,23 @@ Reader 链路稳定后，开始补自己的知识库。这里也没有改变 Das
 
 知识库的第一价值不是复杂的图谱，而是“能放进去、能找到、能读懂、能跳转”。文件夹、搜索、Markdown 预览和反向链接把这条最短路径闭环了；向量检索、自动整理和更复杂的图谱可以在真实笔记积累后再决定。
 
+## Phase 13：刷新页面后回到刚才的位置（2026-09-22）
+
+Phase 12 只让"页面不主动刷新"这一条成立了：5 秒轮询不再重建视图，所以草稿不会被后台轮询吃掉。但只要你真的按 F5，或者关掉标签页再回来，正在读的文档和正在写的笔记就都没了——因为那些状态本来只活在内存里。这一轮把它们延长到"下次打开"。
+
+### 这次加了什么
+
+- **阅读器记住打开的是哪一份文档**。`readerOpen()` 把文档 id 写进浏览器的 localStorage；页面重新加载后 `restoreReaderState()` 先加载文档库，再确认这个 id 还在库里，在的话就重新打开它。文档已经被删掉时不会去追一个不存在的 id。
+- **知识库记住打开的是哪一条笔记**，并且**按 Agent 分开记**（键名是 `knowme_kb_note_<agent>`）：你在 Learning 里看到的笔记，不会因为切到 Coding 就跳出来。点「新建」、点「关闭」、删除笔记都会把这个记忆清掉。
+- **修掉"写完界面不更新"**。以前创建、保存、删除之后是 `location.hash = "#knowledge"`，可你本来就在 `#knowledge` 上——赋一个相同的 hash 不会触发 hashchange，所以什么都不会发生，左侧列表一直显示旧标题。现在改成直接调用 `main.js` 的 `refresh()`，并且先把当前选中清空，让 `render()` 真的重建视图（笔记列表和文件夹筛选是服务端烘进视图 HTML 的），紧接着 `restoreKnowledgeState()` 再把这条笔记从服务器重新读出来打开——所以详情区也不会停留在旧标题上。
+- **顺手修掉一个显示问题**：知识库第一次打开时，"从一条笔记开始"和"创建新笔记"表单会同时出现。`#kb-note-detail` 有初始 `display:none`，`#kb-create-editor` 漏了，而两个 JS 函数本来就一直在切换这两个面板的可见性，说明初始状态本该是隐藏的。
+- **补上测试**：新增 `evals/deterministic/test_knowledge_frontend.py`（node + DOM 桩，跑的是真实的 `knowledge.js`），锁住"轮询不重建视图""保存后列表重建并重新打开这条笔记""新建不会跳回旧笔记""刷新后回到上次那条笔记"；阅读器的桩补上了 `localStorage`，并锁住"刷新后回到原文"。
+- **测试基线**：**606 passed / 3 failed / 62 skipped**（3 个失败仍是既有的 `test_delegate_env.py` ×2 和 `test_packaging.py::test_the_bundled_skills_are_findable`）。
+
+### 为什么没有让轮询去重新拉文档库
+
+`restoreReaderState()` 每一轮都会跑，但如果让它每次都强制重新拉一遍文档库列表，就等于每 5 秒发一次多余的请求，也违背了这块面板"轮询不重拉"的约定（测试里就有这一条）。恢复文档并不需要它：刷新页面后 JS 状态本来就是空的，第一次调用自然会去请求服务器。
+
 ## 项目概览
 
 一个以自研 Agent Core 为底座的个人 Agent 工作平台。支持多Agent记忆隔离，提供Reader应用和Context Bridge。
@@ -335,7 +352,7 @@ cd D:\LLM\Agent\knowme-agent
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 dashboard**。
 - **已知失败的 3 个测试**（动手前先看一眼，别把它们算到自己头上）：
   `test_delegate_env.py` ×2、`test_packaging.py::test_the_bundled_skills_are_findable`。
-  干净工作区就失败，与前端无关。当前基线：**605 passed / 3 failed / 62 skipped**。
+  干净工作区就失败，与前端无关。当前基线：**606 passed / 3 failed / 62 skipped**。
 - **改完 `.py` 一定要重启 dashboard**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
   硬刷新就能看到；但 `dashboard.py` 及其 import 的一切都在内存里。
   （2026-09-21 亲自踩到：改了 `library.py` 后接口还是旧行为，以为改错了。）
