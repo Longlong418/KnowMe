@@ -88,6 +88,76 @@ def test_a_rotated_thread_keeps_the_document_you_have_open(tmp_path, monkeypatch
         "…and the document you had open followed you to the new thread"
 
 
+def _pick_from_history(app, session_id):
+    """The page's 历史记录 -> 点一条对话 path, without a browser."""
+    from knowme.ops.web import data as web_data
+
+    return web_data.session_action(
+        {"action": "switch", "id": session_id, "agent_id": app.agent_id})
+
+
+def _point_web_at(app, monkeypatch):
+    from knowme.ops import web
+    from knowme.ops.web import data as web_data
+
+    monkeypatch.setattr(web_data, "get_agent", lambda agent_id="default": app)
+    monkeypatch.setattr(web, "get_agent", lambda agent_id="default": app)
+
+
+def test_a_thread_you_picked_from_history_is_not_rotated_away(tmp_path, monkeypatch):
+    """Live bug: 在历史记录里点开一条旧对话接着说，回复却落进了另一条新对话 ——
+    屏幕上还挂在旧对话下面，所以那条对话看起来永远只能看、不能接着聊。
+
+    The rotation is for the thread you were RESUMED into; a thread you clicked
+    on purpose is the opposite, and the idle gap is exactly what makes an old
+    conversation look like a conversation again.
+    """
+    from knowme.ops import web
+
+    monkeypatch.setenv("KNOWME_SESSION_IDLE_MINUTES", "60")
+    gate = response([text_block('{"retrieve": false, "reason": "接着上次说"}')])
+    app = make_knowme(tmp_path / "home",
+                      client=ScriptedClient([gate, response([text_block("第二步是先写测试。")])]))
+    old = app.session.session_id
+    _seed(app, old, age_minutes=180)                # 3h idle: rotation bait
+    _point_web_at(app, monkeypatch)
+
+    _pick_from_history(app, old)
+    assert app.session.session_id == old
+
+    web.chat_stream("继续，第二步是什么", lambda kind, ev: None)
+
+    assert app.session.session_id == old, "手选的线程被轮换掉了"
+    landed = {r[0] for r in app.conn.execute("SELECT DISTINCT session_id FROM chat_log")}
+    assert landed == {old}, "这条消息落进了另一个线程"
+
+
+def test_the_exemption_covers_the_turn_you_sent_not_the_thread_forever(tmp_path, monkeypatch):
+    """The other half: picking a thread must not switch the idle rule off for it.
+    An hour later, saying something new there is the accident rotation exists to
+    prevent, and the old thread is a click away in History again."""
+    from knowme.ops import web
+
+    monkeypatch.setenv("KNOWME_SESSION_IDLE_MINUTES", "60")
+    gate = response([text_block('{"retrieve": false, "reason": "接着上次说"}')])
+    app = make_knowme(tmp_path / "home",
+                      client=ScriptedClient([gate, response([text_block("ok")])]))
+    old = app.session.session_id
+    _seed(app, old, age_minutes=180)
+    _point_web_at(app, monkeypatch)
+
+    _pick_from_history(app, old)
+    web.chat_stream("继续", lambda kind, ev: None)
+    assert app.session.session_id == old
+
+    app.conn.execute("UPDATE chat_log SET created_at=datetime('now', '-180 minutes') "
+                     "WHERE session_id=?", (old,))
+    app.conn.commit()
+    maybe_rotate_session(app)
+
+    assert app.session.session_id != old
+
+
 def test_provider_switch_resets_stale_model_overrides(tmp_path, monkeypatch):
     """Live bug: kimi -> gemini kept gate model kimi-k3; every turn then 404'd
     against Gemini. A provider change must reset any model field the user

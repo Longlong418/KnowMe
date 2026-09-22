@@ -14,7 +14,9 @@ across page refreshes, so it needs two things the other gateways don't:
   handles the other half of that: come back after an idle gap and you get a new
   thread, with the old one one click away in History. (Live bug this fixes: a
   tester came back days later and their new message landed in a week-old
-  32-message thread.)
+  32-message thread.) That rotation is for threads you were RESUMED into —
+  a thread you picked from History yourself is exempt for the next turn, see
+  `pick_session`.
 
 This lives in its own module because several callers share and rebuild the
 pool: web.py lazily creates profiles for chat, while settings changes
@@ -40,6 +42,7 @@ _agents = {}
 agent_lock = threading.Lock()
 _dashboard_session = None  # legacy name; this web run's thread
 _dashboard_sessions = {}  # legacy name; keyed by Agent id
+_picked_sessions = {}  # threads the user chose by hand, keyed by Agent id
 
 
 def _new_session_id(agent_id: str) -> str:
@@ -119,6 +122,25 @@ def get_agent(agent_id: str = "default"):
     return fresh
 
 
+def pick_session(agent_id: str, session_id: str) -> None:
+    """The page chose this agent's thread by hand — History, or the inbox.
+
+    Both halves of that fact live here, because they are one fact: which thread
+    this agent is talking in.
+
+    * the web run's current thread, so /api/data (and any later dash_session)
+      answers with the thread the agent is actually using;
+    * a note that the user PICKED it, which is what stops maybe_rotate_session
+      from undoing the click a moment later.
+    """
+    global _dashboard_session
+    if agent_id == "default":
+        _dashboard_session = session_id
+    else:
+        _dashboard_sessions[agent_id] = session_id
+    _picked_sessions[agent_id] = session_id
+
+
 def maybe_rotate_session(agent) -> None:
     """Rotate only the supplied agent's thread after the configured idle gap."""
     global _dashboard_session
@@ -137,6 +159,15 @@ def maybe_rotate_session(agent) -> None:
     except ValueError:
         return
     if (datetime.now(UTC) - last).total_seconds() > idle_min * 60:
+        # …unless you opened this thread yourself a moment ago. The rotation
+        # exists to keep you out of the thread you were RESUMED into; clicking
+        # one in History is the opposite of that, and rotating it anyway sent
+        # your reply to a brand-new thread while the page went on showing it
+        # under the thread you had just picked — 那条旧对话于是看起来只能看、
+        # 不能接着说. Consumed on use: it excuses the turn you are about to
+        # send, not the thread for the rest of the process.
+        if _picked_sessions.pop(agent_id, None) == agent.session.session_id:
+            return
         session_id = _new_session_id(agent_id)
         agent.session.start_new(session_id)
         if agent_id == "default":

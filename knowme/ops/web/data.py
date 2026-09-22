@@ -30,7 +30,8 @@ from knowme.integrations import (
     test_integration,
 )
 from knowme.ops import browser_agent, commands
-from knowme.ops.browser_agent import agent_lock, dash_session, get_agent, maybe_rotate_session
+from knowme.ops.browser_agent import (agent_lock, dash_session, get_agent, maybe_rotate_session,
+                                      pick_session)
 from knowme.ops.catalog import list_models
 from knowme.ops.pricing import price_for, usage_summary
 from knowme.ops.settings_api import apply_settings, pin_action, settings_info
@@ -646,6 +647,11 @@ def session_action(payload: dict) -> dict:
         if action == "switch":
             sid = payload.get("id") or "default"
             agent.session.switch(sid)
+            # Tell the gateway, not just the agent: "which thread is current"
+            # has to have one answer, and a thread you picked by hand must
+            # survive the idle rotation that runs at the top of your next
+            # message (see browser_agent.pick_session).
+            pick_session(agent_id, sid)
             # Same meta-rich rows as the read-only "history" action, so a
             # switched thread renders its full turn cards (gate/stats/tools/
             # model) — not just the text. (These two paths used to disagree.)
