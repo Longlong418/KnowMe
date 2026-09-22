@@ -40,8 +40,22 @@ from .runtime import (
     _notion_lock,
     _parse_ts,
     _tool_status,
+    _tool_summary,
     application_contexts,
 )
+from knowme.core.tools import as_text
+
+
+# The two Notion caches live HERE, in the module whose code reads them. They used
+# to be defined in runtime.py and copied into this module by the package
+# wrapper's _sync_state() — but the HTTP route calls this module directly
+# (server.py: `from .data import *`), so on a real request the names did not
+# exist: with KNOWME_EPISODIC_STORE=notion, collect() raised NameError and the
+# dashboard answered with an error payload instead of episodes. A name that only
+# exists after someone else's wrapper ran is a name that isn't really there.
+_notion_store = None                       # built once (its constructor calls Notion)
+_notion_episodes: tuple[float, list] | None = None   # (fetched_at, items)
+
 
 def invalidate_notion_cache() -> None:
     """Forget cached Notion clients/results after connection settings change."""
@@ -179,8 +193,12 @@ def collect(agent_id: str = "default") -> dict:
         tout = sum(c.get("usage", {}).get("out", 0) for c in t["llm_calls"])
         t["cost"] = tin / 1e6 * price_in + tout / 1e6 * price_out
         for x in t["tools"]:
-            x["status"] = _tool_status(x.get("output", ""))
-            x["summary"] = (x.get("output", "") or "").split(". ")[0][:120]
+            # Older trace files stored a list-returning tool's result as a list
+            # (see tools.as_text) — a truthy list used to raise right here and
+            # take all of /api/data with it.
+            x["output"] = as_text(x.get("output"))
+            x["status"] = _tool_status(x["output"])
+            x["summary"] = _tool_summary(x["output"])
 
     latencies = sorted(t["latency_ms"] for t in turns if t["latency_ms"] is not None)
     total_cost = sum(t["cost"] for t in turns)
@@ -276,6 +294,12 @@ def collect(agent_id: str = "default") -> dict:
                   for e in events if e.get("type") == "graph_end"][-8:][::-1]
 
     return {
+        # WHOSE data this is. Much of the payload is agent-scoped (facts,
+        # episodes, skills, and sessions_by_agent — which is filled for the
+        # requested agent only), so the page has to be able to tell that an
+        # answer arriving late belongs to the agent you just left. See the
+        # matching check in static/js/main.js refresh().
+        "agent_id": agent_id,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "home": str(home.resolve()),
         "provider": settings.provider,
@@ -609,7 +633,15 @@ def session_action(payload: dict) -> dict:
         if action == "new":
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             sid = f"s-{agent_id}-{stamp}"
+            previous = agent.session.session_id
             agent.session.start_new(sid)
+            # The open document is screen state, not thread state, so it comes
+            # along — the same rule the idle rotation follows (see
+            # runtime.chat_stream). The reader publishes when you OPEN a
+            # document, so without this the brand-new thread looked up a key
+            # nothing had ever been written to and the agent answered "我看不到
+            # 你打开的是哪篇" about the document you still had on screen.
+            application_contexts.rekey(agent_id, previous, sid)
             return {"ok": True, "agent_id": agent_id, "session_id": sid, "history": []}
         if action == "switch":
             sid = payload.get("id") or "default"

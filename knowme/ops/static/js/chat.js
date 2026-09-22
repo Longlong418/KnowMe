@@ -18,6 +18,22 @@ function activeAgentData(){
     {id:"default", name:"General", icon:"✦", status:"idle"};
 }
 
+// The stored agent id can outlive the agent itself (the catalog changed, or the
+// profile was renamed). Then /api/data answers "unknown agent: X" for every
+// request, D stays null, render() bails on its first line, and the page has no
+// data AND no way back: the sidebar never paints, and even a click on another
+// agent cannot help because selectAgent() needs D.agents to accept it. Forget
+// the id, go back to the default agent, and keep the URL honest about it.
+let forgotUnknownAgent = false;
+function recoverUnknownAgent(){
+  forgotUnknownAgent = true;
+  const unknown = ACTIVE_AGENT;
+  ACTIVE_AGENT = "default";
+  localStorage.setItem("knowme_active_agent", ACTIVE_AGENT);
+  if (location.hash === "#agent/" + unknown) location.hash = "#agent/" + ACTIVE_AGENT;
+  refresh();
+}
+
 function syncAgentChrome(){
   document.querySelectorAll(".agent-link").forEach(button => {
     const data = ((D && D.agents) || []).find(a => a.id === button.dataset.agent);

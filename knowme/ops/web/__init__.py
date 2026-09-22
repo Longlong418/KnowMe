@@ -10,9 +10,7 @@ from .data import (
 )
 from .runtime import (
     _NOTION_EPISODES_TTL,
-    _notion_episodes,
     _notion_lock,
-    _notion_store,
 )
 from . import data as _data
 from . import runtime as _runtime
@@ -22,7 +20,7 @@ from .server import Handler, main
 def collect(agent_id: str = "default") -> dict:
     """Collect the data shown by the Web client."""
     # Keep the payload contract visible to diagnostics:
-    # "settings", "tools", "facts", "episodes", "soul", "chat_log",
+    # "agent_id", "settings", "tools", "facts", "episodes", "soul", "chat_log",
     # "sessions", "turns", "stats", "db", "skills", "trace_file",
     # "chat_pending", "graph".
     _sync_dependencies()
@@ -31,14 +29,15 @@ def collect(agent_id: str = "default") -> dict:
         "tools_info", "usage_summary", "list_models",
     ):
         setattr(_data, name, globals()[name])
-    result = _data.collect(agent_id)
-    _pull_state()
-    return result
+    return _data.collect(agent_id)
 
 
 def _sync_state() -> None:
-    for name in ("_NOTION_EPISODES_TTL", "_notion_store", "_notion_episodes"):
-        setattr(_data, name, globals()[name])
+    # Only the TTL: a caller may patch it on the package to age the cache out.
+    # The Notion caches themselves are NOT forwarded — they live in data.py, in
+    # the module whose code reads them (a copy here is what made the HTTP route
+    # raise NameError; see the note next to them).
+    _data._NOTION_EPISODES_TTL = _NOTION_EPISODES_TTL
 
 
 def _sync_dependencies() -> None:
@@ -54,17 +53,10 @@ def _sync_dependencies() -> None:
     _sync_state()
 
 
-def _pull_state() -> None:
-    for name in ("_notion_store", "_notion_episodes"):
-        globals()[name] = getattr(_data, name)
-
-
 def memory_action(payload: dict) -> dict:
     """Forward memory mutations through the canonical Web data module."""
     _sync_dependencies()
-    result = _data.memory_action(payload)
-    _pull_state()
-    return result
+    return _data.memory_action(payload)
 
 
 def knowledge_action(payload: dict) -> dict:

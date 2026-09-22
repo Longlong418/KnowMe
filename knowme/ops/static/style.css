@@ -313,6 +313,8 @@
             word-break:break-all;margin-top:6px;max-height:180px;overflow:auto}
   .live{display:inline-flex;align-items:center;gap:6px}
   .live .dot{animation:pulse 2s ease-in-out infinite}
+  /* the header's "the backend is failing" state — see tickLive() in main.js */
+  .live.bad{color:var(--bad)} .live.bad .dot{background:var(--bad);animation:none}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
   /* streaming caret — the token-by-token "thinking" cursor */
   .caret{display:inline-block;width:7px;height:14px;margin-left:2px;vertical-align:text-bottom;

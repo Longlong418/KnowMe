@@ -58,16 +58,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/api/data":
-            self._send(json.dumps(collect(), default=str).encode(), "application/json")
-        elif self.path.startswith("/api/data?"):
+        if self.path == "/api/data" or self.path.startswith("/api/data?"):
             from urllib.parse import parse_qs, urlparse
 
-            agent_id = parse_qs(urlparse(self.path).query).get("agent_id", ["default"])[0]
+            agent_id = parse_qs(urlparse(self.path).query).get("agent_id", ["default"])[0] or "default"
             try:
-                payload = collect(agent_id or "default")
-            except ValueError as exc:
-                payload = {"error": str(exc)}
+                payload = collect(agent_id)
+            except Exception as exc:
+                # NEVER let this raise. An exception here closes the connection
+                # without a byte of response, and the browser can only reduce
+                # that to "TypeError: Failed to fetch" — which is how a bug
+                # inside collect() (a tool result that was not a string) looked
+                # like a network fault for as long as the bad trace row existed.
+                # An error body is something the page can name and show.
+                payload = {"error": f"{type(exc).__name__}: {exc}"}
             self._send(json.dumps(payload, default=str).encode(), "application/json")
         elif self.path == "/api/agents":
             live = browser_agent.current_agents()

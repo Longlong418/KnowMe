@@ -22,6 +22,7 @@ from knowme.agents import get_profile, list_profiles
 from knowme.applications import ApplicationContextBridge
 from knowme.applications.reader import ReaderError, load_upload, load_url
 from knowme.config import load_settings
+from knowme.core.tools import as_text
 from knowme.db import connect
 from knowme.integrations import (
     apply_integration,
@@ -137,9 +138,9 @@ def chat_stream(message: str, emit, agent_id: str = "default") -> None:
         "graph": ({"workflow": route.get("workflow", "triage"),
                    "route": "quick" if quick else "full",
                    "reason": (triage or {}).get("reason", "")} if route else None),
-        "tools": [{"tool": c["tool"], "args": c["args"], "output": c["output"],
+        "tools": [{"tool": c["tool"], "args": c["args"], "output": as_text(c["output"]),
                    "status": _tool_status(c["output"]),
-                   "summary": (c["output"] or "").split(". ")[0][:120]} for c in result.tool_calls],
+                   "summary": _tool_summary(c["output"])} for c in result.tool_calls],
         "consolidation": {"new_facts": cons["new_facts"]} if cons else None,
         "iterations": result.iterations,
         "latency_ms": latency_ms,
@@ -239,10 +240,13 @@ def _parse_ts(ts: str):
         return None
 
 
-def _tool_status(output: str) -> str:
+def _tool_status(output) -> str:
     """Classify a tool result for the UI: ok / warn / error — from the output
-    string alone (tools already report honestly, so trust their words)."""
-    low = (output or "").lower()
+    string alone (tools already report honestly, so trust their words).
+
+    as_text() first, because trace files written before that helper existed
+    still contain raw lists from the notes tools (see tools.as_text)."""
+    low = as_text(output).lower()
     if "failed" in low or "timed out" in low or low.startswith("error"):
         return "error"
     if "already exists" in low or "not synced" in low or "skipped" in low:
@@ -250,11 +254,17 @@ def _tool_status(output: str) -> str:
     return "ok"
 
 
+def _tool_summary(output) -> str:
+    """The one-line gist under a tool chip: first sentence, capped. Shared by
+    the live turn and the trace-derived turns so the two can't drift."""
+    return as_text(output).split(". ")[0][:120]
+
+
 # Notion-backed episodes live across the network, so the client AND the result
 # are cached with a short TTL — collect() runs on every web auto-refresh
 # and must not round-trip to Notion every few seconds (rate limits + latency).
 # The sqlite path is a local query and doesn't need this.
+# The two caches themselves live in data.py, next to the only code that reads
+# them (see the note there); a copy here would be a second, silently-dead one.
 _NOTION_EPISODES_TTL = 30.0   # seconds; the page polls ~every 5s
 _notion_lock = threading.Lock()
-_notion_store = None                       # built once (its constructor calls Notion)
-_notion_episodes: tuple[float, list] | None = None   # (fetched_at, items)

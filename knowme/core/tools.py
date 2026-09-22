@@ -7,9 +7,37 @@ adapted from launch-agentic-rag's app/agents/tools/registry.py.)
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+
+def as_text(output: object) -> str:
+    """A tool's result in the ONE form the rest of the system reads it in.
+
+    `Tool.fn` is declared `-> str` and almost every tool obeys, but not all: the
+    notes tools (`search_notes`, `list_notes`, `list_folders`) return Python
+    lists. Everything downstream nevertheless treats a tool result as text —
+    the trace writes it, `meta.tools` classifies it with `.lower()`, the web
+    payload summarises it with `.split(". ")`, the CLI slices it with `[:80]`.
+
+    One list therefore took the whole dashboard down: `/api/data` raised
+    AttributeError in the middle of `collect()`, answered with an empty
+    connection instead of JSON, and the page could only report
+    `TypeError: Failed to fetch` — with no clue which tool or which Agent.
+
+    This is about the RECORD of the call, not the call: the model still receives
+    whatever the tool returned.
+    """
+    if isinstance(output, str):
+        return output
+    if output is None:
+        return ""
+    try:
+        return json.dumps(output, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return str(output)
 
 
 @dataclass

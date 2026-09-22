@@ -25,7 +25,7 @@ import anthropic
 # Observers let the gateway show tool calls live and let ops/tracing record
 # them — without either being wired into the loop's logic.
 from knowme.core.events import LoopEvent, Observer
-from knowme.core.tools import ToolRegistry
+from knowme.core.tools import ToolRegistry, as_text
 
 
 @dataclass
@@ -106,7 +106,9 @@ def run_loop(
         tool_results = []
         for call in tool_uses:
             output = tools.execute(call.name, call.input, notify=notify)
-            event = {"tool": call.name, "args": call.input, "output": output}
+            # The RECORD is always text, whatever the tool returned (see
+            # tools.as_text) — the model below still gets `output` verbatim.
+            event = {"tool": call.name, "args": call.input, "output": as_text(output)}
             result.tool_calls.append(event)
             notify("tool", event)
             tool_results.append(

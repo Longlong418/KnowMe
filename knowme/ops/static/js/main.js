@@ -107,21 +107,52 @@ function render(){
   if (view === "agent") wireChat();
 }
 let lastFetch = Date.now();
+// Why the poll is not advancing, in words, or null while it is healthy. The
+// header used to just stop counting ("122 秒前更新") with nothing anywhere saying
+// that the backend was answering with errors — so a broken payload was
+// indistinguishable from a slow one, and the chat card could only offer the
+// browser's own "TypeError: Failed to fetch".
+let fetchError = null;
 function tickLive(){
+  const el = document.getElementById("sub");
+  if (fetchError){
+    // Say it even with no data at all: that is the case where the page has
+    // nothing to show, and staying silent was how a dead dashboard looked
+    // exactly like a slow one.
+    el.innerHTML = `<span class="live bad"><span class="dot"></span>后端没在正常回应</span> · ${esc(fetchError)}${D ? " · " + esc(D.home) : ""}`;
+    return;
+  }
   if (!D) return;
   const ago = Math.round((Date.now()-lastFetch)/1000);
-  document.getElementById("sub").innerHTML =
-    `<span class="live"><span class="dot"></span>实时</span> · ${ago} 秒前更新 · ${esc(D.home)}`;
+  el.innerHTML = `<span class="live"><span class="dot"></span>实时</span> · ${ago} 秒前更新 · ${esc(D.home)}`;
 }
 async function refresh(){
   try {
-    D = await (await fetch("/api/data?agent_id=" + encodeURIComponent(ACTIVE_AGENT || "default"))).json(); lastFetch = Date.now();
+    const next = await (await fetch("/api/data?agent_id=" + encodeURIComponent(ACTIVE_AGENT || "default"))).json();
+    // /api/data reports a failure as {"error": ...} (see server.do_GET). Keep the
+    // last good payload and name the reason instead of rendering a half-empty
+    // D — every view below reads D.stats/D.agents and would throw on it.
+    if (next && next.error) throw new Error(next.error);
+    // ...and one agent's answer is never used for another. Switching Agent takes
+    // two awaits (selectAgent), so a poll that left before the switch can land
+    // after it. The payload is agent-scoped — sessions_by_agent is filled for
+    // the requested agent and left empty for everyone else — so that late answer
+    // used to paint the agent you had just left: the history menu found an empty
+    // list and announced 还没有历史对话, then the next poll brought it back.
+    if (next && next.agent_id && next.agent_id !== ACTIVE_AGENT) return;
+    D = next; fetchError = null; lastFetch = Date.now();
     render(); tickLive();
     syncModelChip();  // keep the conversation's model pill in sync with the active brain
     applyTele();      // reflect the stats on/off choice (default on)
     syncLiveView();   // live-update an opened conversation (e.g. new phone messages)
     if (!threadRestored) restoreThread();
-  } catch(e){ /* server restarting — keep showing last data */ }
+  } catch(e){
+    fetchError = String((e && e.message) || e); /* server restarting — keep showing last data */
+    // ...unless there IS no data yet and the reason is an agent id that no
+    // longer exists (see chat.js recoverUnknownAgent). That one never heals on
+    // its own, and it heals no other way either.
+    if (!D && !forgotUnknownAgent && /unknown agent/i.test(fetchError)) recoverUnknownAgent();
+  }
 }
 // --- resizable sidebar: drag the thin handle between nav|main.
 // Width lives in a CSS var + localStorage, so it survives refreshes.
