@@ -158,3 +158,49 @@ def test_app_js_is_gone():
     """The monolith was split; index.html must not load the old single file."""
     assert not (STATIC / "app.js").exists(), "stale app.js still present"
     assert "/static/app.js" not in INDEX, "index.html still references app.js"
+
+
+# The sidebar entries that are deliberately NOT listed: the runtime internals,
+# reachable from links inside pages (#tools, #database, …) and by URL. Every
+# other entry in index.html must be visible — a page you can only reach by
+# typing a URL is a page that does not exist for the person using the dashboard.
+DEEP_ONLY = {"#gateway", "#loop", "#graph", "#tools", "#database"}
+
+
+def _css_rules() -> str:
+    """style.css with its comments stripped: a comment QUOTING a selector is not
+    a rule, and matching one would fail these tests for the wrong reason."""
+    css = (STATIC / "style.css").read_text(encoding="utf-8")
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+
+def test_every_sidebar_entry_except_the_deep_pages_is_visible():
+    """A page listed in the sidebar must actually be in the sidebar.
+
+    f6a5f8b hid seven operational entries with `display:none` — among them 模型
+    and 连接, which are the pages you open the sidebar to change. Nothing
+    failed and nothing looked broken: the entries were still in index.html, so
+    the sidebar just quietly lost them. Reported as "配置模型的页面现在看不到".
+    """
+    rule = re.search(r"nav a\[href[^}]*display:none\}", _css_rules())
+    hidden = set(re.findall(r'href="([^"]+)"', rule.group(0))) if rule else set()
+    assert hidden == DEEP_ONLY, (
+        "the CSS hides sidebar entries that must be visible "
+        f"({sorted(hidden - DEEP_ONLY)}) or stopped hiding the deep pages "
+        f"({sorted(DEEP_ONLY - hidden)}). Update DEEP_ONLY in the same commit "
+        "if this was on purpose.")
+
+
+def test_group_headers_are_not_hidden_by_position():
+    """A group header is hidden by name, never by :nth-of-type.
+
+    The header rule counted from the brand div, so when the nav was regrouped it
+    hid the wrong headers — 总览/运维/行为 lost theirs and read as children of
+    Applications. A group you mean to hide marks itself (`class="grp deep"`).
+    """
+    css = _css_rules()
+    assert not re.search(r"nav > \.grp:nth-of-type", css), \
+        "a positional selector hides whichever group lands in that slot"
+    assert 'class="grp deep"' in INDEX, "the deep group must say so on itself"
+    assert re.search(r"nav > \.grp\.deep\s*\{\s*display:none", css), \
+        "the deep group's header is no longer hidden by name"

@@ -120,12 +120,16 @@
   .u{font-weight:550}
   .r{color:var(--ink2);white-space:pre-wrap;margin-top:6px}
 
-  /* Focused workspace shell: operational pages remain deep-linkable, but do
-     not compete with the four agents and four applications in the sidebar. */
+  /* Focused workspace shell: the runtime internals (网关/循环/图工作流/工具/数据库)
+     stay deep-linkable, but do not compete with the agents, applications and
+     system pages in the sidebar. */
   nav a[href="#gateway"],nav a[href="#loop"],nav a[href="#graph"],
-  nav a[href="#tools"],nav a[href="#database"],nav a[href="#models"],
-  nav a[href="#connections"]{display:none}
-  nav > .grp:nth-of-type(4),nav > .grp:nth-of-type(5){display:none}
+  nav a[href="#tools"],nav a[href="#database"]{display:none}
+  /* Its header, by name. This used to be `nav > .grp:nth-of-type(4),:nth-of-type(5)`
+     — counting from the brand div. When the groups were regrouped it silently hid
+     the wrong headers, which is how 总览/运维/行为 ended up looking like part of
+     Applications. A group you mean to hide says so on itself. */
+  nav > .grp.deep{display:none}
   /* --- Reader: a document library beside a reading pane, both full height ---
      The pane was a centred 880px column before. Inside a full-width workspace a
      library list on the left earns that width back: you pick a document, then

@@ -21,18 +21,26 @@
   <a href="#knowledge" data-v="knowledge">知识库</a>
   <a href="#memory" data-v="memory">记忆管理 <span class="n" id="n-mem"></span></a>
   <a href="#coding" data-v="coding">Coding Workspace</a>
-  <div class="grp">Manage</div>
+  <!-- Three groups you actually see: what you talk to (Agents), what you work in
+       (Applications), and the system itself — 系统: how it is doing (总览/运维) and
+       how it is set up (行为/模型/连接). The three used to be split across a
+       "Manage" group and a "设置" group, which left 总览/运维/行为 looking like they
+       belonged to Applications (their own group headers were hidden, see
+       style.css) and buried 模型/连接 below the fold. -->
+  <div class="grp">系统</div>
   <a href="#overview" data-v="overview">总览</a>
+  <a href="#ops" data-v="ops">运维 <span class="n" id="n-ops"></span></a>
+  <a href="#settings" data-v="settings">行为</a>
+  <a href="#models" data-v="models">模型</a>
+  <a href="#connections" data-v="connections">连接</a>
+  <!-- The runtime internals. `deep` = deep-linkable but NOT in the sidebar:
+       they are where you go from a link in a page, not from the nav. -->
+  <div class="grp deep">运行</div>
   <a href="#gateway" data-v="gateway">网关 <span class="n" id="n-gw"></span></a>
   <a href="#loop" data-v="loop">循环 <span class="n" id="n-loop"></span></a>
   <a href="#graph" data-v="graph">图工作流 <span class="n" id="n-graph"></span></a>
   <a href="#tools" data-v="tools">工具 <span class="n" id="n-tools"></span></a>
   <a href="#database" data-v="database">数据库 <span class="n" id="n-db"></span></a>
-  <a href="#ops" data-v="ops">运维 <span class="n" id="n-ops"></span></a>
-  <div class="grp">设置</div>
-  <a href="#models" data-v="models">模型</a>
-  <a href="#connections" data-v="connections">连接</a>
-  <a href="#settings" data-v="settings">行为</a>
 </nav>
 <div class="resizer" id="nav-resizer" title="拖动调整侧栏宽度"></div>
 <main>
