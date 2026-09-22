@@ -44,7 +44,7 @@ from knowme.ops.tracing import TraceEncodingError, iter_trace_lines
 # The frontend lives in its own files (static/index.html + style.css + app.js),
 # served as-is by this stdlib server — no build step, no framework. Edit those
 # to change the UI; edit this file to change the server/API.
-STATIC = Path(__file__).resolve().parent / "static"
+STATIC = Path(__file__).resolve().parents[1] / "static"
 
 # Transient UI state belongs to the web process, not SQLite memory.  The
 # bridge is intentionally explicit so the chat path cannot accidentally read
