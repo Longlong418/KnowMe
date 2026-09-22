@@ -156,6 +156,97 @@ if (typeof Uint8Array.prototype.fromBase64 !== "function") return "浏览器不�
 
 **613 passed / 3 failed / 62 skipped**。3 个失败是既有的、和这轮无关：`test_delegate_env.py` ×2 和 `test_packaging.py::test_the_bundled_skills_are_findable`（缺 `weekly-brief` 这个 skill）。
 
+## Phase 15：知识库改成"一个知识库"，笔记来源标出来（2026-09-22）
+
+你问的那个问题——"知识库有时候不显示"——根因是 Phase 14 那个崩溃，但还有一个**设计上**的原因：笔记是按 Agent 隔离的，而你的笔记分别属于 `reader`、`learning`、`default`。所以停在哪个 Agent，就只能看到那个 Agent 的笔记。停在 `default`（默认落在的那一页）而它一条笔记都没有时，看到的就是空的知识库。
+
+你拍板改成"看所有 Agent 的笔记、只标注来源"。下面是改了什么。
+
+### 关键区分：两个读者，两套规则
+
+这次改动最重要的判断是**分清了两件事**，它们之前被混在一起：
+
+| | 谁在用 | 应该看到什么 |
+|---|---|---|
+| **Dashboard 知识库** | **你（人）** | 所有 Agent 的笔记。这是你自己的知识库，你有全部所有权 |
+| **Agent 自己的工具** | **模型** | 只有它自己的笔记 |
+
+**只有第一行改了。** `make_knowledge_tools()`（模型调用的 `save_note`/`list_notes` 这些工具）**完全没动**——Coding Agent 依然看不到你 Learning 的笔记。这是 Agent 隔离这个功能本身，你没有要求去掉它，去掉会让每个 Agent 都能读到你的私人笔记。
+
+所以这不是"取消隔离"，而是"**浏览器是人的视角，工具调用是 Agent 的视角**"。
+
+### 后端怎么改的
+
+**一个概念：`agent_id=None` 表示"不过滤"。**
+
+`knowme/tools/knowledge.py` 里加了一个小助手，把这个规则收在一处：
+
+```python
+def _agent_conds(agent_id):
+    """把查询限定到某个 Agent 的条件。
+
+    agent_id=None 表示不限定 —— 所有 Agent 的笔记。Dashboard 的知识库就是
+    这么调的，因为看它的人拥有全部笔记。Agent 自己的工具永远不传 None
+    （它们闭包持有自己的 id），所以 Agent 依然读不到别的 Agent 的笔记。
+    None 是刻意写成"必须显式传"的：这样没有任何现有调用会不小心放宽范围。
+    """
+    if agent_id is None:
+        return [], []
+    return ["agent_id = ?"], [agent_id]
+```
+
+`get_note / update_note / delete_note / list_notes / list_folders / search_notes / get_linked_notes` 都支持它，条件用一个小 `_where()` 拼，SQL 不再散落七份（顺手抽了 `_COLS` 常量）。
+
+**为什么不是"加一组新的 all_agents_* 函数"**：那会复制一遍 SQL，而且两个函数长得几乎一样，以后改一个忘一个。用一个参数表达"限定/不限定"是一件事，不是两件事。
+
+**默认值仍是 `"default"`**，所以所有老调用行为不变。只有显式写 `agent_id=None` 才会放宽。
+
+**`dashboard.py`**：
+
+- `knowledge_info()` 去掉了 `agent_id` 参数（它已经不用了，留着会误导），列出全部笔记和全部文件夹。
+- `knowledge_action()`：`list` / `get` / `update` / `delete` / `search` / `links` 都传 `agent_id=None`；**只有 `create` 还用当前 Agent**——新笔记总得盖上某个 Agent 的章。
+
+### 关于"能不能改别人的笔记"这个决定
+
+能。**只要列表里看得到，就应该打得开、存得下。** 否则点开一条笔记、改完点保存却失败，那是比原来的 bug 更糟的体验——我把"看不见"换成了"看得见但用不了"。
+
+而且编辑**不会改变笔记的归属**：`update_note` 的 SQL 只 `SET title/folder/content/updated_at`，从来不 `SET agent_id`。你在 `default` 视图里编辑一条 `learning` 的笔记，它还是 `learning` 的。
+
+### 前端怎么改的
+
+- **`views.js`**：删掉了那行 `filter(n => (n.agent_id||"default") === ACTIVE_AGENT)`——这就是"知识库是空的"的直接原因。文件夹筛选现在跨 Agent 取并集。
+- **每张卡片标出来源**：加了一个 `kb-note-agent` 小标签（灰底描边），显示 `reader` / `learning` / `default`，和彩色的文件夹标签并排。用一个 `kb-note-tags` 包住两个标签——卡片是两列 grid，直接塞第三个 span 会把预览挤到第三行。
+- **`knowledge.js`**：读/写/删/搜索/反链的请求里去掉了 `agent_id`（已经不起限定作用了，留着会让人以为它在限定）。**`create` 保留**。
+- **localStorage 的键从 `knowme_kb_note_<agent>` 改成 `knowme_kb_note`**：列表现在跟 Agent 无关，却按 Agent 分别记"上次打开哪条"，切 Agent 会莫名其妙换一条笔记。一个知识库，一个记忆。
+- **反链也跨 Agent 了**：`[[链接]]` 从一条 Learning 笔记指向 Reader 笔记时，两边都要能看到——点击能跳过去，反向链接却空着，那才是自相矛盾。
+
+### 顺手修掉一个测试里的坑
+
+`evals/deterministic/test_knowledge_frontend.py` 里我那几条新断言，一开始是用 `indexOf("\n  },\n  settings(d){")` 切 `VIEWS.knowledge` 的。这个标记里包含方法自己的收尾 `}`，所以切片少了一个大括号，`eval` 直接 SyntaxError。**另外**：切出来的代码引用了 `ACTIVE_AGENT`，而它在那个 IIFE 里没声明——**故意还原旧代码做反向验证时，它报的是 `ReferenceError` 而不是我想要的"FAIL：只显示了当前 Agent 的笔记"**。所以在 IIFE 里补了 `let ACTIVE_AGENT = "learning"`，让它失败时报的是人话。
+
+反向验证过了：把旧的过滤那行加回去，6 条断言 **FAIL**（消息可读），改回新代码全 PASS。**这个锁是真能抓住回归的，不是摆设。**
+
+### 真机实测（Chrome 153，3 条笔记分属 3 个 Agent）
+
+```
+默认 Agent 下的知识库（以前这里是空的）
+   [reader]    test  (TEST)
+   [default]   test  (TEST)
+   [learning]  test  (DEFAULT)
+切到 reader 之后：条数 3 → 3（列表不再跟着 Agent 变）
+在 default 视图下编辑 learning 那条 → 保存成功，没有报错弹窗
+刷新后：详情区还在，标题还在
+控制台错误：无
+```
+
+数据库里确认了最关键的一条：内容确实写进去了，而 `agent_id` **仍然是 `learning`**。
+
+### 测试基线
+
+**613 passed / 3 failed / 62 skipped**（3 个失败仍是既有的 `test_delegate_env.py` ×2 和 `test_packaging.py`）。ruff 干净。
+
+改动的是断言而不是数量：`test_dashboard_api_keeps_crud_in_the_selected_agent_scope`（它锁的正是被推翻的旧行为）换成了 `test_dashboard_shows_every_agent_but_the_agents_tools_stay_scoped`——**名字里带上了"工具仍然隔离"**，因为那是不许回归的那一半。
+
 ## 项目概览
 
 一个以自研 Agent Core 为底座的个人 Agent 工作平台。支持多Agent记忆隔离，提供Reader应用和Context Bridge。

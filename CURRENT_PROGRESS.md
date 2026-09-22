@@ -1,5 +1,17 @@
 # KnowMe 实现进度更新
 
+## Phase 15: 知识库改成"一个知识库"（2026-09-22）
+- ✅ 知识库显示**所有 Agent** 的笔记，不再只显示当前 Agent 的（停在 default 曾经是空的）
+- ✅ 每张卡片标出来源 Agent（`kb-note-agent` 标签），文件夹筛选跨 Agent 取并集
+- ✅ 看得到就打得开、存得下：`get/update/delete/search/links` 都跨 Agent；只有 `create` 还用当前 Agent
+- ✅ **编辑不改变归属**：在 default 视图里编辑 learning 的笔记，它仍然是 learning 的
+- ✅ **Agent 自己的工具完全没动**，依然只能看自己的笔记——隔离是"人 vs 模型"两个视角，不是取消隔离
+- ✅ 反链也跨 Agent 了（能点过去的链接，另一边就该校验得到）
+- ✅ localStorage 键从 `knowme_kb_note_<agent>` 收敛成 `knowme_kb_note`（一个知识库，一个记忆）
+- ✅ 旧测试 `test_dashboard_api_keeps_crud_in_the_selected_agent_scope` 改名并改断言，新名字带上了"工具仍然隔离"
+- ✅ 反向验证：把旧过滤加回去，6 条断言 FAIL 且消息可读；真机 Chrome 实测通过
+- ✅ 基线 **613 passed / 3 failed / 62 skipped**（3 个失败仍是既有的），ruff 干净
+
 ## Phase 14: 三个 bug 的根因，其实只有一个（2026-09-22）
 - ✅ 找到真正的元凶：`main.js` 的 `render()` 每次都在给一个已经被删掉的侧边栏计数位写数字，直接抛异常
 - ✅ 异常发生在函数中段，所以它下面的「恢复阅读器文档」「恢复知识库笔记」从来没被执行过——三个 bug 是同一个原因
