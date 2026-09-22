@@ -568,7 +568,7 @@ def collect(agent_id: str = "default") -> dict:
         "workspace": workspace_info(),
         "settings": info,
         "providers": [asdict(view) for view in list_providers()],
-        "knowledge_info": knowledge_info(agent_id),
+        "knowledge_info": knowledge_info(),
         "connections": [asdict(view) for view in list_connections()],
         "tools": tools_info(),
         "usage": usage_summary(home),
@@ -643,17 +643,19 @@ def _tool_source(name: str, mcp_servers: list[str]) -> str:
     return "other"
 
 
-def knowledge_info(agent_id: str = "default") -> dict:
-    """Return the current user's knowledge notes for the dashboard.
+def knowledge_info() -> dict:
+    """Every one of the user's knowledge notes, for the dashboard.
 
-    The browser filters the returned snapshots by its selected Agent. Keeping
-    the agent id on each row also makes old dashboards safe during migration.
+    Not filtered by Agent: this is the human's own knowledge base and they own
+    every note in it, whatever Agent wrote it. Each row still carries its
+    agent_id so the view can label where the note came from. (the Agents' own
+    tools stay scoped — see knowme/tools/knowledge.py:_agent_conds.)
     """
     from knowme.tools.knowledge import list_folders, list_notes
     settings = load_settings()
     conn = connect(settings.home)
-    notes = list_notes(conn, agent_id=agent_id)
-    folders = list_folders(conn, agent_id=agent_id)
+    notes = list_notes(conn, agent_id=None)
+    folders = list_folders(conn, agent_id=None)
     return {
         "notes_count": len(notes),
         "folders": folders,
@@ -1111,7 +1113,15 @@ def library_file(conn, home, doc_id: str):
 
 
 def knowledge_action(payload: dict) -> dict:
-    """Store, retrieve, and delete knowledge notes with [[links]] support."""
+    """Store, retrieve, and delete knowledge notes with [[links]] support.
+
+    The dashboard is the human's own view, so reading, editing and deleting all
+    span every Agent — you can open and save any note you can see, whichever
+    Agent wrote it, and the note keeps its original agent_id. Only `create`
+    still uses the selected Agent, because a NEW note has to be stamped with
+    somebody. (The Agents' tools remain scoped: this is the browser, not a tool
+    call.)
+    """
     from knowme.db import connect
     from knowme.tools.knowledge import (
         create_note,
@@ -1132,11 +1142,11 @@ def knowledge_action(payload: dict) -> dict:
     action = payload.get("action", "")
 
     if action == "list":
-        notes = list_notes(conn, payload.get("folder"), agent_id)
-        folders = list_folders(conn, agent_id)
+        notes = list_notes(conn, payload.get("folder"), agent_id=None)
+        folders = list_folders(conn, agent_id=None)
         return {"ok": True, "notes": notes, "folders": folders}
     elif action == "get":
-        note = get_note(conn, payload.get("note_id", ""), agent_id)
+        note = get_note(conn, payload.get("note_id", ""), agent_id=None)
         return {"ok": True, "note": note} if note else {"ok": False, "error": "Note not found"}
     elif action == "create":
         try:
@@ -1158,19 +1168,19 @@ def knowledge_action(payload: dict) -> dict:
                 payload.get("content", ""),
                 title=payload.get("title"),
                 folder=payload.get("folder"),
-                agent_id=agent_id,
+                agent_id=None,
             )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "note": note} if note else {"ok": False, "error": "Note not found"}
     elif action == "delete":
-        deleted = delete_note(conn, payload.get("note_id", ""), agent_id)
+        deleted = delete_note(conn, payload.get("note_id", ""), agent_id=None)
         return {"ok": deleted, "error": "Note not found"} if not deleted else {"ok": True}
     elif action == "search":
-        notes = search_notes(conn, payload.get("query", ""), agent_id)
+        notes = search_notes(conn, payload.get("query", ""), agent_id=None)
         return {"ok": True, "notes": notes}
     elif action == "links":
-        notes = get_linked_notes(conn, payload.get("note_id", ""), agent_id)
+        notes = get_linked_notes(conn, payload.get("note_id", ""), agent_id=None)
         return {"ok": True, "notes": notes}
     else:
         return {"error": f"unknown knowledge action: {action}"}

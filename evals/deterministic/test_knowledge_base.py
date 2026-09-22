@@ -1,4 +1,8 @@
-"""Knowledge Base invariants: usable CRUD without cross-Agent leakage."""
+"""Knowledge Base invariants: usable CRUD, and the right things stay scoped.
+
+Two audiences read these notes. The human's dashboard sees all of them; an
+Agent's own tools see only its own. Both halves are asserted here.
+"""
 
 import pytest
 
@@ -56,7 +60,18 @@ def test_wiki_links_are_deduplicated_and_escaped_for_html(tmp_path):
     assert "&lt;script&gt;" in html
 
 
-def test_dashboard_api_keeps_crud_in_the_selected_agent_scope(tmp_path, monkeypatch):
+def test_dashboard_shows_every_agent_but_the_agents_tools_stay_scoped(tmp_path, monkeypatch):
+    """The dashboard is the human's view; a tool call is an Agent's.
+
+    This used to assert the opposite — that the dashboard filtered notes by the
+    selected Agent — and that filter is why the knowledge base looked empty
+    whenever the selected Agent had not written any notes yet. The human owns
+    every note in their own knowledge base, so the browser shows them all.
+
+    The isolation that MATTERS is unchanged and is asserted at the bottom: an
+    Agent's own tools still cannot see another Agent's notes. Losing that half
+    while fixing the first is the failure this test exists to catch.
+    """
     from knowme.config import Settings
     from knowme.ops import dashboard
 
@@ -64,14 +79,35 @@ def test_dashboard_api_keeps_crud_in_the_selected_agent_scope(tmp_path, monkeypa
     settings.ensure_home()
     monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
 
-    created = dashboard.knowledge_action({
-        "action": "create", "title": "Private", "content": "coding only",
+    coding = dashboard.knowledge_action({
+        "action": "create", "title": "Coding note", "content": "coding only",
         "agent_id": "coding",
-    })
-    note_id = created["note"]["id"]
-    assert dashboard.knowledge_action({"action": "get", "note_id": note_id,
-                                       "agent_id": "default"})["ok"] is False
-    assert dashboard.knowledge_action({"action": "get", "note_id": note_id,
-                                       "agent_id": "coding"})["ok"] is True
-    assert dashboard.knowledge_action({"action": "delete", "note_id": note_id,
-                                       "agent_id": "default"})["ok"] is False
+    })["note"]
+    learning = dashboard.knowledge_action({
+        "action": "create", "title": "Learning note", "content": "learning only",
+        "agent_id": "learning",
+    })["note"]
+
+    # The list spans Agents, and still says who wrote what — that label is what
+    # the view shows on each card.
+    listed = dashboard.knowledge_action({"action": "list", "agent_id": "default"})
+    assert {n["title"]: n["agent_id"] for n in listed["notes"]} == {
+        "Coding note": "coding", "Learning note": "learning"}
+
+    # A note you can see, you can open, save and delete — from any Agent. The
+    # note does not change owner when you do.
+    assert dashboard.knowledge_action({"action": "get", "note_id": coding["id"],
+                                       "agent_id": "default"})["ok"] is True
+    saved = dashboard.knowledge_action({
+        "action": "update", "note_id": coding["id"], "content": "edited",
+        "title": "Coding note", "agent_id": "default"})
+    assert saved["ok"] is True and saved["note"]["agent_id"] == "coding"
+
+    # The Agents' tools are the boundary, and it still holds.
+    conn = connect(tmp_path)
+    assert [n["content"] for n in list_notes(conn, agent_id="coding")] == ["edited"]
+    assert [n["content"] for n in list_notes(conn, agent_id="learning")] == ["learning only"]
+    assert get_note(conn, learning["id"], "coding") is None
+
+    assert dashboard.knowledge_action({"action": "delete", "note_id": coding["id"],
+                                       "agent_id": "default"})["ok"] is True

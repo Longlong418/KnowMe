@@ -3,15 +3,19 @@
 // Classic <script>, shared global scope (no build step, no modules).
 // Load order + rules: static/README.md.
 //
-// Every call carries agent_id: notes are agent-scoped on the server, so a note
-// written while the Learning agent is active is not visible to Coding. The
-// sub-view markup lives in views.js; this file is the interaction.
+// This is the human's view, so it shows EVERY Agent's notes at once and labels
+// where each one came from. The Agents' own tools stay scoped — a note you see
+// here next to a Coding note is still invisible to the Coding agent. Only
+// `create` sends an agent_id, because a new note has to be stamped with one.
+// The sub-view markup lives in views.js; this file is the interaction.
 
 let currentNoteId = null;
 let currentNoteContent = "";
 
+// One key, not one per Agent: the list is the same whichever Agent is active,
+// so remembering a different note for each would reopen something at random.
 function knowledgeStateKey(){
-  return `knowme_kb_note_${ACTIVE_AGENT || "default"}`;
+  return "knowme_kb_note";
 }
 
 async function restoreKnowledgeState(){
@@ -72,7 +76,7 @@ async function viewKnowledgeNote(noteId, options = {}){
   if (options.remember !== false) localStorage.setItem(knowledgeStateKey(), noteId);
   try {
     const res = await postJSON("/api/knowledge", {
-      action: "get", note_id: noteId, agent_id: ACTIVE_AGENT
+      action: "get", note_id: noteId
     });
     if (!res.ok) return alert(res.error || "笔记不存在");
     const note = res.note || {};
@@ -88,7 +92,7 @@ async function viewKnowledgeNote(noteId, options = {}){
     currentNoteContent = note.content || "";
     renderKnowledgePreview();
     const links = await postJSON("/api/knowledge", {
-      action: "links", note_id: noteId, agent_id: ACTIVE_AGENT
+      action: "links", note_id: noteId
     });
     renderKnowledgeBacklinks(links.notes || []);
   } catch (error) { alert("打开笔记失败：" + (error.message || error)); }
@@ -102,7 +106,7 @@ async function saveKnowledgeNote(){
   if (!id) return;
   try {
     const res = await postJSON("/api/knowledge", {
-      action: "update", note_id: id, content, title, folder, agent_id: ACTIVE_AGENT
+      action: "update", note_id: id, content, title, folder
     });
     if (res.ok) {
       editing = false;
@@ -117,7 +121,7 @@ async function deleteKnowledgeNote(){
   if (!confirm("确定删除这条笔记吗？此操作不可撤销。")) return;
   try {
     const res = await postJSON("/api/knowledge", {
-      action: "delete", note_id: currentNoteId, agent_id: ACTIVE_AGENT
+      action: "delete", note_id: currentNoteId
     });
     if (!res.ok) return alert(res.error || "删除笔记失败");
     editing = false;
@@ -160,7 +164,7 @@ async function openKnowledgeByTitle(encodedTitle){
   const title = decodeURIComponent(encodedTitle || "");
   try {
     const res = await postJSON("/api/knowledge", {
-      action: "search", query: title, agent_id: ACTIVE_AGENT
+      action: "search", query: title
     });
     const note = (res.notes || []).find(n => n.title === title) || res.notes?.[0];
     if (note) viewKnowledgeNote(note.id);

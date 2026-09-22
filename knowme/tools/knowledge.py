@@ -76,18 +76,50 @@ def linkify_content(content: str) -> str:
     return re.sub(r'\[\[([^\]]+)\]\]', replace_link, content)
 
 
-def get_note(conn: sqlite3.Connection, note_id: str, agent_id: str = "default") -> Note | None:
-    """Get a note by ID."""
-    _ensure_table(conn)
+# The columns every note query returns, in one place.
+_COLS = "id, title, folder, content, created_at, updated_at, agent_id"
+
+
+def _agent_conds(agent_id: str | None) -> tuple[list[str], list]:
+    """The WHERE conditions that scope a notes query to one Agent.
+
+    ``agent_id=None`` means NO scoping — every Agent's notes. That is what the
+    Dashboard's knowledge view asks for, because the human reading it owns all
+    the notes; it is one knowledge base, not one per Agent. The Agents' own
+    tools never pass None (they close over their own id), so an Agent still
+    cannot read another Agent's notes. None is deliberately explicit: it has to
+    be written out, so no existing caller can widen its scope by accident.
+    """
+    if agent_id is None:
+        return [], []
+    return ["agent_id = ?"], [agent_id]
+
+
+def _where(conds: list[str]) -> str:
+    return f" WHERE {' AND '.join(conds)}" if conds else ""
+
+
+def _select(conn: sqlite3.Connection, conds: list[str], params: list,
+            order: str = " ORDER BY updated_at DESC") -> list[Note]:
+    """Run the one SELECT shape every note listing shares."""
     cursor = conn.execute(
-        "SELECT id, title, folder, content, created_at, updated_at, agent_id "
-        "FROM notes WHERE id = ? AND agent_id = ?",
-        (note_id, agent_id),
+        f"SELECT {_COLS} FROM notes{_where(conds)}{order}",
+        tuple(params),
     )
-    row = cursor.fetchone()
-    if not row:
-        return None
-    return _note_from_row(row)
+    return [_note_from_row(row) for row in cursor.fetchall()]
+
+
+def get_note(conn: sqlite3.Connection, note_id: str,
+             agent_id: str | None = "default") -> Note | None:
+    """Get a note by ID. Pass agent_id=None to find it whoever owns it."""
+    _ensure_table(conn)
+    conds, params = _agent_conds(agent_id)
+    conds.insert(0, "id = ?")
+    params.insert(0, note_id)
+    row = conn.execute(
+        f"SELECT {_COLS} FROM notes{_where(conds)}", tuple(params)
+    ).fetchone()
+    return _note_from_row(row) if row else None
 
 
 def create_note(conn: sqlite3.Connection, title: str, folder: str = "default", content: str = "",
@@ -114,8 +146,12 @@ def create_note(conn: sqlite3.Connection, title: str, folder: str = "default", c
 
 def update_note(conn: sqlite3.Connection, note_id: str, content: str,
                 title: str | None = None, folder: str | None = None,
-                agent_id: str = "default") -> Note | None:
-    """Update a note's content."""
+                agent_id: str | None = "default") -> Note | None:
+    """Update a note's content. agent_id=None updates it whoever owns it.
+
+    Editing never reassigns a note: the row keeps the agent_id it was created
+    with even when the human edits it from another Agent's view.
+    """
     note = get_note(conn, note_id, agent_id)
     if not note:
         return None
@@ -125,10 +161,12 @@ def update_note(conn: sqlite3.Connection, note_id: str, content: str,
     if not new_title:
         raise ValueError("note title cannot be empty")
     updated_at = datetime.now(UTC).isoformat()
+    conds, params = _agent_conds(agent_id)
+    conds.insert(0, "id = ?")
+    params.insert(0, note_id)
     conn.execute(
-        "UPDATE notes SET title=?, folder=?, content=?, updated_at=? "
-        "WHERE id=? AND agent_id=?",
-        (new_title, new_folder, content, updated_at, note_id, agent_id),
+        f"UPDATE notes SET title=?, folder=?, content=?, updated_at=?{_where(conds)}",
+        (new_title, new_folder, content, updated_at, *params),
     )
     conn.commit()
 
@@ -136,72 +174,69 @@ def update_note(conn: sqlite3.Connection, note_id: str, content: str,
             "content": content, "updated_at": updated_at}
 
 
-def delete_note(conn: sqlite3.Connection, note_id: str, agent_id: str = "default") -> bool:
-    """Delete a note."""
+def delete_note(conn: sqlite3.Connection, note_id: str,
+                agent_id: str | None = "default") -> bool:
+    """Delete a note. agent_id=None deletes it whoever owns it."""
     _ensure_table(conn)
-    cursor = conn.execute(
-        "DELETE FROM notes WHERE id = ? AND agent_id = ?", (note_id, agent_id)
-    )
+    conds, params = _agent_conds(agent_id)
+    conds.insert(0, "id = ?")
+    params.insert(0, note_id)
+    cursor = conn.execute(f"DELETE FROM notes{_where(conds)}", tuple(params))
     conn.commit()
     return cursor.rowcount > 0
 
 
 def list_notes(conn: sqlite3.Connection, folder: str | None = None,
-               agent_id: str = "default") -> list[Note]:
-    """List all notes, optionally filtered by folder."""
+               agent_id: str | None = "default") -> list[Note]:
+    """List notes, optionally filtered by folder. agent_id=None lists all Agents'."""
     _ensure_table(conn)
+    conds, params = _agent_conds(agent_id)
     if folder:
-        cursor = conn.execute(
-            "SELECT id, title, folder, content, created_at, updated_at, agent_id FROM notes "
-            "WHERE folder = ? AND agent_id = ?",
-            (folder, agent_id)
-        )
-    else:
-        cursor = conn.execute(
-            "SELECT id, title, folder, content, created_at, updated_at, agent_id FROM notes "
-            "WHERE agent_id = ? ORDER BY updated_at DESC",
-            (agent_id,)
-        )
-    return [_note_from_row(row) for row in cursor.fetchall()]
+        conds.append("folder = ?")
+        params.append(folder)
+    return _select(conn, conds, params)
 
 
-def list_folders(conn: sqlite3.Connection, agent_id: str = "default") -> list[str]:
-    """List all folders with notes."""
+def list_folders(conn: sqlite3.Connection, agent_id: str | None = "default") -> list[str]:
+    """List every folder that has a note. agent_id=None spans all Agents."""
     _ensure_table(conn)
+    conds, params = _agent_conds(agent_id)
     cursor = conn.execute(
-        "SELECT DISTINCT folder FROM notes WHERE agent_id = ? ORDER BY folder",
-        (agent_id,),
+        f"SELECT DISTINCT folder FROM notes{_where(conds)} ORDER BY folder", tuple(params)
     )
     return [row["folder"] for row in cursor.fetchall()]
 
 
 def search_notes(conn: sqlite3.Connection, query: str,
-                 agent_id: str = "default") -> list[Note]:
-    """Search notes by title or content."""
+                 agent_id: str | None = "default") -> list[Note]:
+    """Search notes by title or content. agent_id=None searches all Agents'."""
     _ensure_table(conn)
-    cursor = conn.execute(
-        "SELECT id, title, folder, content, created_at, updated_at, agent_id FROM notes "
-        "WHERE agent_id = ? AND (title LIKE ? OR content LIKE ?) ORDER BY updated_at DESC",
-        (agent_id, f"%{query}%", f"%{query}%")
-    )
-    return [_note_from_row(row) for row in cursor.fetchall()]
+    conds, params = _agent_conds(agent_id)
+    conds.append("(title LIKE ? OR content LIKE ?)")
+    params += [f"%{query}%", f"%{query}%"]
+    return _select(conn, conds, params)
 
 
 def get_linked_notes(conn: sqlite3.Connection, note_id: str,
-                     agent_id: str = "default") -> list[Note]:
-    """Get notes that link TO this note."""
+                     agent_id: str | None = "default") -> list[Note]:
+    """Get notes that link TO this note. agent_id=None spans all Agents.
+
+    A [[link]] in a note the Learning agent wrote can point at a note the Reader
+    agent wrote — the human's knowledge base is one graph, so the backlinks
+    shown next to a note have to cross Agents too, or a link you can click
+    would have no backlink on the other end.
+    """
     note = get_note(conn, note_id, agent_id)
     if not note:
         return []
 
     _ensure_table(conn)
-    pattern = f"%[[{note['title']}]]%"
-    cursor = conn.execute(
-        "SELECT id, title, folder, content, created_at, updated_at, agent_id FROM notes "
-        "WHERE agent_id = ? AND content LIKE ? AND id != ?",
-        (agent_id, pattern, note_id)
-    )
-    return [_note_from_row(row) for row in cursor.fetchall()]
+    conds, params = _agent_conds(agent_id)
+    conds.append("content LIKE ?")
+    params.append(f"%[[{note['title']}]]%")
+    conds.append("id != ?")
+    params.append(note_id)
+    return _select(conn, conds, params)
 
 
 def make_knowledge_tools(conn: sqlite3.Connection, agent_id: str = "default") -> dict:

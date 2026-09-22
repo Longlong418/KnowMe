@@ -587,10 +587,15 @@ const VIEWS = {
   knowledge(d){
     const kb = d.knowledge_info || {};
     const selectedFolder = localStorage.getItem("knowme_kb_folder") || "";
-    const agentNotes = (kb.notes || []).filter(n => (n.agent_id || "default") === ACTIVE_AGENT);
-    const notes = agentNotes.filter(n => !selectedFolder || n.folder === selectedFolder);
+    // Every Agent's notes, not just the active one. This is the human's own
+    // knowledge base and they own all of it -- filtering by the selected Agent
+    // here is what made the view look empty whenever you were on an Agent that
+    // had not written any notes yet. Each card is labelled with the Agent that
+    // wrote it, so a Reader note is not mistaken for a Coding one.
+    const allNotes = kb.notes || [];
+    const notes = allNotes.filter(n => !selectedFolder || n.folder === selectedFolder);
     const folders = (kb.all_folders || kb.folders || []).filter((folder, index, all) =>
-      all.indexOf(folder) === index && agentNotes.some(n => n.folder === folder));
+      all.indexOf(folder) === index && allNotes.some(n => n.folder === folder));
     let h = `<div class="meta kb-intro"><b>知识库</b> — 用文件夹整理笔记，用 <code>[[笔记标题]]</code> 连接想法。</div>
       <div class="kb-shell">
         <aside class="kb-sidebar">
@@ -607,7 +612,10 @@ const VIEWS = {
       const searchText = esc(`${n.title} ${n.folder} ${preview}`.toLowerCase());
       h += `<button class="kb-note-card" data-search="${searchText}" onclick="viewKnowledgeNote('${esc(n.id)}')">
         <span class="kb-note-title">${esc(n.title)}</span>
-        <span class="kb-note-folder">${esc(n.folder)}</span>
+        <span class="kb-note-tags">
+          <span class="kb-note-folder">${esc(n.folder)}</span>
+          <span class="kb-note-agent" title="这条笔记属于哪个 Agent">${esc(n.agent_id || "default")}</span>
+        </span>
         <span class="kb-note-preview">${esc(preview.slice(0, 100))}${preview.length > 100 ? "…" : ""}</span>
       </button>`;
     }

@@ -118,7 +118,7 @@ pendingTests.push((function testKnowledgePane() {
 
   return (async () => {
     // --- a page load comes back to the note you were last in ------------------
-    storage["knowme_kb_note_learning"] = "n1";
+    storage["knowme_kb_note"] = "n1";
     activeView = "knowledge";
     render();
     await flush();
@@ -149,7 +149,7 @@ pendingTests.push((function testKnowledgePane() {
     newKnowledgeNote();
     assert(el("kb-create-editor").style.display === "block", "新建 shows the create form");
     assert(el("kb-empty-editor").style.display === "none", "and hides the welcome panel");
-    assert(!("knowme_kb_note_learning" in storage), "新建 forgets the remembered note");
+    assert(!("knowme_kb_note" in storage), "新建 forgets the remembered note");
 
     // --- creating a note must not re-open the one you were in before ---------
     const getsBefore = gets.length;
@@ -164,12 +164,55 @@ pendingTests.push((function testKnowledgePane() {
 
     // --- deleting forgets the note, so a reload cannot chase a dead id -------
     await viewKnowledgeNote("n1");
-    assert(storage["knowme_kb_note_learning"] === "n1", "opening a note remembers it");
+    assert(storage["knowme_kb_note"] === "n1", "opening a note remembers it");
     await deleteKnowledgeNote();
-    assert(!("knowme_kb_note_learning" in storage), "deleting it forgets it");
+    assert(!("knowme_kb_note" in storage), "deleting it forgets it");
     assert(el("kb-note-detail").style.display === "none", "and closes the detail pane");
   })();
 })());
+
+// ---- the list shows every Agent's notes, and says who wrote each ------------
+// The regression: VIEWS.knowledge filtered the list to the ACTIVE Agent, so the
+// knowledge base looked EMPTY whenever you were on an Agent that had not
+// written a note yet. Notes are agent-stamped, so for this user that was most
+// Agents — including the default one, which is the view you land on.
+(function testEveryAgentIsShown() {
+  const from = viewsSrc.indexOf("knowledge(d){");
+  // The end marker is the "}" that CLOSES the method, so it has to be included
+  // (+4 skips back over "\n  }") or the eval gets an unclosed function body.
+  const to = viewsSrc.indexOf("\n  },\n  settings(d){");
+  assert(from > 0 && to > from, "VIEWS.knowledge is still findable in views.js");
+  const view = eval("({" + viewsSrc.slice(from, to + 4) + "})").knowledge;
+  const esc = s => String(s);                         // the view escapes its own output
+  // Declared because the view may (and once did) filter on it. Without it, a
+  // reintroduced `=== ACTIVE_AGENT` filter would blow up the harness with a
+  // ReferenceError instead of failing the claims below with a readable message.
+  let ACTIVE_AGENT = "learning";
+
+  const html = view({ knowledge_info: {
+    notes: [
+      { id: "n1", title: "Reader note", folder: "papers", content: "a", agent_id: "reader" },
+      { id: "n2", title: "Learning note", folder: "notes", content: "b", agent_id: "learning" },
+    ],
+    all_folders: ["papers", "notes"],
+  } });
+  assert(html.includes("Reader note") && html.includes("Learning note"),
+         "every Agent's notes are listed, not only the active Agent's");
+  assert(html.includes(">reader<") && html.includes(">learning<"),
+         "every card is labelled with the Agent that wrote it");
+  assert(html.includes("papers") && html.includes("notes"),
+         "the folder filter offers folders from every Agent's notes");
+  assert(html.includes("2 条"), "the count is the number of notes actually shown");
+
+  // A note with no agent stamp (an old row) must not vanish: it reads "default".
+  const legacy = view({ knowledge_info: { notes: [
+    { id: "n3", title: "Old note", folder: "default", content: "", agent_id: "" }] } });
+  assert(legacy.includes("Old note"), "a note with no agent stamp is still listed");
+  assert(legacy.includes(">default<"), "and is labelled with the default Agent");
+
+  assert(view({ knowledge_info: {} }).includes("还没有笔记"),
+         "a knowledge base with no notes at all still says so");
+})();
 
 // ---- the markup the app is written against ----------------------------------
 // knowledge.js looks every one of these ids up by name; dropping one from
