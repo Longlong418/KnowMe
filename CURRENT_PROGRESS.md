@@ -1,5 +1,19 @@
 # KnowMe 实现进度更新
 
+## Phase 18: 选中之后在右边问 + 页面和这一轮必须用同一个线程（2026-09-22）
+- ✅ **选中文字按「发送给 Agent」会把你甩到上面的 agent 视图**：`rcSend()` 原来去填主对话的 `#dmsg`，填不到就 `openAgent()` 导航过去——引用一句话，人却离开了正在读的文档
+- ✅ 改成填右侧提问框 `#amsg` 并聚焦（面板本来就贴在文档右边），按钮和提示语改成「在右侧提问」；选中内容仍经 Context Bridge 同时发给 reader 和当前 agent
+- ✅ 面板开着就不重建它（重建会丢选区）；关着才靠 `setAskPanel` 重建一次把它打开
+- ✅ **又一层同类问题（更长引信）**：`/api/data` 走 `dash_session()`、一轮对话走 `get_agent()`，**两边各自调一次** `resume_or_new_session()`；最后一条消息够老时两边都判"旧线程结束"、各自生成带时间戳的新 id → 页面 publish 到 A、这一轮在 B 里回答，`application_chars=0`（实测 `…155717` vs `…155727`）
+- ✅ 改法一句话：`get_agent()` 直接用 `dash_session()` 定好的线程，不再自己掷骰子。**`default` 走同一对函数，主对话第一句话同样中招**
+- ✅ **空闲轮换那一半**：轮换发生在这一轮开始之后，一小时前 publish 的快照留在旧线程上——新增 `ApplicationContextBridge.rekey()`，在轮换之后把快照搬过去（快照是"屏幕上开着什么"，属于即将回答的那个线程）
+- ✅ 锁的坑记一笔：`_new_session_id()` 只精确到秒，同一秒内两次调用会撞出同一个 id、测试白过——所以把 `_new_session_id` 打桩成计数器
+- ✅ 反向验证：还原旧写法读到 `AssertionError: … dashboard-fresh-02`（页面 01 / 这一轮 02）；轮换那条把 `rekey` 打成空操作就 FAIL
+- ✅ 真实 Chrome 13 项全过（副本 + `KNOWME_SESSION_IDLE_MINUTES=1` + 灌了历史让日志真能滚）：`24157` 字、翻上去不被推回、按发送回到底部、选中进右侧框不跳走
+- ✅ 最后两条配套：**先确认真的换了线程**（`dashboard-reader-seed -> …160326`），再看文档跟没跟着（`application_chars=2142`）——否则换线程没发生时这条检查是空的
+- ✅ 基线 **619 passed / 3 failed / 62 skipped**（3 个既有失败；26 个 ERROR 是 `evals/judge/` 缺 `deepeval`），ruff 干净
+- ✅ 提交：`d608afa`、`b09431a`
+
 ## Phase 17: 提问看不到当前文档 + 日志被轮询推回底部（2026-09-22）
 - ✅ **右侧提问看不到当前文档**：Context Bridge 按 (agent, session) 存，服务端按"这一轮是哪个 Agent 在问"取——而前端只写进 `ACTIVE_AGENT` 那一格，面板却是以 `reader` 问的，两边从来不是同一格
 - ✅ 改法：一次发布两个目标（面板的 `reader` + 主对话的 `ACTIVE_AGENT`，后者是`选中文字→发送`在用的）；`askSessionId()` 把"reader 的线程是谁"收在一处

@@ -434,6 +434,63 @@ PASS  按发送之后日志回到最新一条 （scrollTop=17170 底部=17170）
 
 **选中文字之后不按发送，Agent 是看不到的**——它只在你点「发送」时（`rcSend`）才知道你选了哪一段。这是现在的行为，我没有动它：要不要"选中即注入"是个产品决定，你说一声我再改。
 
+## Phase 18：选中之后在右边问 + 页面和这一轮必须用同一个线程（2026-09-22）
+
+你报了两件事：选中文字按「发送给 Agent」，人被甩到上面的 agent 视图去了，你要的是在右边栏提问；以及顺着上一轮"看不出我开着哪篇文档"再挖下去，发现还有一个更长引信的同类问题。
+
+### 1. 选中文字 → 在右边问（不再跳走）
+
+以前的 `rcSend()` 是去填主对话那个输入框 `#dmsg`，填不到就 `openAgent()` 导航到 `#agent/<当前 agent>`——你只是引用一句话，人却被从正在读的文档里扔了出去。
+
+现在改成填右侧提问框 `#amsg`，并把焦点放进去，等你按发送。理由很直接：**那个面板本来就贴在文档右边，而"就着正在读的内容提问"正是 reader agent 存在的意义**。选中内容照旧经过 Context Bridge 同时发给 reader 和当前 agent 两个格子，所以主对话那一侧也还是拿得到这段话。
+
+- 按钮和提示语都改成「在右侧提问」/「选中文本后可在右侧提问」。
+- `rcSend()` 现在返回 promise（测试要能等它跑完）。面板本来开着就不重建它——重建会把你的选区丢掉，白丢一次；只有关着的时候才需要重建一次把它打开（靠 `setAskPanel`，见上一轮那段注释）。
+
+### 2. 真正的大问题：页面认的线程 ≠ 这一轮跑的线程
+
+上一轮修完"publish 挂错了 agent"，我以为这件事完了。结果在真实 Chrome 上再跑一次，bug 1 又 FAIL 了，日志里写得很清楚：
+
+```
+→ agent_id=reader session_id=dashboard-reader-20260922-155717 …
+→ agent_id=reader session_id=dashboard-reader-20260922-155727 …
+FAIL  reader agent 拿到了当前打开的文档 application_chars=0
+```
+
+publish 写进了 `…155717`，这一轮却在 `…155727` 里回答。原因不是轮换，是**同一个问题问了两遍**：
+
+- 页面加载时 `/api/data` 调 `dash_session()`，它调 `resume_or_new_session()` 决定"现在该用哪个线程"；
+- 一轮对话开始时 `get_agent()` **又自己调了一次** `resume_or_new_session()`。
+
+当这个 agent 最后一条消息够老（超过 `KNOWME_SESSION_IDLE_MINUTES`），两次调用都会判定"旧线程结束了"，各自 `_new_session_id()` 生成一个带时间戳的新 id。两次发生在不同的秒上（上面就是差了 10 秒），于是页面把打开的文档 publish 到 A，这一轮在 B 里回答，桥里当然是空的。**这不是阅读器独有的问题**：`default` 走的是同一对函数，主对话第一句话同样会落到一个页面不知道的线程里。
+
+修法只有一句话——`get_agent()` 不再自己掷骰子，直接用 `dash_session()` 已经定好的那个线程。谁先问谁决定，后面的人照抄。
+
+顺带补上同症状的另一半：**空闲轮换发生在这一轮开始之后**。你上午打开 dashboard（页面认下线程 A），一直开着读文档（publish 到 A），一小时后才第一次提问——这时候 `maybe_rotate_session()` 才把 A 换成 B，而快照还留在 A 上，你读了一小时的那篇恰好在你问它的那一刻掉线。新增 `ApplicationContextBridge.rekey(agent, 旧, 新)`，在这一轮开始、轮换之后把快照搬过去。判断依据是：**快照描述的是"屏幕上开着什么"，不是"说过什么"**，所以它属于这一轮即将回答的那个线程。
+
+### 复现与验证
+
+- 单元锁：`test_browser_agent.py::test_the_page_and_the_first_turn_agree_on_the_thread`。这里有个坑值得记一笔——`_new_session_id()` 只精确到秒，两次调用在同一秒内会撞出**同一个** id，测试就会白过。所以这个测试把 `_new_session_id` 打桩成一个计数器，让两次调用必然拿到不同的值，模拟真实里"差了几秒"的那种情况。
+- 反向验证：把 `get_agent()` 还原成旧写法，读到的是
+  `AssertionError: … + dashboard-fresh-02`（页面拿到 01，这一轮跑 02）——失败原因一眼就是这个问题本身。
+- 真实 Chrome（`.claude/verify17.py`，副本 + 端口 31237 + `KNOWME_SESSION_IDLE_MINUTES=1`）：**13 项全过**。为了让日志真能滚起来，副本里给 reader 和 default 各灌了 24 条历史消息。关键几条：
+
+```
+PASS  reader agent 拿到了当前打开的文档 application_chars=24157
+PASS  翻到顶部成功 / 轮询没有把你推回底部 （7 秒后 scrollTop=0）
+PASS  按发送之后日志回到最新一条 （scrollTop=2817 底部=2817）
+PASS  没有跳到上面的 agent 视图 （hash=#reader）
+PASS  选中的文字进了右侧提问框 （'[选中文本] Coding Workspace MVP这次新增的是 Coding'）
+PASS  空闲之后真的换了新线程（否则这条检查是空的） （dashboard-reader-seed -> dashboard-reader-20260922-160326）
+PASS  换线程之后 reader agent 还是看得到那篇文档 application_chars=2142
+```
+
+最后两条是配套的：**先确认真的换了线程，再看文档有没有跟着走**。否则换线程没发生时这条检查等于什么都没验（这正是我一开始跑出来的假 PASS 风险）。`2142` 比 `24157` 小，是因为转线程之前你刚好又选中了另一篇小文档，快照跟的是"现在屏幕上开着的那篇"——这正是我们要的语义。
+
+### 测试基线
+
+**619 passed / 3 failed / 62 skipped**（比上轮多 3 条：页面/线程一致性的锁、轮换搬快照的锁、选中走右侧的锁）。3 个失败仍是既有那三个，另外 26 个 ERROR 是 `evals/judge/` 需要 `deepeval`，本机没装。
+
 ## 项目概览
 
 一个以自研 Agent Core 为底座的个人 Agent 工作平台。支持多Agent记忆隔离，提供Reader应用和Context Bridge。
@@ -723,7 +780,8 @@ cd D:\LLM\Agent\knowme-agent
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 dashboard**。
 - **已知失败的 3 个测试**（动手前先看一眼，别把它们算到自己头上）：
   `test_delegate_env.py` ×2、`test_packaging.py::test_the_bundled_skills_are_findable`。
-  干净工作区就失败，与前端无关。当前基线：**616 passed / 3 failed / 62 skipped**。
+  干净工作区就失败，与前端无关。另外 `evals/judge/` 有 26 个 ERROR，是没装 `deepeval`。
+  当前基线：**619 passed / 3 failed / 62 skipped**。
 - **改完 `.py` 一定要重启 dashboard**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
   硬刷新就能看到；但 `dashboard.py` 及其 import 的一切都在内存里。
   （2026-09-21 亲自踩到：改了 `library.py` 后接口还是旧行为，以为改错了。）
