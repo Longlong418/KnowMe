@@ -18,6 +18,13 @@ So the lock is not really about counters. It is about the loop: a cosmetic
 counter that has lost its element must degrade to a counter that is not
 painted, and the rest of render() must still run. node is required here and
 soft elsewhere, so this skips rather than fails without it.
+
+The file also owns the other half of the same loop: what the poll does to the
+chat log. Repainting it follows the newest message, which is what makes
+streaming feel live — but wireChat() repaints on every poll, so an
+unconditional jump to the bottom pulled the reader off the older message they
+had just scrolled up to read. syncLogClass() now decides from where the log
+already was.
 """
 
 import re
@@ -30,6 +37,7 @@ import pytest
 STATIC = (Path(__file__).resolve().parents[2] / "knowme" / "ops" / "static")
 JS = STATIC / "js"
 MAIN_JS = JS / "main.js"
+RENDER_JS = JS / "render.js"
 INDEX_HTML = STATIC / "index.html"
 
 # Reads the real main.js, lifts render() out by shape (the same slice the
@@ -133,6 +141,60 @@ process.exit(failures ? 1 : 0);
 """
 
 
+# The other half of the loop: what repainting the chat log does to the reader's
+# scroll position. Reads the real render.js and drives syncLogClass() on a log
+# element whose scroll geometry the test controls.
+SCROLL_HARNESS = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[2], "utf8");
+let failures = 0;
+const assert = (ok, msg) => {
+  if (!ok) failures++;
+  console.log((ok ? "PASS  " : "FAIL  ") + msg);
+};
+
+const fn = src.slice(src.indexOf("function syncLogClass("),
+                     src.indexOf("\nconst CHAT_EMPTY"));
+const renderChatLogFor = () => "<rendered>";
+const log = { scrollTop: 0, scrollHeight: 1200, clientHeight: 400, innerHTML: "" };
+const document = { querySelectorAll: sel => (sel === ".asklog" ? [log] : []) };
+eval(fn);
+
+// Geometry: 1200px of log in a 400px window -> "at the bottom" means scrollTop 800.
+const BOTTOM = log.scrollHeight - log.clientHeight;
+assert(BOTTOM === 800, "the stub log is taller than its window (so it can scroll)");
+
+// ---- scrolled up: the poll must leave you where you are --------------------
+log.scrollTop = 0;
+syncLogClass("asklog", [], "");
+assert(log.innerHTML === "<rendered>", "the poll still repaints the log");
+assert(log.scrollTop === 0,
+       "a poll does NOT drag you back to the bottom when you have scrolled up");
+
+// ---- at the bottom: streaming still follows ---------------------------------
+log.scrollTop = BOTTOM;
+syncLogClass("asklog", [], "");
+assert(log.scrollTop === log.scrollHeight,
+       "a poll DOES follow the newest message while you are at the bottom");
+
+// ---- a log with nothing in it yet reads as 'at the bottom' ------------------
+// This is the rebuilt-view case: render() replaces #view, so the log element is
+// fresh and empty. Treating it as "you scrolled away" would open every
+// conversation at its oldest message.
+log.scrollTop = 0; log.scrollHeight = 0; log.clientHeight = 0;
+syncLogClass("asklog", [], "");
+assert(log.scrollTop === 0, "a fresh, empty log follows the newest message");
+
+// ---- force: the callers that KNOW something new happened --------------------
+log.scrollHeight = 1200; log.clientHeight = 400; log.scrollTop = 0;
+syncLogClass("asklog", [], "", true);
+assert(log.scrollTop === log.scrollHeight,
+       "`force` jumps to the bottom even when you had scrolled up (you pressed send)");
+
+process.exit(failures ? 1 : 0);
+"""
+
+
 @pytest.fixture(scope="module")
 def node():
     exe = shutil.which("node")
@@ -154,6 +216,18 @@ def test_a_missing_counter_cannot_kill_the_render_loop(node, tmp_path):
     assert proc.returncode == 0, f"render() checks failed:\n{proc.stdout}\n{proc.stderr}"
 
 
+def test_the_poll_does_not_steal_the_scroll_position(node, tmp_path):
+    """The log follows the newest message only if you were already there."""
+    assert RENDER_JS.exists(), f"missing frontend source: {RENDER_JS}"
+    harness = tmp_path / "scroll_harness.js"
+    harness.write_text(SCROLL_HARNESS, encoding="utf-8")
+
+    proc = subprocess.run([node, str(harness), str(RENDER_JS)],
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+    print(proc.stdout)
+    assert proc.returncode == 0, f"log scroll checks failed:\n{proc.stdout}\n{proc.stderr}"
+
+
 def test_the_render_slice_is_still_findable():
     """The harness slices render() out by shape, so a rename must fail loudly.
 
@@ -164,3 +238,11 @@ def test_the_render_slice_is_still_findable():
     assert "function setCount(" in src, "render()'s counter helper kept its name"
     assert "\nlet lastFetch" in src, "the slice's end marker is still there"
     assert re.search(r"^function render\(\)\{", src, re.M), "render() is still a function"
+
+
+def test_the_log_slice_is_still_findable():
+    """Same guard for the scroll harness — same silent-vacuity failure mode."""
+    src = RENDER_JS.read_text(encoding="utf-8")
+    assert "function syncLogClass(" in src, "the log repaint kept its name"
+    assert "\nconst CHAT_EMPTY" in src, "the slice's end marker is still there"
+    assert "scrollTop" in src, "the repaint still positions the log"

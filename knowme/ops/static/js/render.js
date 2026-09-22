@@ -172,10 +172,21 @@ function renderChatLog(){ return renderChatLogFor(CHAT, CHAT_EMPTY); }
 // by id) is what lets the same chat machine drive more than one surface — the
 // conversation panel, and the Reader's ask panel, which has its own log element
 // and its own message list.
-function syncLogClass(cls, chat, emptyText){
+//
+// Following the newest message is what makes streaming feel live, but it cannot
+// be unconditional: wireChat() repaints both logs on the 5s poll, so jumping to
+// the bottom every time pulled you off the older message you had just scrolled
+// up to read. The decision is taken from where the log already was — at the
+// bottom, keep following; scrolled up, stay put. `force` is for the callers that
+// KNOW something new happened (you pressed send, a thread just loaded), where
+// the bottom is right no matter where you were.
+function syncLogClass(cls, chat, emptyText, force){
   document.querySelectorAll("." + cls).forEach(el => {
+    // Measured BEFORE the markup is replaced: "was the reader at the bottom" is
+    // a fact about the content they were looking at, not about the new one.
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     el.innerHTML = renderChatLogFor(chat, emptyText);
-    el.scrollTop = el.scrollHeight;   // scroll-to-bottom is what makes streaming feel live
+    if (force || atBottom) el.scrollTop = el.scrollHeight;
   });
 }
 const CHAT_EMPTY = "你可以在任意标签页从这里给 KnowMe 发消息。打开“总览”可观察消息流经运行框架，打开“网关”可汇总查看所有渠道的消息。";
@@ -183,7 +194,7 @@ const CHAT_EMPTY = "你可以在任意标签页从这里给 KnowMe 发消息。�
 // The main conversation (#agent/<id>): its log elements carry .chatlog, which
 // body.no-tele keys on to hide per-turn telemetry — so that class name is
 // load-bearing (see style.css).
-function syncChatLogs(){ syncLogClass("chatlog", CHAT, CHAT_EMPTY); }
+function syncChatLogs(force){ syncLogClass("chatlog", CHAT, CHAT_EMPTY, force); }
 
 // One streamed harness event updates the live card in place.
 function applyStreamEvent(pending, ev){
@@ -276,7 +287,7 @@ async function sendChatTo(target, fromInput){
   target.chat.push({role:"user", text});
   const pending = {role:"knowme", pending:true, stream:"", started: Date.now()};
   target.chat.push(pending);
-  target.repaint();
+  target.repaint(true);   // you hit send: the newest turn is what you want to see
   // tick the elapsed counter while we wait for the first token
   const ticker = setInterval(() => { if (pending.pending && !pending.stream) target.repaint(); }, 1000);
   try {

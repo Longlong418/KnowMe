@@ -121,7 +121,7 @@ function askPanelHTML(){
 }
 
 const ASK_CHAT = {chat: ASK, agentId: () => ASK_AGENT,
-                  repaint: () => syncLogClass("asklog", ASK, ASK_EMPTY)};
+                  repaint: force => syncLogClass("asklog", ASK, ASK_EMPTY, force)};
 const ASK_EMPTY = "问点什么吧——这个 Agent 看得到你正在读的文档，也能自己查文档库。";
 
 // Called by wireChat() alongside the main composer. Re-binding on every rebuild
@@ -140,7 +140,7 @@ function wireAsk(){
 // next question continues it (sending with agent_id=reader appends server-side).
 async function loadAskThread(){
   askLoaded = true;
-  const sid = (D && D.current_sessions && D.current_sessions[ASK_AGENT]) || "default";
+  const sid = askSessionId();
   let r;
   try {
     r = await postJSON("/api/session", {action: "history", id: sid, agent_id: ASK_AGENT});
@@ -150,7 +150,7 @@ async function loadAskThread(){
   if (!r.ok) return;
   ASK.length = 0;
   (r.history || []).map(histItem).forEach(m => ASK.push(m));
-  syncLogClass("asklog", ASK, ASK_EMPTY);
+  syncLogClass("asklog", ASK, ASK_EMPTY, true);   // a loaded thread opens at its end
 }
 
 // --- the library list --------------------------------------------------------
@@ -627,20 +627,40 @@ function scrollParent(el){
 // --- selection -> the agent --------------------------------------------------
 
 // Publish the open document (and any selection) to the Context Bridge, so the
-// next turn of the ACTIVE agent sees what you are reading. Kept out of the
-// poll: this runs on open and on send, which are the moments the context
-// actually changes.
+// next turn of an agent sees what you are reading. Kept out of the poll: this
+// runs on open and on send, which are the moments the context actually changes.
+//
+// It publishes TWICE, because two different agents can be asked about this
+// document and the bridge is keyed by (agent, session):
+//   * ASK_AGENT — the panel on the right. It asks as `reader`, and the server
+//     looks the snapshot up as (agent.agent_id, agent.session.session_id).
+//   * ACTIVE_AGENT — the main conversation, for the 选中文字→发送 flow (rcSend),
+//     which hands the text to the agent you are browsing as.
+// Publishing only under ACTIVE_AGENT is why the panel used to answer "我看不到
+// 你打开的是哪篇": the document was filed under ("default", <default thread>)
+// while the panel's own turn ran as `reader` and looked up ("reader", ...).
 function publishReaderContext(extra = {}){
   if (!currentDoc) return Promise.resolve({ok:false, error:"no document"});
-  return postJSON("/api/extras", {
+  const snapshot = {
     application: "reader",
     resource: currentDoc.title,
     content: currentDoc.text,
     selection: extra.selection || "",
-    metadata: {doc_id: currentDoc.id, kind: currentDoc.kind},
-    agent_id: ACTIVE_AGENT,
-    session_id: SESSION || D?.current_sessions?.[ACTIVE_AGENT] || "default"
-  });
+    metadata: {doc_id: currentDoc.id, kind: currentDoc.kind}
+  };
+  const targets = [
+    [ASK_AGENT, askSessionId()],
+    [ACTIVE_AGENT, SESSION || D?.current_sessions?.[ACTIVE_AGENT] || "default"]
+  ];
+  return Promise.all(targets.map(([agent_id, session_id]) =>
+    postJSON("/api/extras", {...snapshot, agent_id, session_id})
+  )).then(results => ({ok: results.every(r => r && r.ok), results}));
+}
+
+// The reader agent's own thread. Same expression loadAskThread() loads from, so
+// the publish target and the thread on screen cannot drift apart.
+function askSessionId(){
+  return (D && D.current_sessions && D.current_sessions[ASK_AGENT]) || "default";
 }
 
 function rcSend(){

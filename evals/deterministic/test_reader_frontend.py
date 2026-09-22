@@ -145,10 +145,14 @@ pendingTests.push((function testReaderPane() {
   function render() { renderCalls++; }
   const alert = m => { throw new Error("unexpected alert: " + m); };
   const confirm = () => true;
-  const D = { current_sessions: {} };
+  const D = { current_sessions: { reader: "sr" } };
   let opened = null;
+  // Every /api/extras body, so the Context Bridge publish can be checked for the
+  // agent it is filed under (see the assertions after readerOpen below).
+  const extras = [];
   const postJSON = async (url, body) => {
     fetches++;
+    if (url === "/api/extras") extras.push(body);
     if (body.action === "list") return { ok: true, documents: [
       { id: "d1", title: "alpha", kind: "markdown", chars: 22, created_at: "2026-09-21" },
       { id: "d2", title: "beta", kind: "text", chars: 5, created_at: "2026-09-21" }] };
@@ -215,6 +219,21 @@ pendingTests.push((function testReaderPane() {
     // stays on the first one.
     assert(lit(els["rc-library"].innerHTML) === "d1",
            "the library highlights the document that is open");
+
+    // The open document has to reach the Context Bridge under the READER agent,
+    // because that is who the panel asks as — the bridge is keyed by
+    // (agent, session) and the server looks it up as (agent.agent_id,
+    // agent.session.session_id). Filed only under the active agent, the panel
+    // answered "我看不到你打开的是哪篇": it looked under ("reader", ...) and
+    // found nothing. The active agent's copy stays, for 选中文字→发送 (rcSend).
+    const posted = extras.map(p => p.agent_id + "/" + p.session_id);
+    assert(posted.includes("reader/sr"),
+           "opening a document publishes it under the READER agent (the panel's own key): "
+           + posted.join(", "));
+    assert(posted.includes("default/s1"),
+           "…and still under the active agent's thread (the 选中文字→发送 flow)");
+    assert(extras.every(p => p.resource === "alpha" && p.content.includes("para one")),
+           "both snapshots carry the document you just opened");
 
     // A different document, and the same document made longer, both repaint:
     // that second one is the 继续加载 button, and a stamp keyed on the id alone
