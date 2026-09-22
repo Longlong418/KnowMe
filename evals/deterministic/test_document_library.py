@@ -185,3 +185,96 @@ def test_kind_drives_which_renderer_the_frontend_picks(tmp_path):
     assert kind_for("a.py") == "code"
     assert kind_for("a.unknownext") == "text"
     assert kind_for("https://x.dev/doc.PDF?v=1") == "pdf"   # query string stripped
+
+
+def test_the_bytes_decide_when_the_name_lies(tmp_path):
+    """An arXiv URL ends in /pdf/1706.03762 — a name, not an extension.
+
+    Reading ".03762" as a suffix made a 15-page paper a text/plain document,
+    and the reader picks its renderer from the kind, so it painted the whole
+    extraction as one paragraph. A PDF says what it is in its first four bytes.
+    """
+    from knowme.applications.library import kind_and_suffix
+
+    assert kind_and_suffix("https://arxiv.org/pdf/1706.03762", b"%PDF-1.7\n...") == ("pdf", ".pdf")
+    assert kind_and_suffix("paper.pdf", b"%PDF-1.4\n...") == ("pdf", ".pdf")
+    # A name we do understand still wins for everything that is not a PDF.
+    assert kind_and_suffix("notes.md", b"# hi") == ("markdown", ".md")
+    assert kind_and_suffix("data.csv", b"a,b") == ("csv", ".csv")
+    # No usable extension at all: text, and a suffix that is at least a suffix.
+    assert kind_and_suffix("mystery", b"hello") == ("text", ".txt")
+
+
+def test_saving_a_url_named_pdf_stores_it_as_a_pdf(tmp_path):
+    conn = connect(tmp_path)
+    doc = save_document(conn, tmp_path, name="https://arxiv.org/pdf/1706.03762",
+                        raw=b"%PDF-1.7\n" + b"x" * 100, text="extracted body")
+    assert doc["kind"] == "pdf"
+    assert doc["suffix"] == ".pdf"
+    assert file_path(conn, tmp_path, doc["id"]).read_bytes().startswith(b"%PDF")
+
+
+def test_a_wrongly_kinded_row_is_repaired_in_place(tmp_path):
+    """Old rows are corrected without touching the file or the text.
+
+    `suffix` and `path` are separate columns, so fixing the row is enough: the
+    bytes on disk were never wrong. Written the way the old code wrote it, so
+    this fails if the repair pass ever stops running.
+    """
+    conn = connect(tmp_path)
+    save_document(conn, tmp_path, name="keep.md", raw=b"# keep", text="keep me")
+    conn.execute(
+        "INSERT INTO documents (id, title, kind, suffix, path, source, content,"
+        " chars, bytes, sha256, added_by, created_at)"
+        " VALUES ('legacy','1706','text','.03762','documents/legacy.03762','',"
+        " 'arxiv body', 10, 8, 'deadbeef', 'default', '2026-01-01T00:00:00+00:00')")
+    folder = tmp_path / "documents"
+    folder.mkdir(exist_ok=True)
+    (folder / "legacy.03762").write_bytes(b"%PDF-1.7\n" + b"y" * 40)
+    conn.commit()
+
+    docs = list_documents(conn, home=tmp_path)
+    fixed = next(d for d in docs if d["id"] == "legacy")
+    assert (fixed["kind"], fixed["suffix"]) == ("pdf", ".pdf")
+    # The file did not move and the extracted text is untouched.
+    assert (folder / "legacy.03762").is_file()
+    assert "arxiv body" in get_document(conn, "legacy")["content"]
+    assert search_documents(conn, "arxiv body")[0]["id"] == "legacy"
+
+
+def test_the_repair_only_touches_real_pdfs(tmp_path):
+    """A row with an odd suffix but text bytes must keep saying text.
+
+    Otherwise the second time this ran it would relabel every extensionless
+    document in the library as a PDF and the reader would refuse to open them.
+    """
+    conn = connect(tmp_path)
+    save_document(conn, tmp_path, name="keep.md", raw=b"# keep", text="keep me")
+    conn.execute(
+        "INSERT INTO documents (id, title, kind, suffix, path, source, content,"
+        " chars, bytes, sha256, added_by, created_at)"
+        " VALUES ('plain','README','text','.README','documents/plain.README','',"
+        " 'just words', 10, 10, 'cafe', 'default', '2026-01-01T00:00:00+00:00')")
+    folder = tmp_path / "documents"
+    folder.mkdir(exist_ok=True)
+    (folder / "plain.README").write_bytes(b"just words, no magic here")
+    conn.commit()
+
+    docs = list_documents(conn, home=tmp_path)
+    assert next(d for d in docs if d["id"] == "plain")["kind"] == "text"
+    # Second pass over an already-correct row is a no-op, not a flip.
+    assert next(d for d in list_documents(conn, home=tmp_path)
+                if d["id"] == "plain")["kind"] == "text"
+
+
+def test_a_missing_file_does_not_break_the_listing(tmp_path):
+    """A row whose file was deleted by hand still lists; it just cannot be read."""
+    conn = connect(tmp_path)
+    save_document(conn, tmp_path, name="keep.md", raw=b"# keep", text="keep me")
+    conn.execute(
+        "INSERT INTO documents (id, title, kind, suffix, path, source, content,"
+        " chars, bytes, sha256, added_by, created_at)"
+        " VALUES ('ghost','gone','text','.weird','documents/ghost.weird','',"
+        " '', 0, 0, '', 'default', '2026-01-01T00:00:00+00:00')")
+    conn.commit()
+    assert any(d["id"] == "ghost" for d in list_documents(conn, home=tmp_path))

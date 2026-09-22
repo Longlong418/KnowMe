@@ -1043,7 +1043,10 @@ def library_action(payload: dict) -> dict:
     action = payload.get("action", "")
 
     if action == "list":
-        return {"ok": True, "documents": list_documents(conn, limit=200)}
+        # home here so a row stored with the wrong kind repairs itself (see
+        # library._repair_binary_kinds) -- this is the listing the reader calls
+        # before it decides how to render anything.
+        return {"ok": True, "documents": list_documents(conn, limit=200, home=settings.home)}
     if action == "search":
         return {"ok": True, "results": search_documents(conn, str(payload.get("query", "")))}
     if action in {"open", "text"}:

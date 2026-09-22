@@ -90,6 +90,22 @@ def kind_for(name: str) -> str:
     return KINDS.get(suffix, "text")
 
 
+def kind_and_suffix(name: str, raw: bytes) -> tuple[str, str]:
+    """What the document IS, letting the bytes outrank the name.
+
+    The name is only a name. An arXiv URL ends in "/pdf/1706.03762", which read
+    as a file extension gives ".03762" — so a 15-page paper was stored as
+    text/plain, and because the reader picks its renderer from the kind, it
+    painted the extracted text as one long paragraph instead of rendering the
+    PDF. A PDF announces itself in its first five bytes, and that cannot be a
+    coincidence the way an extension can.
+    """
+    if raw.startswith(b"%PDF"):
+        return "pdf", ".pdf"
+    suffix = Path(name.split("?", 1)[0].lower()).suffix or ".txt"
+    return kind_for(name), suffix
+
+
 def _ensure_table(conn: sqlite3.Connection) -> None:
     """Create the documents table, the first time it is needed.
 
@@ -148,7 +164,7 @@ def save_document(conn: sqlite3.Connection, home: Path, *, name: str, raw: bytes
     if existing:
         return _public(existing)
 
-    suffix = Path(name.split("?", 1)[0].lower()).suffix or ".txt"
+    kind, suffix = kind_and_suffix(name, raw)
     doc_id = str(uuid4())
     stored = f"documents/{doc_id}{suffix}"      # uuid4 name, never the upload's
     folder = home / "documents"
@@ -158,7 +174,7 @@ def save_document(conn: sqlite3.Connection, home: Path, *, name: str, raw: bytes
     conn.execute(
         "INSERT INTO documents (id, title, kind, suffix, path, source, content, "
         "chars, bytes, sha256, added_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (doc_id, _title_from(name), kind_for(name), suffix, stored, source,
+        (doc_id, _title_from(name), kind, suffix, stored, source,
          text, len(text), len(raw), digest, added_by,
          datetime.now(UTC).isoformat(timespec="seconds")),
     )
@@ -167,12 +183,42 @@ def save_document(conn: sqlite3.Connection, home: Path, *, name: str, raw: bytes
     return _public(row)
 
 
-def list_documents(conn: sqlite3.Connection, limit: int = 100) -> list[Document]:
+def list_documents(conn: sqlite3.Connection, limit: int = 100,
+                   home: Path | None = None) -> list[Document]:
     _ensure_table(conn)
+    if home is not None:
+        _repair_binary_kinds(conn, home)
     rows = conn.execute(
         "SELECT * FROM documents ORDER BY created_at DESC, rowid DESC LIMIT ?", (limit,)
     ).fetchall()
     return [_public(r) for r in rows]
+
+
+def _repair_binary_kinds(conn: sqlite3.Connection, home: Path) -> None:
+    """Fix rows whose stored file is a PDF but whose kind still says text.
+
+    Rows written before kind_and_suffix() existed are wrong in the TABLE: an
+    arXiv URL was stored as text/plain because its path ends in ".03762". The
+    bytes on disk were never wrong, so correcting the row is enough — `suffix`
+    and `path` are separate columns, and the stored file does not have to move.
+    Cheap to run on every listing: only a row whose suffix is not one we know
+    gets its file opened, and after the first pass there are none.
+    """
+    fixed = 0
+    for row in conn.execute("SELECT id, suffix, path FROM documents").fetchall():
+        if row["suffix"] in KINDS:
+            continue                                    # already says what it is
+        target = home / row["path"]
+        if not target.is_file():
+            continue
+        with target.open("rb") as handle:
+            if handle.read(4) != b"%PDF":        # read(4): the magic is 4 bytes,
+                continue                          # read(5) would never match it
+        conn.execute("UPDATE documents SET kind='pdf', suffix='.pdf' WHERE id=?",
+                     (row["id"],))
+        fixed += 1
+    if fixed:
+        conn.commit()
 
 
 def get_document(conn: sqlite3.Connection, doc_id: str) -> sqlite3.Row | None:
