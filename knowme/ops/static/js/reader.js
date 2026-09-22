@@ -19,6 +19,7 @@ let currentDoc = null;
 let libraryDocs = [];
 let libraryLoaded = false;
 let readerQuery = "";
+const READER_DOC_KEY = "knowme_reader_open_doc";
 // How much of the open document is on screen. A 400 KB document rendered in one
 // innerHTML is a multi-second freeze in the tab, so text is painted in chunks
 // and the rest is one click away. See renderReaderText().
@@ -269,7 +270,10 @@ async function readerDelete(docId){
     alert("删除失败：" + (error.message || error));
     return;
   }
-  if (currentDoc && currentDoc.id === docId) currentDoc = null;
+  if (currentDoc && currentDoc.id === docId){
+    currentDoc = null;
+    localStorage.removeItem(READER_DOC_KEY);
+  }
   await loadLibrary(true);
   renderReaderDoc();
 }
@@ -287,6 +291,7 @@ async function readerOpen(docId){
   if (!res.ok) { alert("文档打不开：" + (res.error || "未知错误")); return; }
   currentDoc = {...res.document, text: res.text, has_more: res.has_more,
                 file_url: res.file_url};
+  localStorage.setItem(READER_DOC_KEY, docId);
   readerShown = READER_CHUNK;             // a new document starts at the top
   pdfSession = null;                      // and any previous PDF is gone
   await publishReaderContext({selection: ""});
@@ -556,7 +561,19 @@ function syncReaderSelection(){
 // keeps the ORDER right — the list paints before the pane does, and a caller
 // that does want to wait (the tests) can.
 async function restoreReaderState(){
+  // loadLibrary() itself fetches once per page (libraryLoaded), which is all the
+  // restore below needs: after a refresh the JS state starts empty, so the first
+  // call here does hit the server. Re-fetching on every poll would break the
+  // "a poll does not re-fetch" rule this pane is built on.
   await loadLibrary();
+  // The document itself lives in memory, so the 5s poll keeps it for free --
+  // but a page reload starts with nothing. readerOpen() wrote the id to
+  // localStorage for exactly that case: come back to the document you were
+  // reading, unless it is gone from the library.
+  if (!currentDoc){
+    const savedId = localStorage.getItem(READER_DOC_KEY);
+    if (savedId && libraryDocs.some(doc => doc.id === savedId)) await readerOpen(savedId);
+  }
   renderLibrary();
   renderReaderDoc();
   syncReaderSelection();

@@ -122,6 +122,16 @@ pendingTests.push((function testReaderPane() {
     createElement: () => ({ style: {}, append() {}, classList: { add() {} } }),
   };
   const window = { getSelection: () => ({ toString: () => "" }), devicePixelRatio: 1 };
+  // node has no localStorage. The reader keeps the open document's id there so a
+  // full page refresh comes back to the same document -- and readerOpen() writes
+  // to it unconditionally, so without a stub the whole harness dies on a
+  // ReferenceError instead of reporting on the logic under test.
+  const storage = {};
+  const localStorage = {
+    getItem: k => (k in storage ? storage[k] : null),
+    setItem: (k, v) => { storage[k] = String(v); },
+    removeItem: k => { delete storage[k]; },
+  };
   const esc = s => String(s).replace(/[&<>"']/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   // markdown rendering is util.js's job and is tested by using the app; here it
@@ -155,6 +165,8 @@ pendingTests.push((function testReaderPane() {
     assert(els["rc-content"].innerHTML.includes("para one"),
            "the document is painted from its extracted text");
     assert(els["rc-title"].textContent === "alpha", "the pane header names the document");
+    assert(storage["knowme_reader_open_doc"] === "d1",
+           "opening a document remembers its id for the next page load");
     await restoreReaderState();          // settle the one-time library fetch
 
     // The one that matters: a poll must not touch innerHTML, or a text selection
@@ -190,6 +202,20 @@ pendingTests.push((function testReaderPane() {
     await readerDelete("d2");
     assert(els["rc-content"].innerHTML.includes("选一份文档"), "the empty state is shown");
     assert(els["rc-content"].dataset.stamp === "", "the empty state clears the stamp");
+    assert(!("knowme_reader_open_doc" in storage),
+           "deleting the open document forgets it (a reload must not chase a dead id)");
+
+    // A full page refresh: brand-new module state, same localStorage. The pane
+    // has to come back to the document being read rather than the empty state --
+    // which is the whole point of the id in localStorage, and the reason the
+    // restore is allowed to call readerOpen() from a poll's code path.
+    await readerOpen("d1");
+    eval(readerSrc);                    // reload: fresh currentDoc/libraryDocs
+    reset();                            // ...and fresh elements, as a reload gives
+    await restoreReaderState();
+    assert(opened === "d1", "a reload re-opens the document you were reading");
+    assert(els["rc-content"].innerHTML.includes("para one"),
+           "and paints it, instead of coming up empty");
   })();
 })());
 
