@@ -88,6 +88,22 @@ def test_a_rotated_thread_keeps_the_document_you_have_open(tmp_path, monkeypatch
         "…and the document you had open followed you to the new thread"
 
 
+def test_a_documents_thread_is_never_rotated(tmp_path, monkeypatch):
+    """A document's own thread belongs to the document, not to "the thread you
+    were resumed into" — reading for two hours and asking a question must not
+    move the panel to a fresh thread while that document is still on screen.
+
+    The picked-thread exemption cannot cover this: it is consumed by the next
+    turn, and a document is read for an afternoon.
+    """
+    monkeypatch.setenv("KNOWME_SESSION_IDLE_MINUTES", "60")
+    app = make_knowme(tmp_path / "home", client=ScriptedClient([]))
+    app.session.start_new("doc-4d21")            # what the reading pane uses
+    _seed(app, "doc-4d21", age_minutes=600)      # 10h of reading
+    maybe_rotate_session(app)
+    assert app.session.session_id == "doc-4d21"
+
+
 def _pick_from_history(app, session_id):
     """The page's 历史记录 -> 点一条对话 path, without a browser."""
     from knowme.ops.web import data as web_data

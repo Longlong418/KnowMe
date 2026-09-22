@@ -109,7 +109,7 @@ pendingTests.push((function testReaderPane() {
     els = {};
     for (const id of ["rc-content", "rc-title", "rc-meta", "rc-selection", "rc-text",
                       "rc-library", "rc-search", "rc-file-input", "rc-url-input",
-                      "amsg"])
+                      "amsg", "ra-title", "rc-doc-acts"])
       els[id] = { id, innerHTML: "", dataset: {}, style: {}, textContent: "", value: "",
                   classList: { add() {}, remove() {}, toggle() {} },
                   appendChild() {}, insertAdjacentHTML() {}, focus() {} };
@@ -146,23 +146,49 @@ pendingTests.push((function testReaderPane() {
   function render() { renderCalls++; }
   const alert = m => { throw new Error("unexpected alert: " + m); };
   const confirm = () => true;
+  let renameTo = null;                          // what the rename dialog returns
+  const prompt = () => renameTo;
+  // The ask panel paints with the SAME primitives as the main conversation
+  // (histItem/histLogClass live in render.js), and opening a document now moves
+  // the panel's thread — so both are reachable from here for the first time and
+  // both need a stub, or the harness dies on a ReferenceError instead of
+  // reporting on the logic under test.
+  const histItem = m => m;
+  const askPaints = [];
+  function syncLogClass(cls, chat, empty, force){
+    askPaints.push({cls, count: chat.length, force: !!force});
+  }
   const D = { current_sessions: { reader: "sr" } };
   let opened = null;
   // Every /api/extras body, so the Context Bridge publish can be checked for the
   // agent it is filed under (see the assertions after readerOpen below).
   const extras = [];
+  // Every /api/session body: which thread the panel is switched to (and which
+  // one it reads) is the whole point of one-document-one-conversation.
+  const sessions = [];
+  // The library as the server would hold it: rename really changes the row here,
+  // because "the list shows the new name" is only checkable if the next list call
+  // answers with the new name.
+  const documents = [
+    { id: "d1", title: "alpha", kind: "markdown", chars: 22, created_at: "2026-09-21" },
+    { id: "d2", title: "beta", kind: "text", chars: 5, created_at: "2026-09-21" }];
   const postJSON = async (url, body) => {
     fetches++;
     if (url === "/api/extras") extras.push(body);
-    if (body.action === "list") return { ok: true, documents: [
-      { id: "d1", title: "alpha", kind: "markdown", chars: 22, created_at: "2026-09-21" },
-      { id: "d2", title: "beta", kind: "text", chars: 5, created_at: "2026-09-21" }] };
+    if (url === "/api/session") sessions.push(body);
+    if (body.action === "list") return { ok: true, documents };
     if (body.action === "open") {
       opened = body.doc_id;
-      return { ok: true, document: { id: body.doc_id, title: "alpha", kind: "markdown",
+      const title = body.doc_id === "d2" ? "beta" : "alpha";
+      return { ok: true, document: { id: body.doc_id, title, kind: "markdown",
                                      chars: 22, created_at: "2026-09-21" },
                text: "para one\n\npara two", has_more: false,
                file_url: "/api/library/file?id=" + body.doc_id };
+    }
+    if (body.action === "rename") {
+      const doc = documents.find(d => d.id === body.doc_id);
+      if (doc) doc.title = body.title;
+      return { ok: true, title: body.title };
     }
     return { ok: true };
   };
@@ -232,13 +258,27 @@ pendingTests.push((function testReaderPane() {
     // answered "我看不到你打开的是哪篇": it looked under ("reader", ...) and
     // found nothing. The active agent's copy stays, for 选中文字→发送 (rcSend).
     const posted = extras.map(p => p.agent_id + "/" + p.session_id);
-    assert(posted.includes("reader/sr"),
-           "opening a document publishes it under the READER agent (the panel's own key): "
-           + posted.join(", "));
+    assert(posted.includes("reader/doc-d1"),
+           "opening a document publishes it under the READER agent's key for THIS "
+           + "document (one document, one conversation): " + posted.join(", "));
     assert(posted.includes("default/s1"),
            "…and still under the active agent's thread (the 选中文字→发送 flow)");
-    assert(extras.every(p => p.resource === "alpha" && p.content.includes("para one")),
+    assert(extras.filter(p => p.action !== "clear")
+                 .every(p => p.resource === "alpha" && p.content.includes("para one")),
            "both snapshots carry the document you just opened");
+
+    // The pane and the panel move TOGETHER. You complained that the panel only
+    // followed a document switch after collapsing and reopening it — because it
+    // was never told about the switch AND was reading the reader agent's single
+    // process-wide thread. Both halves are asserted here: which thread it is on,
+    // and that the panel was repainted from it.
+    assert(sessions.some(b => b.action === "switch" && b.id === "doc-d1"
+                              && b.agent_id === "reader"),
+           "打开文档 = 把阅读面板切到这份文档自己的会话上: " + JSON.stringify(sessions));
+    assert(els["ra-title"].textContent === "alpha",
+           "the panel's header names the document you just opened");
+    assert(askPaints.length && askPaints[askPaints.length - 1].count === 0,
+           "…and the panel is painted from that thread (empty: no questions here yet)");
 
     // Quoting a sentence asks in the panel on the right, not in the main
     // conversation. The old code prefilled #dmsg and, when that was not on
@@ -263,10 +303,19 @@ pendingTests.push((function testReaderPane() {
     // A different document, and the same document made longer, both repaint:
     // that second one is the 继续加载 button, and a stamp keyed on the id alone
     // would silently swallow it.
+    const views = renderCalls;
     await readerOpen("d2");
     assert(els["rc-content"].innerHTML.includes("para one"), "a different document repaints");
     assert(lit(els["rc-library"].innerHTML) === "d2",
            "and the highlight follows to the document you just opened");
+    // 换文档就换面板 — without the view being rebuilt. A rebuild is what used to
+    // make this work, and it also throws away the text you have selected, which
+    // is exactly what the poll guard exists to prevent.
+    assert(els["ra-title"].textContent === "beta",
+           "switching documents switches the panel's header right away");
+    assert(sessions.some(b => b.action === "switch" && b.id === "doc-d2"),
+           "…and moves the panel to the new document's own conversation");
+    assert(renderCalls === views, "…without rebuilding the reader view");
     const before = paints;
     readerMore();
     assert(paints > before, "continuing a long document repaints it");
@@ -279,6 +328,15 @@ pendingTests.push((function testReaderPane() {
     assert(els["rc-content"].dataset.stamp === "", "the empty state clears the stamp");
     assert(!("knowme_reader_open_doc" in storage),
            "deleting the open document forgets it (a reload must not chase a dead id)");
+    // …and takes it OFF THE BRIDGE. The snapshot used to be write-only, so an
+    // agent went on "seeing" a document you had closed or deleted hours ago.
+    // Both keys, because the document was filed under both.
+    const clears = extras.filter(p => p.action === "clear")
+                         .map(p => p.agent_id + "/" + p.session_id);
+    assert(clears.includes("reader/doc-d2"),
+           "deleting the open document clears it from the panel's key: " + clears.join(", "));
+    assert(clears.includes("default/s1"),
+           "…and from the active agent's key (that copy is the document too)");
 
     // A full page refresh: brand-new module state, same localStorage. The pane
     // has to come back to the document being read rather than the empty state --
@@ -291,6 +349,34 @@ pendingTests.push((function testReaderPane() {
     assert(opened === "d1", "a reload re-opens the document you were reading");
     assert(els["rc-content"].innerHTML.includes("para one"),
            "and paints it, instead of coming up empty");
+
+    // 重命名 changes the name and NOTHING else — no new id, no new file, no
+    // re-parse. And the bridge is republished, because the snapshot carries the
+    // NAME: without that the agent would go on calling the document by its old
+    // name for as long as you kept it open.
+    renameTo = "阿尔法";
+    await readerRename();
+    assert(els["rc-title"].textContent === "阿尔法", "重命名后页头就是新名字");
+    assert(els["ra-title"].textContent === "阿尔法", "面板标题一起换（同一个绘制路径）");
+    // …and so does the row in the LIBRARY. Its stamp was (query | open id | row
+    // ids) and a rename changes none of those, so the list kept the old name
+    // until some unrelated click happened to move the highlight. The name is part
+    // of what the markup says, so it has to be part of the stamp.
+    assert(els["rc-library"].innerHTML.includes("阿尔法"),
+           "重命名后文档列表那一行也是新名字（stamp 要带上名字，只认 id 会留着旧的）");
+    assert(extras.filter(p => p.action !== "clear").slice(-2)
+                 .every(p => p.resource === "阿尔法"),
+           "…并且把快照重发一遍，桥里的 resource 就是文档名");
+
+    // 关闭文档: the affordance that did not exist at all, so the only way to take
+    // a document off the bridge was to restart the server.
+    const clearsBefore = extras.filter(p => p.action === "clear").length;
+    await readerClose();
+    assert(extras.filter(p => p.action === "clear").length === clearsBefore + 2,
+           "关闭文档把两个键都从桥上撤掉（和 publish 用同一份目标清单）");
+    assert(els["rc-content"].innerHTML.includes("选一份文档"), "关掉就回到空态");
+    assert(!("knowme_reader_open_doc" in storage), "…并且不再记住它");
+    assert(els["ra-title"].textContent === "还没有打开文档", "面板也说没有打开文档了");
   })();
 })());
 

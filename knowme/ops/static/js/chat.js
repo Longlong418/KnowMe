@@ -103,7 +103,7 @@ async function newChat(){
 // drift (they used to: some dropped meta, some added a length-guard, some
 // didn't).
 //   mode 'switch'  -> action:switch, also moves the agent's active thread
-//   mode 'history' -> action:history, read-only ('__all__' = full timeline)
+//   mode 'history' -> action:history, read-only (the live inbox polls this one)
 // Replaces CHAT + repaints, unless `guard` is set and the length is unchanged
 // (the live-poll case, to avoid a needless redraw). Returns the items or null.
 async function loadThreadInto(id, {mode = "history", setSession = false, guard = false} = {}){
@@ -134,16 +134,37 @@ async function openConversation(id){
   await switchSession(id);   // switch the agent so a reply continues this thread
   render();                  // reflect the active-session highlight in the inbox
 }
-// Read-only "everything" view: the full cross-thread timeline, like the Loop tab
-// but as chat. Doesn't switch the agent — your next message still goes to the
-// active thread; this is purely for reading your whole history.
-async function viewAllHistory(){
+// Delete a conversation for good. The server does the whole job in one action —
+// its messages, its archived tail, and the thread itself if it is the one this
+// agent is in. What survives is what was distilled OUT of it: memories and notes
+// never carried a session id, so nothing you taught the agent is lost with the
+// messages that taught it.
+async function deleteConversation(id){
+  if (!confirm("删除这条对话？消息会彻底删掉、不可恢复（已经提炼进记忆的内容保留）。")) return;
+  let r;
+  try {
+    r = await postJSON("/api/session", {action:"delete", id, agent_id:ACTIVE_AGENT});
+  } catch (error) {
+    alert("删除失败：" + (error.message || error));
+    return;
+  }
+  if (!r || !r.ok){ alert("删除失败：" + ((r && r.error) || "未知错误")); return; }
   closeSessMenu();
-  liveView = "__all__";
-  const target = "#agent/" + ACTIVE_AGENT;
-  if (location.hash !== target) location.hash = target;
-  await loadThreadInto("__all__");
-  render();
+  if (id === SESSION){
+    // We just deleted the thread this agent is in, and the server moved it to a
+    // fresh one: follow that id, or the page (and the next message) would still
+    // be pointing at the conversation we removed.
+    liveView = null;
+    SESSION = r.session_id;
+    CHAT.length = 0;
+    (r.history || []).map(histItem).forEach(m => CHAT.push(m));
+    syncChatLogs();
+    if (typeof publishReaderContext === "function" && currentDoc)
+      await publishReaderContext({selection:""});
+  } else if (liveView === id){
+    liveView = null;         // stop live-syncing a conversation that is gone
+  }
+  await refresh();           // the History list loses the row
 }
 // Re-pull the opened conversation each refresh so CLI messages show up live —
 // unless a turn is mid-stream.
@@ -158,15 +179,17 @@ function toggleSessMenu(ev){
   const sessions = (D && D.sessions_by_agent && D.sessions_by_agent[ACTIVE_AGENT]) || [];
   const menu = document.createElement("div");
   menu.className = "sessmenu"; menu.id = "sessmenu";
-  // "All messages" shows the full cross-thread timeline (like the Loop tab, but
-  // as chat) — so your whole history is one scroll, not split across threads.
-  const allItem = `<div class="sessitem allitem ${liveView==='__all__'?'on':''}" onclick="viewAllHistory()">
-      <div><b>全部消息</b>——完整时间线</div>
-      <div class="sm">汇总所有对话，最新消息在最后</div></div>`;
-  menu.innerHTML = allItem + (sessions.length ? sessions.map(s => {
+  // One row per conversation, and nothing that merges them: each is its own
+  // thread, so it is read, continued and deleted on its own. (There used to be a
+  // "全部消息 —— 完整时间线" row above these, stitching every thread into one
+  // timeline; it went away with the backend branch that fed it.)
+  menu.innerHTML = (sessions.length ? sessions.map(s => {
     const tags = gwTags(s);
     return `<div class="sessitem ${s.id===SESSION?"on":""}" onclick="openConversation('${esc(s.id)}')">
-      <div>${esc(s.title||s.id)} ${tags}</div>
+      <div class="sess-head"><div>${esc(s.title||s.id)} ${tags}</div>
+        <button class="sess-del" title="删除这条对话（不可恢复）"
+                onclick="event.stopPropagation();deleteConversation('${esc(s.id)}')">&times;</button>
+      </div>
       <div class="sm">${sessionMeta(s)}</div>
     </div>`;
   }).join("") : `<div class="sessitem">还没有历史对话</div>`);

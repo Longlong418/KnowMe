@@ -594,29 +594,104 @@ def run_query(payload: dict) -> dict:
 def _thread_history(conn, sid: str, agent_id: str = "default") -> list[dict]:
     """The ONE way to load a thread for the chat dock: role + content + the
     per-turn meta (gate/stats/tools/model) so every card renders in full.
-    id '__all__' returns the whole cross-thread timeline (like the Loop tab,
-    but as chat). Every history-loading path goes through here so they can't
-    drift apart (they used to: 'switch' dropped meta and showed only text)."""
-    if sid == "__all__":
-        rows = conn.execute(
-            "SELECT role, content, meta FROM chat_log WHERE agent_id=? "
-            "ORDER BY id DESC LIMIT 200",
-            (agent_id,),
-        ).fetchall()[::-1]
-    else:
-        rows = conn.execute(
-            "SELECT role, content, meta FROM chat_log "
-            "WHERE session_id=? AND agent_id=? ORDER BY id",
-            (sid, agent_id),
-        ).fetchall()
+    Every history-loading path goes through here so they can't drift apart
+    (they used to: 'switch' dropped meta and showed only text)."""
+    rows = conn.execute(
+        "SELECT role, content, meta FROM chat_log "
+        "WHERE session_id=? AND agent_id=? ORDER BY id",
+        (sid, agent_id),
+    ).fetchall()
     return [{"role": r["role"], "content": r["content"],
              "meta": json.loads(r["meta"]) if r["meta"] else None} for r in rows]
 
 
+# The agent behind the reading pane's ask panel (reader.js's ASK_AGENT). A
+# document's own thread lives under this id, named doc-<document id> — see
+# browser_agent.DOC_PREFIX for the two places that name has to be honoured.
+READER_AGENT = "reader"
+
+
+def _purge_session(conn, home: Path, agent_id: str, sid: str) -> None:
+    """Erase one conversation from every store it lives in.
+
+    A "thread" is not one table: its messages are chat_log rows, its archived
+    tail is two more tables (history_snips / history_summaries) plus the .jsonl
+    files they point at, and the document it was reading is a Context Bridge
+    entry. Miss one and the delete is a lie — the messages go, but the agent
+    stays parked on a thread id nothing owns any more, or an archive is left on
+    disk for a conversation you asked to be rid of.
+
+    NOT touched, deliberately: traces/<date>.jsonl (one file per DAY, and only
+    its turn_start/turn_end lines even name a session — rewriting a file the
+    tracer appends to per event can drop a line from a turn running right now)
+    and tool_results/*.txt (keyed by content hash; no session link exists).
+    """
+    from knowme.core.context import snip_compact
+
+    archives = [r["archive_path"] for r in conn.execute(
+        "SELECT archive_path FROM history_snips WHERE session_id=? "
+        "UNION ALL SELECT archive_path FROM history_summaries WHERE session_id=?",
+        (sid, sid))]
+    conn.execute("DELETE FROM chat_log WHERE session_id=? AND agent_id=?", (sid, agent_id))
+    conn.execute("DELETE FROM history_snips WHERE session_id=?", (sid,))
+    conn.execute("DELETE FROM history_summaries WHERE session_id=?", (sid,))
+    conn.commit()
+    # The paths the rows store, plus the two shapes nothing stores: the plain
+    # archive is a pure function of the id, and every compaction writes a NEW
+    # <slug>-compacted-<stamp>.jsonl while overwriting the row's path — so the
+    # earlier ones are orphans only a glob can find. Exact shapes only: _slug()
+    # maps each non-alphanumeric to '-' and truncates at 60, so a looser
+    # <slug>*.jsonl glob could reach a neighbouring thread's archive.
+    targets = [Path(p) for p in archives if p]
+    targets.append(snip_compact.archive_path(home, sid))
+    targets += list((home / snip_compact.ARCHIVES_DIR).glob(
+        f"{snip_compact._slug(sid)}-compacted-*.jsonl"))
+    for path in targets:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass  # an archive we cannot remove must not fail the whole delete
+
+
+def _delete_conversation(conn, home: Path, agent_id: str, sid: str, agent=None) -> str | None:
+    """Delete a conversation; return the thread the agent must use from now on.
+
+    None means "that was not this agent's current thread" — nothing else moved.
+
+    The rule this exists for: you cannot delete the thread an agent is IN and
+    leave it there. switch() cannot fix it either — it re-reads the thread from
+    chat_log and those rows just went away, so it would leave the agent in an
+    EMPTY thread still labelled with the dead id. start_new() mints a thread
+    nobody has written to.
+
+    `agent` is the LIVE profile instance, or None when the dashboard has not
+    built it: deleting a document whose reading pane never opened must not build
+    the reader agent (building one needs a provider key) just to delete a thread.
+    """
+    current = agent is not None and (
+        agent.session.session_id == sid or dash_session(agent_id) == sid)
+    _purge_session(conn, home, agent_id, sid)
+    if not current:
+        application_contexts.clear(agent_id, sid)
+        return None
+    new_sid = f"s-{agent_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    agent.session.start_new(new_sid)
+    # rekey, never clear-then-rekey: the snapshot of whatever this thread was
+    # looking at is still on the bridge and still belongs to this agent.
+    application_contexts.rekey(agent_id, sid, new_sid)
+    # Tell the gateway, not only the agent: /api/data and the History menu read
+    # the gateway's answer, so without this they go on reporting the thread we
+    # just removed. (session_action's `new` branch skips this, which is how a
+    # brand-new chat could still be listed under the old id.) pick_session also
+    # rewrites the picked-thread pointer, so no stale id survives in there.
+    pick_session(agent_id, new_sid)
+    return new_sid
+
+
 def session_action(payload: dict) -> dict:
-    """Chat history control: start a new conversation, switch to a past one, or
-    read a conversation's history (read-only, for the live inbox). Sessions live
-    in chat_log."""
+    """Chat history control: start a new conversation, switch to a past one, read
+    a conversation's history (read-only, for the live inbox), or delete one.
+    Sessions live in chat_log."""
     action = payload.get("action")
     agent_id = payload.get("agent_id") or "default"
     get_profile(agent_id)
@@ -657,6 +732,17 @@ def session_action(payload: dict) -> dict:
             # model) — not just the text. (These two paths used to disagree.)
             return {"ok": True, "agent_id": agent_id, "session_id": sid,
                     "history": _thread_history(agent.conn, sid, agent_id)}
+        if action == "delete":
+            # Hard delete, and it has to be complete: see _purge_session for the
+            # stores a conversation lives in. Deleting the thread you are IN also
+            # moves this agent to a fresh one, so your next message cannot append
+            # itself to a conversation that no longer exists.
+            sid = payload.get("id") or "default"
+            moved = _delete_conversation(agent.conn, load_settings().home, agent_id, sid,
+                                         agent=agent)
+            current = moved or agent.session.session_id
+            return {"ok": True, "agent_id": agent_id, "session_id": current,
+                    "history": _thread_history(agent.conn, current, agent_id)}
     return {"error": f"unknown action {action}"}
 
 
@@ -848,6 +934,7 @@ def library_action(payload: dict) -> dict:
         get_document,
         list_documents,
         parse_and_save,
+        rename_document,
         search_documents,
         text_window,
     )
@@ -881,8 +968,27 @@ def library_action(payload: dict) -> dict:
             "created_at": row["created_at"],
         }, "text": window["text"], "has_more": window["has_more"],
             "file_url": f"/api/library/file?id={row['id']}"}
+    if action == "rename":
+        name = rename_document(conn, str(payload.get("doc_id", "")), str(payload.get("title", "")))
+        if name is None:
+            return {"ok": False, "error": "文档不存在，或者标题是空的"}
+        # The new name is what the reading pane and the bridge should carry, so
+        # the caller gets the name that is actually on file (trimmed, capped).
+        return {"ok": True, "title": name}
     if action == "delete":
-        gone = delete_document(conn, settings.home, str(payload.get("doc_id", "")))
+        doc_id = str(payload.get("doc_id", ""))
+        gone = delete_document(conn, settings.home, doc_id)
+        if gone:
+            # A document OWNS its reading-pane conversation (one document, one
+            # conversation — browser_agent.DOC_PREFIX), so deleting the document
+            # deletes that conversation with it. Otherwise a deleted document's
+            # chat stays in History and its rows stay in chat_log forever.
+            # current() returns the live agent only if there is one: this must
+            # never BUILD the reader agent (that needs a provider key) — a
+            # document you never asked about has no live agent to move.
+            _delete_conversation(conn, settings.home, READER_AGENT,
+                                 browser_agent.DOC_PREFIX + doc_id,
+                                 agent=browser_agent.current(READER_AGENT))
         return {"ok": gone} if gone else {"ok": False, "error": "文档不存在"}
     if action in {"upload", "url"}:
         try:

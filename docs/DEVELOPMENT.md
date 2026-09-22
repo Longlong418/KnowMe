@@ -1,5 +1,144 @@
 # KnowMe 开发文档
 
+## Phase 25：阅读区一份文档一条对话 + 对话可以删了（2026-09-22）
+
+**你提的**（大意）：① 对话管理要有删除；② 阅读区的 agent 会话要**跟着文档分**——一份文档
+一个对话，删文档就删掉它那个对话；③ 换文档时右侧面板还显示着上一份文档，得「收起提问 +
+打开提问」才刷新；④ 文档要能重命名；⑤ 「全部消息——完整时间线」这个入口不要了，每个会话
+各自独立。另外上一轮我说过的三个疤也一并修。
+
+### 先说清一件事：对话本来就没有混
+
+你担心「各种 agent 的对话混在一起」。查过了：**没有**。`chat_log` 每行都带 `agent_id` +
+`session_id`，历史、记忆也是按 agent 分开的。唯一跨 agent 的东西是**你正打开的那份文档的
+快照**——它由 `publishReaderContext()` 有意识地发给两个收件人（右侧面板的会话、以及当前
+agent 的当前会话，因为「选中文字 → 发给主对话」也要知道你在读什么）。这不是串台，是设计。
+
+真正的问题是它只写不撤：`extras_action` 里 `action:"clear"` 早就写好了，前端**一个调用者
+都没有**（关闭文档这个动作本身也不存在）。所以关掉/删掉文档之后，agent 一直以为你还在读它。
+
+### 改法一：一份文档一条会话，`doc-<文档 id>`
+
+阅读区 agent（`reader`）原来只有一个全局会话 `dash_session("reader")`，10 份文档的问题全挤在
+一条时间线里。现在**会话 id 由文档决定**：`doc-<doc_id>`（`browser_agent.DOC_PREFIX`，
+前端 `ASK_DOC_PREFIX` 拼的是同一个字符串；打开文档时 `POST /api/session {action:"switch"}`
+切过去，空会话返回空历史，正好是「从零开始」）。
+
+**光有"切换"不够，要三个守卫**（这是设计复核时挖出来的，少一个都会在真实使用里翻车）：
+
+1. **换文档要切会话**（上面那条）。
+2. **`maybe_rotate_session` 不许轮转 `doc-` 开头的会话**。轮转是为了把你从"被恢复的旧线程"
+   里带出来；文档的线程不是被恢复的，它是屏幕上那份文档正在用的。不加这条，读到一半
+   （超过 `KNOWME_SESSION_IDLE_MINUTES`）面板就悄悄换到新线程上了，而你还看着同一份文档。
+   （`pick_session` 那个"你自己点的"豁免只保一轮，保不住一份文档。）
+3. **`resume_or_new_session` 也不许把 `doc-` 会话当成"最近那条"来恢复**。这个最阴：面板提问
+   的轮次 `source='web'`，正是它挑"最近线程"的条件；于是**重启后第一次 `/api/data` 会把某份
+   文档的会话当成 reader 的当前会话**，而 `get_agent` 是硬绑定的，一绑就是整个进程——侧边栏
+   和接口都会报着那份文档的会话。
+
+两个 SQL 谓词都从 `DOC_PREFIX` 派生，不许各写一份字符串：**同一个问题两个决定点，迟早分歧**
+（这个仓库已经栽过两次了：Context Bridge 的键位，还有模型短名单）。
+
+### 改法二：关掉/删除文档，把桥上的快照撤掉
+
+- 页头（和「问 Agent」同排）多了 **×**：清 `currentDoc`、清 localStorage、
+  对 publish 的那两个键**各发一次 `POST /api/extras {action:"clear"}`**，再让面板离开这份
+  文档的会话。删掉的正好是当前打开的那份时，复用同一段逻辑（不写第二份）。
+- publish 和 clear 用**同一个函数**算目标键（`readerContextTargets()`）。原来那两行注释就写着
+  「publish 的目标和屏幕上那条会话不能漂开」——清的时候当然也不能漂。
+
+### 改法三：删除对话（不可恢复，你选的）
+
+后端 `POST /api/session {action:"delete"}`。一条会话的数据**散在五个地方**，少清一处都会留下
+能看见的残留：`chat_log`、`history_snips`、`history_summaries`、归档 `.jsonl` 文件、Context
+Bridge 上的条目，外加**活着的 agent 内存**（`session.history`）和**进程全局**里指向它的指针
+（`_picked_sessions` / `_dashboard_sessions`）。
+
+归档文件有三种形状，都要清，而且**不能误删别人的**：表里存的 `archive_path`、纯函数能重算的
+`home/archives/<slug>.jsonl`、以及 `glob("<slug>-compacted-*.jsonl")`（第二次压缩会 UPSERT
+覆盖 `archive_path`，把上一个文件变成孤儿）。`_slug` 是**有损**的，所以只用这三种精确形状，
+不用宽 glob。
+
+删的正好是**当前**会话时，服务器顺手把你落到一条新会话上（`s-<agent>-<时间戳>`），
+用 `start_new` + `pick_session`——**绝不能用 `switch(被删的 id)`**：`switch` 是从 `chat_log`
+重新读的，行已经删了，你会得到一条挂着死 id 的空会话。（顺手补了个旧漏：`action:"new"`
+原来没调 `pick_session`，于是 `/api/data` 会继续报旧 id。）
+
+桥有两种处置，**不能混**：删的不是当前会话 → `clear`；删的**正是**当前会话 →
+`rekey(旧, 新)`。绝不能"先 clear 再 rekey"——那样会把「你正打开着的文档」悄悄从桥上抹掉。
+
+**明确不删什么**（免得以后当 bug 又"修"一遍）：`traces/<日期>.jsonl` 和 `tool_results/*.txt`。
+轨迹是按日期分文件、只有首尾事件带 `session_id`，改它等于对另一个线程正在逐事件追加的文件做
+读改写（并发轮次会丢行）；工具结果是按内容哈希命名的，根本没有 session 映射。UI 文案里写了
+「消息彻底删掉，不可恢复（已经提炼进记忆的内容保留）」——记忆/笔记本来就不带 `session_id`，
+所以教给 agent 的东西不会跟着消息走。
+
+前端：聊天页历史菜单和 Gateway 收件箱，每一行都多了一个 ×（`event.stopPropagation()`，
+否则会同时触发"打开这条对话"）。删的正好是当前这条时，页面跟着后端给的新 id 走，并清掉
+`liveView`。
+
+### 改法四：重命名文档（只改库里的显示名）
+
+`library.rename_document()`：trim → 空的不改 → 截到 `MAX_TITLE` → `UPDATE documents SET title`。
+**磁盘上的文件、`doc_id`、内容一个字都不动**；`path`/`suffix`/`file_path` 全不碰
+（`_repair_binary_kinds` 不进这条路径）。重命名的是**当前打开的那份**时，前端会重发一次快照——
+桥里存的 `resource` 就是文档名，不重发的话 agent 会拿着旧名字跟你聊，又是"两个决定点"。
+
+**这里真被抓到一个 bug**（写在下面"验证"里）：文档列表的 `stamp` 原来只认「查询词 | 当前
+文档 id | 各行的 id」，重命名**一个 id 都没变**，于是列表一直显示旧名字，直到某个不相干的点击
+把高亮挪走才刷新。名字也是"这段 markup 依赖的东西"，所以名字必须进 stamp。
+
+### 改法五：去掉「全部消息——完整时间线」
+
+前端那个菜单项、`viewAllHistory()`、`liveView === "__all__"` 的判断全删掉；
+后端 `_thread_history()` 里 `if sid == "__all__"` 整段删掉，这个函数现在只剩一条 SQL 路径
+（顺便少一个"两个决定点"）。对应的测试删掉一条、另外两条留着。
+
+### 一次性维护动作：把阅读区已有的旧对话清掉
+
+你选了「全删掉，从零开始」。这是**一次维护动作，不是功能**：先备份 `state.db` 和
+`archives/`，再把 `reader` agent 名下的历史会话按上面那套逻辑清掉。做完侧边栏也就看不到
+那些旧会话了（`reader` 是个普通 profile，也会出现在侧边栏）。
+
+### 没做 / 边界
+
+- 不做回收站、撤销删除、会话改名、导出、跨会话搜索（你选了不可恢复）。
+- 不清理轨迹和工具结果（理由见上）。
+- **不改「文档快照同时发给两个 agent」这个设计本身**，只补它缺的撤销路径。
+  「什么时候该带上下文」的相关性闸门是另一个话题，这一轮没碰。
+- 重命名只改显示名这件事，在界面上写清楚了（按钮 tooltip + 弹窗文案），
+  免得你以为是改文件名。
+
+### 验证
+
+1. **真 Chrome 端到端**（`.claude/repro_reader_threads.py`，一次性脚本没进 git）：临时 home +
+   临时端口 + 临时 `.env`，**绝不指向你真实的 `.knowme`**，全程不调模型（不花钱）。
+   它原本是复现用的（改之前退出码 1），现在同时是验收：打开 alpha/beta 面板标题和会话都跟着换
+   （`doc-<idA>` → `doc-<idB>`）、重命名三处同改且会话不变、关文档发两次 clear 且页头归位、
+   删文档后列表和桥都干净、菜单里没有「全部消息」且每条会话能单独删、删掉当前那条之后服务器
+   报的当前会话换了新的。**控制台零报错**。最后一个检查是只读反证：拿原来的键再 clear 一次，
+   服务器回答 `cleared=false` 才说明那个键上确实什么都没有了——"agent 真的看不到了"。
+2. **新增测试 6 条** `evals/deterministic/test_session_delete.py`（`git add -f` 进库）：
+   一条会话的五个地方+归档全清、删当前会话会落座到新会话并且**下一条消息落进新会话**、
+   删别人的会话不动自己手上的文档、删文档删掉它自己的 `doc-` 对话、重命名只动名字
+   （含 trim / 截断 / 空名拒绝 / 不存在的 id）。另有两条守卫测试分别加进
+   `test_session_rotation.py` 和 `test_session_resume.py`，前端断言加进
+   `test_reader_frontend.py`（含上面那个 stamp 的真实 bug）。
+3. **反向验证**（锁要会咬人）：把「删当前会话时重新落座」「`doc-` 的轮转豁免」
+   「`resume_or_new_session` 的 `doc-%` 排除」「重命名后重发快照」「列表 stamp 带名字」
+   各自拆掉跑对应测试，全都 FAIL；改回来全绿。
+4. 全量 `pytest evals -q`：**682 passed / 89 skipped / 0 failed**（比基线的 676/62 多了本次
+   新增的测试；`evals/judge` 那批缺 `deepeval` 的在全量跑里表现为 skipped）。
+   `ruff check knowme evals` 干净。
+5. **踩到的两个环境坑**（都是这次现场发现的）：
+   - 反向验证的脚本用 Python 文本模式改写 JS（`read_text`/`write_text`），在 Windows 上
+     **把这三个文件从 LF 变成了 CRLF**，于是 `git diff --stat` 显示几百行的假改动。
+     仓库里存的是 LF（`core.autocrlf=false`），所以别用文本模式改这些文件，或者改完
+     用二进制方式把 `\r\n` 换回 `\n`。顺带一条：**Git Bash 的 `grep -c $'\r'` 在这里会骗人**
+     （它把 CR 当行尾，每个文件都报"全是 CRLF"）；要看行尾就用 Python 数 `\r\n` 的字节。
+   - 临时 home 里直连 `sqlite3` 补种两条会话来验删除菜单是可行的，但**页面要重新加载**
+     才看得到：换 `#hash` 只是同页改路由，不会再拉一次 `/api/data`。
+
 ## Phase 24：换了的模型，下拉里还是旧的（2026-09-22）
 
 **你提的**（大意）：把模型服务商的模型换成 mimo2.6 之后，聊天页那个下拉里还显示最初
@@ -1415,10 +1554,10 @@ cd D:\LLM\Agent\knowme-agent
   都不能每 5 秒重建一次，否则用户正在输入或正在选的内容会被清掉。
   加视图时照着 `render()` 里已有的分支写。
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 Web**。
-- **已知失败的 3 个测试**（动手前先看一眼，别把它们算到自己头上）：
-  `test_delegate_env.py` ×2、`test_packaging.py::test_the_bundled_skills_are_findable`。
-  干净工作区就失败，与前端无关。另外 `evals/judge/` 有 26 个 ERROR，是没装 `deepeval`。
-  当前基线：**619 passed / 3 failed / 62 skipped**。
+- **当前基线**（2026-09-22 Phase 25 之后）：`pytest evals -q` → **682 passed / 89 skipped /
+  0 failed**；`ruff check knowme evals` 干净。`evals/judge/` 那 26 个用例缺 `deepeval`，
+  单独跑那个目录会报 ERROR，跟着全量跑表现为 skipped——与改动无关，别看错。
+  （更早的 619/3/62 那条基线里的 3 个失败已经没有了。）
 - **改完 `.py` 一定要重启 Web**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
   硬刷新就能看到；但 `ops/web/` 及其 import 的一切都在内存里。
   （2026-09-21 亲自踩到：改了 `library.py` 后接口还是旧行为，以为改错了。）

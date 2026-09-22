@@ -44,6 +44,14 @@ _dashboard_session = None  # legacy name; this web run's thread
 _dashboard_sessions = {}  # legacy name; keyed by Agent id
 _picked_sessions = {}  # threads the user chose by hand, keyed by Agent id
 
+# The reading pane gives every document its OWN thread, named doc-<document id>.
+# Such a thread belongs to the document, not to "the recent web chat": you are
+# reading that document until you close it, however long ago the last question
+# was. The two predicates below both have to know that, so the prefix lives here
+# once — a second copy of the string is how the rotation and the resume would
+# start disagreeing about what a document's thread is.
+DOC_PREFIX = "doc-"
+
 
 def _new_session_id(agent_id: str) -> str:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -76,14 +84,21 @@ def dash_session(agent_id: str = "default") -> str:
 
 
 def resume_or_new_session(conn, agent_id: str = "default") -> str:
-    """Resume this agent's recent web thread, otherwise make a new one."""
+    """Resume this agent's recent web thread, otherwise make a new one.
+
+    A document's thread (DOC_PREFIX) is not a candidate: the reading pane writes
+    its questions with source='web', so without the exclusion the FIRST /api/data
+    of a restart adopts the last document you read as the agent's whole thread —
+    and get_agent binds that answer for the rest of the process, so the sidebar
+    and the panel would both report a document's thread as the recent chat."""
     get_profile(agent_id)
     idle_min = int(os.getenv("KNOWME_SESSION_IDLE_MINUTES", "60"))
     row = conn.execute(
         "SELECT session_id, MAX(created_at) AS last_at FROM chat_log "
-        "WHERE source IN ('web', 'dashboard') AND agent_id=? GROUP BY session_id "
+        "WHERE source IN ('web', 'dashboard') AND agent_id=? "
+        "AND session_id NOT LIKE ? GROUP BY session_id "
         "ORDER BY last_at DESC LIMIT 1",
-        (agent_id,),
+        (agent_id, DOC_PREFIX + "%"),
     ).fetchone()
     if row and row["last_at"]:
         try:
@@ -145,6 +160,14 @@ def maybe_rotate_session(agent) -> None:
     """Rotate only the supplied agent's thread after the configured idle gap."""
     global _dashboard_session
     agent_id = agent.agent_id
+    if agent.session.session_id.startswith(DOC_PREFIX):
+        # A document's thread never rotates. The point of the rotation is to get
+        # you out of a thread you were RESUMED into; a document's thread was not
+        # resumed, it is the one the document on screen is using -- and the
+        # picked-thread exemption below only excuses a single turn, so without
+        # this a long read would silently move the pane to a fresh thread while
+        # the document stayed open.
+        return
     idle_min = int(os.getenv("KNOWME_SESSION_IDLE_MINUTES", "60"))
     if idle_min <= 0:
         return

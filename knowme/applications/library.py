@@ -242,6 +242,22 @@ def file_path(conn: sqlite3.Connection, home: Path, doc_id: str) -> Path | None:
     return target
 
 
+def rename_document(conn: sqlite3.Connection, doc_id: str, title: str) -> str | None:
+    """Change the DISPLAY name of a document. Returns the name now on file, or
+    None when there was nothing to do (no such document, or an empty title).
+
+    Only `documents.title` moves: the id, the stored file, its suffix and its
+    text are the document, and the title is just what we call it in the library.
+    """
+    _ensure_table(conn)
+    name = " ".join((title or "").split())[:MAX_TITLE]
+    if not name:
+        return None
+    cursor = conn.execute("UPDATE documents SET title=? WHERE id=?", (name, doc_id))
+    conn.commit()
+    return name if cursor.rowcount else None
+
+
 def delete_document(conn: sqlite3.Connection, home: Path, doc_id: str) -> bool:
     """Drop the row (and its FTS entry via the delete trigger) + the original."""
     _ensure_table(conn)

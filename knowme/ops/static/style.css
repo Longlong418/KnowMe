@@ -172,6 +172,10 @@
                padding:16px 22px;min-height:calc(100vh - 150px)}
   .reader-paper-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
                      border-bottom:1px solid var(--line);padding-bottom:10px;font-weight:600}
+  /* 重命名 / 关闭 the open document. margin-right:auto keeps them beside the title
+     and lets the pane's meta + 问 Agent stay on the right where they were. */
+  #rc-doc-acts{margin-right:auto;display:inline-flex;gap:6px}
+  #rc-doc-acts .sessbtn{padding:2px 8px;font-size:11.5px;font-weight:400}
   .reader-pane #rc-content{min-height:260px;padding:16px 2px;color:var(--ink2);line-height:1.8}
   .reader-pane #rc-content p{margin:0 0 14px}
   .reader-more{margin-top:18px;padding-top:12px;border-top:1px dashed var(--line2)}
@@ -457,6 +461,14 @@
   .sessitem:hover{background:var(--accent-soft)}
   .sessitem.on{background:var(--accent-soft);color:var(--accent)}
   .sessitem .sm{color:var(--ink3);font-size:11px;margin-top:2px}
+  /* Delete a conversation: the row itself is the click target that OPENS it, so
+     the button stops propagation and stays out of the way until you hover. */
+  .sess-head{display:flex;align-items:center;gap:8px}
+  .sess-head>div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sess-del{background:none;border:none;color:var(--ink3);cursor:pointer;font-size:14px;
+            line-height:1;padding:0 3px;margin-left:auto;opacity:0;flex:0 0 auto}
+  .sessitem:hover .sess-del,.toolcard:hover .sess-del{opacity:1}
+  .sess-del:hover{color:var(--bad)}
   .fld{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12.5px;color:var(--ink2)}
   .fld input,.fld select{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:9px 12px;
           color:var(--ink);font-size:13.5px;outline:none}

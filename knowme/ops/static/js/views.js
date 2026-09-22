@@ -491,7 +491,13 @@ const VIEWS = {
       return `<div class="toolcard" style="cursor:pointer${on?';border-color:var(--accent)':''}" onclick="openConversation('${esc(s.id)}')">
         <div class="tn" style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
           <span>${esc(s.title||s.id)} ${tags}</span>
-          <span class="meta" style="font-weight:400;white-space:nowrap">${sessionMeta(s)}</span></div>
+          <span class="meta" style="font-weight:400;white-space:nowrap">${sessionMeta(s)}</span>
+          <!-- stopPropagation, or deleting also opens the conversation (the row
+               itself is the click target) — same guard as the library rows.
+               deleteConversation() lives in chat.js and is the ONE way to
+               delete a conversation. -->
+          <button class="sess-del" title="删除这条对话（不可恢复）"
+                  onclick="event.stopPropagation();deleteConversation('${esc(s.id)}')">&times;</button></div>
         <div class="td">${esc(s.last||"")}</div></div>`;
     }).join("");
     return h;

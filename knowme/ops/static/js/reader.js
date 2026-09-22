@@ -57,6 +57,12 @@ VIEWS.reader = function(){
     <div class="reader-pane">
       <div class="reader-paper-head">
         <span id="rc-title">当前文档</span>
+        <span id="rc-doc-acts" style="display:none">
+          <button class="sessbtn" onclick="readerRename()"
+                  title="只改文档库里的显示名，磁盘上的文件不动">重命名</button>
+          <button class="sessbtn" onclick="readerClose()"
+                  title="关掉这份文档：Agent 也就不再看得到它">&times;</button>
+        </span>
         <span class="meta" id="rc-meta">选中文本后可在右侧提问</span>
         <button class="sessbtn ask-toggle" onclick="toggleAskPanel()"
                 title="随时就正在读的内容提问">${askOpen ? "收起提问" : "问 Agent"}</button>
@@ -88,7 +94,13 @@ VIEWS.reader = function(){
 // therefore wired to `.asklog` as well (style.css).
 const ASK_AGENT = "reader";
 const ASK = [];
-let askLoaded = false;
+// Which thread the panel currently holds — the ID, not a yes/no. It used to be a
+// one-way `askLoaded = true`, so the first thread loaded stayed the panel's
+// thread for the life of the page: opening another document changed nothing
+// until you collapsed and reopened the panel, which rebuilt the whole view and
+// started the state over. Comparing ids is what lets a document's own thread
+// arrive without a rebuild.
+let askLoadedFor = null;
 
 function askPanelOpen(){
   const saved = localStorage.getItem("knowme_ask_open");
@@ -111,7 +123,7 @@ function askPanelHTML(){
   return `<aside class="reader-ask">
     <div class="ra-head">
       <span class="reader-kicker">提问 · READER AGENT</span>
-      <span class="meta">${esc(currentDoc ? currentDoc.title : "还没有打开文档")}</span>
+      <span class="meta" id="ra-title">${esc(currentDoc ? currentDoc.title : "还没有打开文档")}</span>
     </div>
     <div class="asklog"></div>
     <div class="chatbar">
@@ -119,6 +131,15 @@ function askPanelHTML(){
       <button id="asend">发送</button>
     </div>
   </aside>`;
+}
+
+// The panel's header names the document, and it is repainted from the ONE place
+// that paints the document — renderReaderDoc(). It used to be baked into the
+// markup when the view was built, so it named whatever document happened to be
+// open at that instant and nothing ever revised it afterwards.
+function paintAskTitle(){
+  const el = document.getElementById("ra-title");
+  if (el) el.textContent = currentDoc ? currentDoc.title : "还没有打开文档";
 }
 
 const ASK_CHAT = {chat: ASK, agentId: () => ASK_AGENT,
@@ -132,7 +153,7 @@ function wireAsk(){
   if (!b && !i) return;
   if (b) b.onclick = () => sendChatTo(ASK_CHAT, i);
   if (i) i.onkeydown = e => { if (e.key === "Enter") sendChatTo(ASK_CHAT, i); };
-  if (!askLoaded) loadAskThread();
+  if (askLoadedFor !== askSessionId()) loadAskThread();
   syncLogClass("asklog", ASK, ASK_EMPTY);
 }
 
@@ -140,7 +161,6 @@ function wireAsk(){
 // existing session without touching the main conversation's SESSION, and the
 // next question continues it (sending with agent_id=reader appends server-side).
 async function loadAskThread(){
-  askLoaded = true;
   const sid = askSessionId();
   let r;
   try {
@@ -149,9 +169,35 @@ async function loadAskThread(){
     return;
   }
   if (!r.ok) return;
+  askLoadedFor = sid;
+  fillAsk(r.history || []);
+}
+
+// Put a thread's rows into the panel. In place — the `.asklog` node is the live
+// one and syncLogClass() paints it (see render.js), so nothing here needs the
+// view to be rebuilt, which is what would drop a text selection.
+function fillAsk(history){
   ASK.length = 0;
-  (r.history || []).map(histItem).forEach(m => ASK.push(m));
+  history.map(histItem).forEach(m => ASK.push(m));
   syncLogClass("asklog", ASK, ASK_EMPTY, true);   // a loaded thread opens at its end
+}
+
+// Point the panel at the thread the OPEN DOCUMENT owns (see askSessionId).
+// 'switch' is what makes the next question belong to this document, and its
+// response already carries that thread's rows, so the panel is painted from it
+// rather than fetching the same history a second time. Wrapped in try/catch on
+// purpose: switching is the one call that BUILDS the reader agent, and building
+// it needs a provider key — a machine without one must still open a document.
+async function openAskThread(){
+  const sid = askSessionId();
+  if (!currentDoc){ askLoadedFor = null; await loadAskThread(); return; }
+  try {
+    const r = await postJSON("/api/session",
+                             {action: "switch", id: sid, agent_id: ASK_AGENT});
+    if (r && r.ok){ askLoadedFor = sid; fillAsk(r.history || []); }
+  } catch (error) {
+    /* keep reading; the panel just will not have this document's thread yet */
+  }
 }
 
 // --- the library list --------------------------------------------------------
@@ -193,7 +239,11 @@ function renderLibrary(){
   // do not change when you open a DIFFERENT document -- so the `.on` highlight
   // stayed on the document you first opened and never followed your clicks.
   // The open document's id is part of the markup, so it is part of the stamp.
-  const stamp = `${readerQuery}|${currentDoc ? currentDoc.id : ""}|${rows.map(d => d.id).join(",")}`;
+  // The NAME is in there too, for the same reason: 重命名 changes what the row
+  // says and changes no id at all, so an id-only stamp would leave the old name
+  // in the list until something else happened to move the highlight.
+  const stamp = `${readerQuery}|${currentDoc ? currentDoc.id : ""}|`
+                + rows.map(d => d.id + ":" + d.title).join(",");
   if (el.dataset.stamp === stamp) return;
   el.dataset.stamp = stamp;
   if (!rows.length){
@@ -283,18 +333,21 @@ async function handleUrlInput(){
 }
 
 async function readerDelete(docId){
-  if (!confirm("从文档库删除这份文档？原文文件也会一起删除。")) return;
+  if (!confirm("从文档库删除这份文档？原文文件、以及这份文档自己的对话都会一起删除，不可恢复。"))
+    return;
+  const wasOpen = !!(currentDoc && currentDoc.id === docId);
   try {
     await postJSON("/api/library", {action: "delete", doc_id: docId});
   } catch (error) {
     alert("删除失败：" + (error.message || error));
     return;
   }
-  if (currentDoc && currentDoc.id === docId){
-    currentDoc = null;
-    localStorage.removeItem(READER_DOC_KEY);
-  }
+  // Deleting the document you are reading closes it, and closing it is what
+  // takes its snapshot off the bridge. Deleting some OTHER document is not a
+  // reason to touch the key this page filed for the one on screen.
+  if (wasOpen) await readerClose();
   await loadLibrary(true);
+  renderLibrary();
   renderReaderDoc();
 }
 
@@ -317,6 +370,66 @@ async function readerOpen(docId){
   await publishReaderContext({selection: ""});
   renderLibrary();
   renderReaderDoc();
+  // Paint first, then move the panel: the question you ask next belongs to THIS
+  // document, and the panel has to say so before anything else can go wrong.
+  await openAskThread();
+}
+
+// Close the document: forget it on screen AND take it off the bridge.
+//
+// The bridge used to be write-only — publishReaderContext() filed a snapshot
+// under two keys and nothing ever removed it, so an agent went on "seeing" a
+// document you had closed hours ago. The server has had the action all along
+// (extras_action's "clear"); this is the caller it never had.
+async function readerClose(){
+  await clearReaderContext();             // before currentDoc is gone: it needs the key
+  currentDoc = null;
+  localStorage.removeItem(READER_DOC_KEY);
+  readerShown = READER_CHUNK;
+  pdfSession = null;
+  askLoadedFor = null;
+  renderLibrary();
+  renderReaderDoc();
+  // …and leave the document's own thread. Keeping it would mean a question asked
+  // with no document open continues the conversation of the document you just
+  // closed — the panel would go on answering about a document that is gone.
+  try {
+    const r = await postJSON("/api/session", {action: "new", agent_id: ASK_AGENT});
+    if (r && r.session_id){
+      D.current_sessions = {...(D.current_sessions || {}), [ASK_AGENT]: r.session_id};
+      askLoadedFor = null;
+      fillAsk([]);
+    }
+  } catch (error) {
+    /* the panel just keeps its thread; nothing about reading depends on this */
+  }
+  paintAskTitle();
+}
+
+// Rename the document in the LIBRARY only (documents.title). The stored file,
+// its id and its content are untouched — this is the name you read, not the name
+// on disk.
+async function readerRename(){
+  if (!currentDoc) return;
+  const asked = prompt("文档显示名（只改库里的名字，磁盘上的文件不动）", currentDoc.title);
+  if (asked === null) return;
+  let r;
+  try {
+    r = await postJSON("/api/library",
+                       {action: "rename", doc_id: currentDoc.id, title: asked});
+  } catch (error) {
+    alert("重命名失败：" + (error.message || error));
+    return;
+  }
+  if (!r || !r.ok){ alert("重命名失败：" + ((r && r.error) || "未知错误")); return; }
+  currentDoc.title = r.title;             // the name the server actually stored
+  await loadLibrary(true);                // the list shows the new name too
+  renderLibrary();
+  renderReaderDoc();
+  // The bridge carries the NAME as well as the text (metadata.resource), so a
+  // rename that skipped this would leave the agent calling your document by its
+  // old name for as long as it stayed open — the two-places-one-fact bug again.
+  await publishReaderContext({selection: ""});
 }
 
 // Repaint the document pane from currentDoc. Called on open, on "load more",
@@ -329,6 +442,13 @@ function renderReaderDoc(){
   if (titleEl) titleEl.textContent = currentDoc ? currentDoc.title : "当前文档";
   if (metaEl && currentDoc)
     metaEl.textContent = `${kindBadge(currentDoc.kind)} · ${currentDoc.chars} 字 · 选中文本后可发送给 Agent`;
+  // 重命名 / 关闭 only mean something with a document open, and the ask panel's
+  // header names the same document. Both follow this one paint: it runs on open,
+  // on delete, on 继续加载, on the poll's restore, and after a rename — so there is
+  // no second place for the panel's title to go stale.
+  const acts = document.getElementById("rc-doc-acts");
+  if (acts) acts.style.display = currentDoc ? "" : "none";
+  paintAskTitle();
   if (!currentDoc){
     contentEl.dataset.stamp = "";
     contentEl.dataset.pdf = "";
@@ -649,18 +769,41 @@ function publishReaderContext(extra = {}){
     selection: extra.selection || "",
     metadata: {doc_id: currentDoc.id, kind: currentDoc.kind}
   };
-  const targets = [
-    [ASK_AGENT, askSessionId()],
-    [ACTIVE_AGENT, SESSION || D?.current_sessions?.[ACTIVE_AGENT] || "default"]
-  ];
+  const targets = readerContextTargets();
   return Promise.all(targets.map(([agent_id, session_id]) =>
     postJSON("/api/extras", {...snapshot, agent_id, session_id})
   )).then(results => ({ok: results.every(r => r && r.ok), results}));
 }
 
-// The reader agent's own thread. Same expression loadAskThread() loads from, so
-// the publish target and the thread on screen cannot drift apart.
+// Where the open document is filed. ONE list: publishReaderContext() writes
+// these keys and clearReaderContext() deletes them, so the two cannot disagree
+// about where the document lives.
+function readerContextTargets(){
+  return [
+    [ASK_AGENT, askSessionId()],
+    [ACTIVE_AGENT, SESSION || D?.current_sessions?.[ACTIVE_AGENT] || "default"]
+  ];
+}
+
+// Take the document back off the bridge — the undo of publishReaderContext().
+// Same two keys, same expression, and idempotent: clearing a key nothing was
+// written to is not an error.
+function clearReaderContext(){
+  return Promise.all(readerContextTargets().map(([agent_id, session_id]) =>
+    postJSON("/api/extras", {action: "clear", agent_id, session_id})
+  )).catch(() => null);
+}
+
+// The reader agent's own thread: the one the OPEN DOCUMENT owns, so a document's
+// questions stay with the document (one document, one conversation). The prefix
+// is not arbitrary — the server treats `doc-` threads specially in two places
+// (browser_agent.DOC_PREFIX: they are never resumed as "the recent chat", never
+// rotated), so the two sides have to spell it the same way.
+//
+// No document open -> fall back to whatever thread the reader agent is in.
+const ASK_DOC_PREFIX = "doc-";
 function askSessionId(){
+  if (currentDoc) return ASK_DOC_PREFIX + currentDoc.id;
   return (D && D.current_sessions && D.current_sessions[ASK_AGENT]) || "default";
 }
 
