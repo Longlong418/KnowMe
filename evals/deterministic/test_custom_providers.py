@@ -162,6 +162,33 @@ def test_adding_saves_the_key_endpoint_and_models_and_switches_to_it(home):
         home.parent / ".env").read_text(encoding="utf-8")
 
 
+def test_adding_a_provider_puts_its_model_in_the_chat_switcher(home):
+    """The agent page's model menu shows the curated shortlist and NOTHING else,
+    so a provider that was never pinned is current and still invisible there —
+    which read as "I added it and the agent page doesn't show it".
+
+    It only looks fine on a fresh install, where pinned_specs() falls back to
+    default_pinned_specs() (derived from whichever keys are set) and picks the
+    new provider up by accident. Anyone who has ever pinned a model has a
+    models.json, and for them the fallback no longer runs — so this asserts on a
+    shortlist that already exists.
+    """
+    catalog.save_pinned(["deepseek:deepseek-v4-pro"])
+
+    _add(home)
+
+    assert "my_lab:my-model-large" in catalog.pinned_specs()
+    assert [p["model"] for p in settings_info()["pinned"] if p["provider"] == "my_lab"] == [
+        "my-model-large"]
+
+
+def test_adding_the_same_provider_twice_does_not_pin_it_twice(home):
+    _add(home)
+    _add(home, label="改名了")
+
+    assert catalog.pinned_specs().count("my_lab:my-model-large") == 1
+
+
 def test_adding_without_switching_leaves_the_current_provider_alone(home):
     _add(home, activate=False)
 

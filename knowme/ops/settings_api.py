@@ -48,6 +48,14 @@ def custom_provider_action(payload: dict) -> dict:
             # how the user sees what did not save, and re-sending this same
             # action with force=true is the 仍然保存 retry.
             return {"ok": False, "error": result.error, "can_force": result.can_force}
+        # Defining a provider is a statement that you mean to use it, so its main
+        # model joins the curated shortlist — that list is exactly what the agent
+        # page's model switcher shows, so without this the new provider would be
+        # current and *still* invisible there until pinned by hand on this page.
+        # catalog.save_pinned stays the only writer of models.json.
+        pinned = catalog.pinned_specs()
+        if (spec_name := f"{spec['id']}:{spec['model']}") not in pinned:
+            catalog.save_pinned([*pinned, spec_name])
         return {"ok": True, **settings_info()}
     if action == "remove_custom":
         if not custom_providers.is_custom(provider):
