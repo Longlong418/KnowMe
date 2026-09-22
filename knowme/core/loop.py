@@ -18,6 +18,7 @@ End-loop guardrails (the orange box's exit conditions):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import anthropic
 
@@ -32,6 +33,14 @@ class LoopResult:
     reply: str
     tool_calls: list[LoopEvent] = field(default_factory=list)
     iterations: int = 0
+    # What the runtime knows about the turn beyond its text: meta.steps (the
+    # timeline the conversation view draws), gate/graph, latency, model. The
+    # plain loop never fills this in — run_loop has no steps to report — but a
+    # turn that went through the runtime does, and the dashboard reads it. It
+    # lives here because callers get a LoopResult back and nothing else: when
+    # this field did not exist, AgentRuntime.as_loop_result() silently dropped
+    # meta on the way out and EVERY dashboard turn died on `result.meta`.
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 def run_loop(

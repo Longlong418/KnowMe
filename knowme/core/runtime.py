@@ -64,8 +64,16 @@ class TurnResult:
     meta: dict[str, Any] = field(default_factory=dict)
 
     def as_loop_result(self) -> LoopResult:
+        """The same turn, in the shape callers of the plain loop already get.
+
+        `meta` MUST come along. This is the only door out of the runtime for a
+        normal turn, and the dashboard renders its timeline from meta.steps —
+        so dropping it here broke every turn with `'LoopResult' object has no
+        attribute 'meta'`, while the stored history (which has meta in SQLite)
+        kept rendering fine and made it look like a frontend problem.
+        """
         return LoopResult(reply=self.reply, tool_calls=self.tool_calls,
-                          iterations=self.iterations)
+                          iterations=self.iterations, meta=self.meta)
 
 
 def _status(output: str) -> str:

@@ -100,3 +100,49 @@ def test_old_rows_without_meta_are_tolerated(tmp_path):
         "SELECT meta FROM chat_log WHERE role='assistant'"
     ).fetchone()
     assert row["meta"] is None
+
+
+def test_the_live_stream_ends_with_what_a_reload_will_render(tmp_path, monkeypatch):
+    """The dashboard's LIVE path — a different call chain from the one above.
+
+    Both paths draw the same card: the stream's 'done' event builds it while you
+    watch, the saved meta rebuilds it after a reload. Only the saved half was
+    covered, and the live half is the one that broke.
+
+    `KnowMe.respond()` returns `runtime.run_turn(...).as_loop_result()`, and when
+    as_loop_result() dropped meta, every dashboard turn died in chat_stream on
+    `result.meta` with an AttributeError — while a reloaded thread (reading the
+    meta out of SQLite) kept rendering perfectly. So it looked like a frontend
+    bug in the ask panel and was in fact every single turn.
+    """
+    from knowme.ops import dashboard
+
+    gate = response([text_block('{"retrieve": true, "query": "alex", "reason": "asks about alex"}')])
+    turn = [
+        response([tool_block("save_note", {"subject": "alex", "content": "likes mornings"})], "tool_use"),
+        response([text_block("Noted.")]),
+    ]
+    app = make_knowme(tmp_path / "home", client=ScriptedClient([gate] + turn))
+    monkeypatch.setattr(dashboard, "get_agent", lambda agent_id="default": app)
+    # Nothing is published to the bridge in this test, and the bridge is a
+    # process-wide singleton the other tests share.
+    monkeypatch.setattr(dashboard.application_contexts, "render", lambda *a: "")
+
+    events = []
+    dashboard.chat_stream("remember alex likes mornings", lambda kind, ev: events.append((kind, ev)))
+    done = next(ev for kind, ev in events if kind == "done")
+
+    assert done["reply"] == "Noted."
+    assert done["iterations"] == 2
+    assert isinstance(done["latency_ms"], int)
+    assert [t["tool"] for t in done["tools"]] == ["save_note"]
+    assert done["model"] == app.settings.model
+
+    # The timeline the live card draws IS the timeline the saved card draws --
+    # that equality is the contract ("one shape, two paths"), so state it.
+    row = app.conn.execute(
+        "SELECT meta FROM chat_log WHERE role='assistant' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    meta = json.loads(row["meta"])
+    assert done["steps"], "the live 'done' carries the turn timeline"
+    assert done["steps"] == meta["steps"]
