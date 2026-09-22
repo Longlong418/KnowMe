@@ -1,5 +1,18 @@
 # KnowMe 实现进度更新
 
+## Phase 17: 提问看不到当前文档 + 日志被轮询推回底部（2026-09-22）
+- ✅ **右侧提问看不到当前文档**：Context Bridge 按 (agent, session) 存，服务端按"这一轮是哪个 Agent 在问"取——而前端只写进 `ACTIVE_AGENT` 那一格，面板却是以 `reader` 问的，两边从来不是同一格
+- ✅ 改法：一次发布两个目标（面板的 `reader` + 主对话的 `ACTIVE_AGENT`，后者是`选中文字→发送`在用的）；`askSessionId()` 把"reader 的线程是谁"收在一处
+- ✅ 服务端自报的 `application_chars` 修复前 **0**、修复后 **24157**——模型直接说出 "Current resource: REACT" 和 doc_id
+- ✅ **往上翻几秒就跳回最后一条**：`syncLogClass()` 原来无条件 `scrollTop = scrollHeight`，而 `wireChat()` 每 5 秒轮询都重画两个日志（那个"几秒"就是轮询周期）
+- ✅ 改法：按"你原本在不在底部"决定（40px 余量）；`force` 留给确实有新内容的调用点（按了发送、刚加载完线程）
+- ✅ 关键细节：**空日志必须算作在底部**，否则重建视图后每个会话都会停在最老的一条
+- ✅ 主对话那边没被碰到：它的 `.chatlog` 不是内层滚动条（实测 `scrollHeight == clientHeight`）
+- ✅ 两个新锁都做了反向验证，读到的是能看懂的 FAIL（不是测试自己炸掉）
+- ✅ 先复现再修：真实 Chrome + 数据副本，修复前 3 项 FAIL → 修复后 6 项全过
+- ✅ 基线 **616 passed / 3 failed / 62 skipped**（3 个失败仍是既有的），ruff 干净
+- ⏳ 待你拍板：**选中文字不按发送，Agent 看不到**——要不要"选中即注入"
+
 ## Phase 16: 右侧提问报错 + 阅读器三处小毛病（2026-09-22）
 - ✅ **右侧提问报 `'LoopResult' object has no attribute 'meta'`**：根因在**后端**——`respond()` 改成 `as_loop_result()` 之后，这个翻译函数把 `meta` 静默丢掉了，前端就一个字都答不出来
 - ✅ `LoopResult` 补上 `meta` 字段，`as_loop_result()` 带上它；老测试只验"历史能画出来"，没验"刚答完推的和落库的是同一个"，所以补了 `test_turn_meta.py` 断言**实时 `done` 的 steps == 落库的 steps**

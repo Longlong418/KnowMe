@@ -339,6 +339,101 @@ const stamp = `${readerQuery}|${currentDoc ? currentDoc.id : ""}|${rows.map(d =>
 
 三个提交：`d823312`（后端 meta）、`6926b48`（PDF 缩放）、`66dc4b6`（前面那三个前端 bug）。
 
+## Phase 17：提问看不到当前文档 + 日志被轮询推回底部（2026-09-22）
+
+你报的两件事。两件的症状都在前端，两件的根因都不在"前端那一眼能看到的地方"。
+
+### 一、右侧提问："没有拿到「当前打开文档」的标识"
+
+你自己也试出来了——在阅读器里开着 REACT 那篇问它，回答是"说不上来，这次会话里我没有拿到「当前打开文档」的标识"。
+
+**Context Bridge 是按 (agent, session) 存的。** `application_contexts.publish(agent_id, session_id, …)` 存进一个字典，键是这两样；服务端取的时候用的是 `render(agent.agent_id, agent.session.session_id)`——也就是**这一轮是哪个 Agent 在问，就取它那一格**。
+
+而前端只在 `ACTIVE_AGENT` 那一格写：你停在 `default`（默认落的那一页），文档就存在 `("default", <default 的线程>)` 里。可是右侧面板是以 `reader` 的身份问的，服务端取的是 `("reader", <reader 的线程>)`——两边**从来就不是同一格**，所以永远取到空。
+
+注意这个 bug 的形状：**发布和读取都没写错，错的是它们对不上。** 单看任何一边的代码都是对的，只有把 `publish` 的实参和服务端 `render` 的实参摆在一起才看得出来。
+
+**改法**：一次发布，两个目标。
+
+```js
+const targets = [
+  [ASK_AGENT, askSessionId()],                      // 右侧面板
+  [ACTIVE_AGENT, SESSION || D?.current_sessions?.[ACTIVE_AGENT] || "default"]
+];
+```
+
+- **`ASK_AGENT`（reader）**：面板自己的那一格，这才是它要看的。
+- **`ACTIVE_AGENT`**：主对话那一格，`选中文字 → 发送`（`rcSend`）走的是它——留着，不是多余的两个 POST，而是那条路本来就在用。
+
+顺手把"reader 的线程是谁"收成一个 `askSessionId()`：原来 `loadAskThread()` 里写了一遍同样的表达式，两处各写一遍迟早会漂。现在发布的目标和屏幕上那个线程用的是同一个来源。
+
+返回值改成 `{ok: 两边都成功, results}`：`rcSend` 里判断的是 `res.ok`，让它以后也代表"两边都写进去了"。
+
+### 二、往上翻几秒就自己跳回最后一条
+
+**根因在 `syncLogClass()`**（`render.js`），它原来是无条件的：
+
+```js
+el.scrollTop = el.scrollHeight;   // 滚到底部才让流式回答看起来"活着"
+```
+
+这句话本身没错——错在**它被调用的时机**。`wireChat()` 每 5 秒的轮询都会重画两个日志（主对话的 `.chatlog` 和右侧的 `.asklog`），所以每 5 秒就有人把你从正在读的旧消息上拽走。你"翻几秒就跳回去"，那个"几秒"就是轮询周期。
+
+**改法**：跟着最新消息这件事，**只在你本来就在底部的时候做**。
+
+```js
+// 量在替换 innerHTML 之前：问的是"你当时看的东西"，不是新的那份
+const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+el.innerHTML = renderChatLogFor(chat, emptyText);
+if (force || atBottom) el.scrollTop = el.scrollHeight;
+```
+
+留了 40px 余量，滚轮/触控板很难精确停在第 0 像素。
+
+**`force` 是给"确实有新东西"的调用点的**：你在面板里按了发送（`sendChatTo` 的第一帧）、刚加载完一个线程（`loadAskThread`）。这两种情况下底才是对的，不管你之前翻到哪儿。
+
+**为什么"空日志"要算作在底部**：`render()` 重建视图后，日志元素是**新的空元素**（`chat.js` 里就是一句 `<div class="chatlog"></div>`）。空元素的 `scrollHeight - 0 - clientHeight` 是 0 或负，所以天然算"在底部"→ 跟着走。要是把它当成"你翻走了"，每个会话打开时都会停在最老的一条上——这是这个改动最容易踩的坑。
+
+**主对话那边没被碰到**：它的 `.chatlog` 不是内层滚动条（实测 `scrollHeight == clientHeight`，滚的是 `<main>`），所以那条判断在那边恒为真，行为和以前一模一样。真实 Chrome 里也确认了。
+
+### 验证
+
+**先复现，再修。** 用真实 Chrome + 一个数据副本（`KNOWME_HOME` 指向 `.knowme` 的拷贝，端口 31237）跑 `.claude/verify17.py`：
+
+修复前：
+```
+FAIL  开文档时把这份材料 publish 给了 reader agent （实际 [('default', 'dashboard-20260922-125333')]）
+FAIL  reader agent 拿到了当前打开的文档 application_chars=0
+FAIL  轮询没有把你推回底部 （7 秒后 scrollTop=10896）
+```
+（`application_chars=0` 是服务端自己报的"这一轮我拿到了多少字的应用上下文"，比看模型的措辞可靠。）
+
+修复后 **6 项全过**，其中：
+
+```
+PASS  开文档时把这份材料 publish 给了 reader agent （实际 [('default', …), ('reader', …)]）
+PASS  reader agent 拿到了当前打开的文档 application_chars=24157
+     它这一轮的回答: 看得到了——这次 [application context] 里带上了 Current resource: REACT，
+     以及 doc_id=36492580-…（pdf · 110151 字）
+PASS  轮询没有把你推回底部 （7 秒后 scrollTop=0）
+PASS  按发送之后日志回到最新一条 （scrollTop=17170 底部=17170）
+```
+
+有意思的是模型自己把三次的差别说出来了（第一次只有时间时区、第二次有标题和 id、第三次连正文都在）——因为每修一次它拿到的 context 就多一段。
+
+**两个新锁都做了反向验证**（把旧写法放回去，读到的必须是能看懂的 FAIL，不是测试自己炸掉）：
+
+- `test_dashboard_render_frontend.py::test_the_poll_does_not_steal_the_scroll_position`：切片 `syncLogClass`，用一个几何可控的假日志元素驱动。反向验证时读到的是 `FAIL a poll does NOT drag you back to the bottom when you have scrolled up`。
+- `test_reader_frontend.py` 里新增的三条：记录每个 `/api/extras` 的 body，断言两格都写了。反向验证时读到的是 `FAIL opening a document publishes it under the READER agent (the panel's own key): default/s1`——**把旧行为的实质直接打出来了**（只发了 default）。
+
+### 测试基线
+
+**616 passed / 3 failed / 62 skipped**（比上轮多 2 条，就是这两个锁）。3 个失败仍是既有的那三个。ruff 干净。
+
+### 一个还没做的选择
+
+**选中文字之后不按发送，Agent 是看不到的**——它只在你点「发送」时（`rcSend`）才知道你选了哪一段。这是现在的行为，我没有动它：要不要"选中即注入"是个产品决定，你说一声我再改。
+
 ## 项目概览
 
 一个以自研 Agent Core 为底座的个人 Agent 工作平台。支持多Agent记忆隔离，提供Reader应用和Context Bridge。
@@ -628,7 +723,7 @@ cd D:\LLM\Agent\knowme-agent
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 dashboard**。
 - **已知失败的 3 个测试**（动手前先看一眼，别把它们算到自己头上）：
   `test_delegate_env.py` ×2、`test_packaging.py::test_the_bundled_skills_are_findable`。
-  干净工作区就失败，与前端无关。当前基线：**614 passed / 3 failed / 62 skipped**。
+  干净工作区就失败，与前端无关。当前基线：**616 passed / 3 failed / 62 skipped**。
 - **改完 `.py` 一定要重启 dashboard**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
   硬刷新就能看到；但 `dashboard.py` 及其 import 的一切都在内存里。
   （2026-09-21 亲自踩到：改了 `library.py` 后接口还是旧行为，以为改错了。）
