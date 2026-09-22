@@ -219,6 +219,139 @@ pendingTests.push((function testReaderPane() {
   })();
 })());
 
+// ---- the PDF pane: ctrl+wheel zooms the page, not the window ----------------
+// pdf.js itself is stubbed (getDocument/TextLayer/canvas), because the claims
+// here are arithmetic and control flow: does the wheel reach preventDefault, do
+// the pages come back bigger, is the listener attached once, do the pages you
+// loaded with 继续加载 survive. A real canvas would prove none of them.
+pendingTests.push((function testPdfZoom() {
+  const els = {};
+  let prevented = 0;
+
+  function stubEl(id) {
+    const classes = new Set();
+    return {
+      id, dataset: {}, style: {}, children: [], value: "", textContent: "",
+      clientWidth: 800, scrollTop: 0, listeners: {}, _html: "",
+      classList: {
+        add: c => classes.add(c), remove: c => classes.delete(c),
+        toggle: (c, on) => (on === undefined
+          ? (classes.has(c) ? classes.delete(c) : classes.add(c))
+          : (on ? classes.add(c) : classes.delete(c))),
+      },
+      addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
+      querySelector: () => null,
+      querySelectorAll(sel) { return sel === ".pdf-page" ? this.children : []; },
+      // a page knows where it sits, so the zoom has something to anchor to
+      getBoundingClientRect() {
+        return { top: (this.index || 0) * 900, height: parseFloat(this.style.height) || 800 };
+      },
+      appendChild(node) { node.index = this.children.length; this.children.push(node); return node; },
+      append() {},
+      insertAdjacentHTML() {},
+      get innerHTML() { return this._html; },
+      set innerHTML(v) { this._html = v; this.children = []; },
+    };
+  }
+  for (const id of ["rc-content", "rc-title", "rc-meta", "rc-selection", "rc-text",
+                    "rc-library", "rc-search", "rc-file-input", "rc-url-input"])
+    els[id] = stubEl(id);
+
+  const document = {
+    getElementById: id => els[id] || null,
+    querySelectorAll: () => [],
+    documentElement: { scrollTop: 0 },
+    // a page wrap needs a rect like a real one, or the zoom has nothing to
+    // anchor to
+    createElement: tag => (tag === "canvas"
+      ? { style: {}, getContext: () => ({}), width: 0, height: 0 }
+      : { className: "", style: {}, append() {},
+          getBoundingClientRect() { return { top: (this.index || 0) * 900,
+                                            height: parseFloat(this.style.height) || 800 }; } }),
+  };
+  const getComputedStyle = () => ({ overflowY: "visible" });
+  const window = { devicePixelRatio: 1, getSelection: () => ({ toString: () => "" }),
+                   addEventListener() {} };
+  const storage = {};
+  const localStorage = { getItem: k => (k in storage ? storage[k] : null),
+                         setItem: (k, v) => { storage[k] = String(v); },
+                         removeItem: k => { delete storage[k]; } };
+  const esc = s => String(s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const renderMarkdown = t => String(t);
+  const ACTIVE_AGENT = "default", SESSION = "s1", activeView = "reader";
+  const VIEWS = {};                    // reader.js assigns VIEWS.reader at load
+  const alert = m => { throw new Error("unexpected alert: " + m); };
+  const confirm = () => true;
+  const D = { current_sessions: {} };
+  const postJSON = async (url, body) => {
+    if (body.action === "list") return { ok: true, documents: [
+      { id: "p1", title: "paper", kind: "pdf", chars: 10, created_at: "2026-09-21" }] };
+    if (body.action === "open") return { ok: true, text: "one two", has_more: false,
+      document: { id: body.doc_id, title: "paper", kind: "pdf", chars: 10,
+                  created_at: "2026-09-21" },
+      file_url: "/api/library/file?id=" + body.doc_id };
+    return { ok: true };
+  };
+  // Drawing is promise-only once pdf.js is stubbed, so ONE macrotask boundary
+  // drains the whole paint; only the zoom's debounce needs real time.
+  const settle = ms => new Promise(r => setTimeout(r, ms === undefined ? 0 : ms));
+  eval(readerSrc);
+
+  // The two things pdf.js would provide: a document and a text layer.
+  const fakePage = () => ({
+    getViewport: ({ scale }) => ({ width: 600 * scale, height: 800 * scale }),
+    render: () => ({ promise: Promise.resolve() }),
+    getTextContent: () => Promise.resolve({ items: [] }),
+  });
+  class FakeTextLayer { constructor() {} render() { return Promise.resolve(); } }
+  loadPdfLib = async () => ({
+    getDocument: () => ({ promise: Promise.resolve({
+      numPages: 12, getPage: async () => fakePage() }) }),
+    TextLayer: FakeTextLayer,
+    GlobalWorkerOptions: {},
+  });
+  pdfUnsupportedReason = () => "";        // node's Uint8Array is not the contract here
+
+  const pageWidth = () => parseFloat(els["rc-content"].children[0].style.width);
+  const wheel = (ev) => els["rc-content"].listeners.wheel[0]({
+    preventDefault: () => { prevented++; }, clientY: 0, ...ev });
+
+  return (async () => {
+    await readerOpen("p1");
+    await settle();
+    assert(els["rc-content"].children.length === 8,
+           "a PDF paints its first batch of pages");
+    await pdfMore();
+    assert(els["rc-content"].children.length === 12, "继续加载 paints the rest of them");
+
+    wirePdfZoom(els["rc-content"]);
+    wirePdfZoom(els["rc-content"]);
+    assert(els["rc-content"].listeners.wheel.length === 1,
+           "the wheel listener is attached once, not once per repaint");
+
+    const before = pageWidth();
+    wheel({ ctrlKey: true, deltaY: -1 });
+    await settle(260);                     // the redraw is debounced; let it run
+    assert(prevented === 1,
+           "ctrl+wheel does NOT zoom the browser page (preventDefault is called)");
+    assert(pageWidth() > before, "ctrl+wheel zooms the PDF itself");
+    assert(els["rc-content"].children.length === 12,
+           "the pages you already loaded survive the zoom");
+
+    wheel({ ctrlKey: false, deltaY: -1 });
+    assert(prevented === 1, "a plain wheel is still the browser's own scrolling");
+
+    for (let i = 0; i < 20; i++) wheel({ ctrlKey: true, deltaY: -1 });
+    await settle(260);
+    const capped = pageWidth();
+    wheel({ ctrlKey: true, deltaY: -1 });
+    await settle(260);
+    assert(pageWidth() === capped, "the zoom stops at its maximum instead of growing forever");
+    assert(capped > before, "...and it did grow before it stopped");
+  })();
+})());
+
 // ---- readerLoad(): reads the file off the event target ----------------------
 (function testReaderLoad() {
   assert(/function readerLoad\(input\)/.test(readerSrc),

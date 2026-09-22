@@ -179,8 +179,13 @@
      is selectable and can be sent to the agent like any other text. */
   .reader-pdfwrap{display:flex;flex-direction:column;align-items:center;gap:14px;
                   background:var(--bg);border-radius:8px;padding:14px}
-  .pdf-page{position:relative;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.18);max-width:100%}
-  .pdf-page canvas{display:block;max-width:100%}
+  /* Zoomed in, a page is wider than the pane, so the pane scrolls sideways —
+     and centring has to go: with overflow, a centred flex item that overflows
+     can be scrolled right but never left. The pages are drawn at the pane's
+     width at zoom 1, so this only ever applies to an explicit ctrl+wheel. */
+  .reader-pdfwrap.zoomed{align-items:flex-start;overflow-x:auto}
+  .pdf-page{position:relative;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.18)}
+  .pdf-page canvas{display:block}
   /* Transcribed from pdf.js's own web/pdf_viewer.css (Apache-2.0, like the
      library). pdf.js positions each span absolutely to match the glyphs it drew
      on the canvas; the text is transparent and only the SELECTION shows. */

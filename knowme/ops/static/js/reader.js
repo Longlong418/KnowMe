@@ -26,9 +26,15 @@ const READER_DOC_KEY = "knowme_reader_open_doc";
 const READER_CHUNK = 60000;
 let readerShown = READER_CHUNK;
 // The loaded pdf.js document and how many of its pages have been drawn.
-let pdfSession = null;          // {docId, doc, rendered}
+let pdfSession = null;          // {docId, doc, lib, rendered, zoom}
 const PDF_MAX_PAGES = 60;       // a 900-page PDF must not try to draw itself
 const PDF_PAGES_PER_BATCH = 8;
+const PDF_ZOOM_MIN = 0.25;      // ctrl+wheel zoom of the page, not of the window
+const PDF_ZOOM_MAX = 4;
+const PDF_ZOOM_STEP = 1.15;
+let pdfPendingAnchor = null;    // where under the pointer the zoom is pinned
+let pdfZoomTimer = null;
+let pdfRedrawing = false;
 
 VIEWS.reader = function(){
   const askOpen = askPanelOpen();
@@ -441,12 +447,16 @@ async function renderReaderPdf(contentEl){
   try {
     if (!pdfSession || pdfSession.docId !== currentDoc.id){
       const doc = await lib.getDocument({url: currentDoc.file_url, ...PDF_ASSETS}).promise;
-      pdfSession = {docId: currentDoc.id, doc, lib, rendered: 0};
+      pdfSession = {docId: currentDoc.id, doc, lib, rendered: 0, zoom: 1};
     }
   } catch (error) {
     pdfFallback(contentEl, `PDF 打不开：${esc(String(error))}`);
     return;
   }
+  wirePdfZoom(contentEl);
+  // Repainting the SAME document keeps its zoom (the panel toggle repaints);
+  // opening another one starts from the session's fresh zoom of 1.
+  contentEl.classList.toggle("zoomed", pdfSession.zoom !== 1);
   contentEl.innerHTML = "";
   await pdfDrawPages(contentEl, 0);
 }
@@ -456,13 +466,16 @@ async function renderReaderPdf(contentEl){
 // sent to the agent exactly like text in a markdown document.
 async function pdfDrawPages(contentEl, from){
   const {doc, lib} = pdfSession;
+  contentEl.querySelector(".reader-more")?.remove();
   const width = Math.max(320, contentEl.clientWidth || 720);
   const last = Math.min(doc.numPages, from + PDF_PAGES_PER_BATCH, PDF_MAX_PAGES);
   for (let n = from + 1; n <= last; n++){
     const page = await doc.getPage(n);
     const base = page.getViewport({scale: 1});
-    const scale = Math.min(2, width / base.width);     // never upscale past 2x
-    const viewport = page.getViewport({scale});
+    // Fit the page to the pane, then apply the reader's own zoom on top. At
+    // zoom 1 this is exactly what it always was.
+    const fit = Math.min(2, width / base.width);       // never upscale past 2x
+    const viewport = page.getViewport({scale: fit * pdfSession.zoom});
     const wrap = document.createElement("div");
     wrap.className = "pdf-page";
     wrap.style.width = `${Math.floor(viewport.width)}px`;
@@ -501,8 +514,101 @@ async function pdfDrawPages(contentEl, from){
 async function pdfMore(){
   const contentEl = document.getElementById("rc-content");
   if (!contentEl || !pdfSession) return;
-  contentEl.querySelector(".reader-more")?.remove();
   await pdfDrawPages(contentEl, pdfSession.rendered);
+}
+
+// --- zooming the page, not the window ---------------------------------------
+
+// Ctrl+wheel is the browser's own page zoom, which on a document viewer zooms
+// the wrong thing: the sidebar and the library grow with the text and you lose
+// your place. So the pane takes the gesture for itself — preventDefault needs a
+// non-passive listener — and re-draws the pages bigger or smaller.
+function wirePdfZoom(contentEl){
+  // #rc-content survives a repaint (renderReaderDoc replaces its children, not
+  // the element), so the flag lives on the element: a plain addEventListener
+  // here would add one more zoom step on every repaint.
+  if (contentEl.dataset.zoomWired) return;
+  contentEl.dataset.zoomWired = "1";
+  contentEl.addEventListener("wheel", (ev) => {
+    if (!ev.ctrlKey || !pdfSession) return;
+    ev.preventDefault();
+    // Pin the zoom to the point under the pointer, the way a map does.
+    pdfPendingAnchor = pdfPointerAnchor(contentEl, ev.clientY);
+    const step = ev.deltaY < 0 ? PDF_ZOOM_STEP : 1 / PDF_ZOOM_STEP;
+    pdfSession.zoom = Math.min(PDF_ZOOM_MAX, Math.max(PDF_ZOOM_MIN, pdfSession.zoom * step));
+    contentEl.classList.toggle("zoomed", pdfSession.zoom !== 1);
+    schedulePdfRedraw();
+  }, {passive: false});
+}
+
+// Which page the pointer is over, and how far down it (0..1). Only the index is
+// kept: the redraw throws the page elements away and makes new ones.
+function pdfPointerAnchor(contentEl, clientY){
+  const pages = contentEl.querySelectorAll(".pdf-page");
+  for (let i = 0; i < pages.length; i++){
+    const rect = pages[i].getBoundingClientRect();
+    if (clientY < rect.bottom){
+      return {index: i, frac: Math.min(1, Math.max(0, (clientY - rect.top) / (rect.height || 1)))};
+    }
+  }
+  return pages.length ? {index: pages.length - 1, frac: 0} : null;
+}
+
+function schedulePdfRedraw(){
+  // One redraw per burst of wheel ticks: re-rendering 8 pages takes longer than
+  // the ticks arrive, so a redraw started per tick would only queue up.
+  clearTimeout(pdfZoomTimer);
+  pdfZoomTimer = setTimeout(pdfRedraw, 160);
+}
+
+async function pdfRedraw(){
+  const contentEl = document.getElementById("rc-content");
+  if (!contentEl || !pdfSession) return;
+  const pages = contentEl.querySelectorAll(".pdf-page");
+  if (!pages.length) return;                     // the pane is not showing this PDF
+  if (pdfRedrawing){ schedulePdfRedraw(); return; }
+  const anchor = pdfPendingAnchor;
+  const page = anchor ? pages[anchor.index] : null;
+  // Plain numbers, taken now: the rect is only useful before the pages are
+  // thrown away, and this keeps the arithmetic below readable.
+  const rect = page ? page.getBoundingClientRect() : null;
+  const beforeTop = rect ? rect.top : 0;
+  const beforeHeight = rect ? rect.height : 0;
+  pdfRedrawing = true;
+  try {
+    const target = Math.min(pdfSession.rendered, pages.length);  // keep 继续加载's pages
+    contentEl.innerHTML = "";
+    for (let from = 0; from < target; from += PDF_PAGES_PER_BATCH){
+      await pdfDrawPages(contentEl, from);
+    }
+  } finally {
+    pdfRedrawing = false;
+  }
+  if (rect) pdfRestoreAnchor(contentEl, anchor, beforeTop, beforeHeight);
+}
+
+// Zoom changes the height of everything above the page you are looking at, so
+// the scroll offset has to be corrected or the text jumps out from under the
+// pointer. The anchored point sits `frac` of the way down its page: the page
+// moved by (top - beforeTop), and grew by (height - beforeHeight), of which
+// `frac` is above the point.
+function pdfRestoreAnchor(contentEl, anchor, beforeTop, beforeHeight){
+  const pages = contentEl.querySelectorAll(".pdf-page");
+  const page = pages[Math.min(anchor.index, pages.length - 1)];
+  if (!page) return;
+  const rect = page.getBoundingClientRect();
+  scrollParent(contentEl).scrollTop +=
+    (rect.top - beforeTop) + anchor.frac * (rect.height - beforeHeight);
+}
+
+// The nearest scrolling ancestor — <main> in this layout. Writing to scrollTop
+// works for whatever that turns out to be, so this does not hardcode the shell.
+function scrollParent(el){
+  for (let node = el.parentElement; node; node = node.parentElement){
+    const overflowY = getComputedStyle(node).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+  return document.scrollingElement || document.documentElement;
 }
 
 // --- selection -> the agent --------------------------------------------------
