@@ -1,4 +1,4 @@
-// knowme dashboard — the conversation view (#agent/<id>), sessions/history,
+// knowme web — the conversation view (#agent/<id>), sessions/history,
 // model chip, stats toggle.
 // Split out of app.js: classic <script>, shared global scope (no build
 // step, no modules). Load order + rules: static/README.md.

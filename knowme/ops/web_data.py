@@ -1,21 +1,7 @@
-"""Dashboard — every pillar on one local page. Zero new dependencies.
+"""Web data collection and mutation handlers."""
 
-    make dashboard        # → http://localhost:7777
+# ruff: noqa: F401, I001
 
-One stdlib HTTP server reading the files KnowMe already writes:
-  loop + harness   traces/*.jsonl   (turns, gate decisions, tool calls, tokens)
-  memory           state.db         (facts, episodes, chat log, consolidation)
-  tools            state.db + calendar.ics + outbox/
-  eval             eval_report.json (written by `make gate`)
-
-The overview mirrors the architecture diagram — every box is clickable and
-opens that section's live data. Type a message in the chat dock and watch the
-same harness (gate, loop, tools, memory) used by the CLI light up in the browser.
-
-The frontend is plain static files (static/index.html + style.css + app.js)
-served as-is — no build step, no framework. This file is just the server + API.
-Bound to 127.0.0.1 only. For deep trace waterfalls use Phoenix (`make trace`).
-"""
 
 from __future__ import annotations
 
@@ -49,231 +35,17 @@ from knowme.ops.catalog import list_models
 from knowme.ops.pricing import price_for, usage_summary
 from knowme.ops.settings_api import apply_settings, pin_action, settings_info
 from knowme.ops.tracing import TraceEncodingError, iter_trace_lines
+from knowme.ops.web_runtime import (
+    _NOTION_EPISODES_TTL,
+    _notion_lock,
+    _parse_ts,
+    _tool_status,
+    application_contexts,
+)
 
 # Windows commonly reserves 7777 (for example through Hyper-V/WSL port
-# exclusions), while 8888 is conventionally available for local dashboards.
+# exclusions), while 8888 is conventionally available for local webs.
 # Keep the familiar 7777 default elsewhere, but make a clean Windows checkout
-# work without a per-shell environment override.
-PORT = 8888 if os.name == "nt" else 7777
-# The frontend lives in its own files (static/index.html + style.css + app.js),
-# served as-is by this stdlib server — no build step, no framework. Edit those
-# to change the UI; edit this file to change the server/API.
-STATIC = Path(__file__).resolve().parent / "static"
-
-# Transient UI state belongs to the dashboard process, not SQLite memory.  The
-# bridge is intentionally explicit so the chat path cannot accidentally read
-# state from another agent or another conversation.
-application_contexts = ApplicationContextBridge()
-
-
-def chat(message: str, agent_id: str = "default") -> dict:
-    """One turn, one JSON result — the non-streaming door to the same room.
-
-    The dashboard itself uses /api/chat/stream; this exists for scripts and for
-    `curl`. It deliberately does NOT reimplement the turn: it drives chat_stream
-    and keeps the final "done" payload, because the two used to be separate
-    copies of the same 25 lines and had already drifted (the streaming one
-    reported which model answered, this one didn't). One implementation means
-    they cannot disagree again.
-    """
-    final: dict = {}
-
-    def collect_done(kind: str, ev: dict) -> None:
-        if kind == "done":
-            final.update(ev)
-
-    chat_stream(message, collect_done, agent_id=agent_id)
-    return final
-
-
-def chat_stream(message: str, emit, agent_id: str = "default") -> None:
-    """Run one turn, calling emit(kind, event) for every harness event AS it
-    happens — gate decision, tool calls, and the reply text token by token —
-    so the browser can show thinking streams like the CLI does. Ends
-    with a 'done' event carrying the final structured result.
-
-    A leading slash calls a graph workflow BY NAME instead of running a turn.
-    Both doors end in the same 'done' event, so the chat renders the answer the
-    same way whether the harness routed it or you named the shape yourself."""
-    command = commands.parse(message)
-    if command is not None:
-        _run_command(command, emit)
-        return
-
-    events: list[dict] = []
-
-    def observer(kind, ev):
-        if kind in ("context", "gate", "consolidation", "route", "triage"):
-            events.append({"kind": kind, **ev})
-        emit(kind, ev)
-
-    with agent_lock:
-        agent = get_agent(agent_id)
-        thread_before = agent.session.session_id
-        maybe_rotate_session(agent)
-        if agent.session.session_id != thread_before:
-            # The idle rotation gave this agent a new thread. The Application
-            # snapshot (the document you have open) is screen state, not thread
-            # state, so it comes along — otherwise an hour of reading would come
-            # off the moment you asked about it, because the publish happened
-            # back when the OLD thread was current.
-            application_contexts.rekey(
-                agent.agent_id, thread_before, agent.session.session_id
-            )
-        extra_context = application_contexts.render(
-            agent.agent_id, agent.session.session_id
-        )
-        start = datetime.now(UTC)
-        result = agent.respond(
-            message,
-            observer=observer,
-            source="dashboard",
-            stream=True,
-            extra_context=extra_context,
-        )
-        latency_ms = int((datetime.now(UTC) - start).total_seconds() * 1000)
-
-    context = next((e for e in events if e["kind"] == "context"), None)
-    gate = next((e for e in events if e["kind"] == "gate"), None)
-    cons = next((e for e in events if e["kind"] == "consolidation"), None)
-    route = next((e for e in events if e["kind"] == "route"), None)
-    triage = next((e for e in events if e["kind"] == "triage"), None)
-    quick = bool(route) and route.get("target") == "quick_reply"
-    emit("done", {
-        "reply": result.reply,
-        "context": ({
-            "application_chars": context.get("application_chars", 0),
-            "history_messages": context.get("history_messages", 0),
-            "sent_messages": context.get("sent_messages", 0),
-            "compaction": context.get("compaction", []),
-        } if context else None),
-        "gate": {"decision": gate["decision"], "reason": gate.get("reason")} if gate else None,
-        "graph": ({"workflow": route.get("workflow", "triage"),
-                   "route": "quick" if quick else "full",
-                   "reason": (triage or {}).get("reason", "")} if route else None),
-        "tools": [{"tool": c["tool"], "args": c["args"], "output": c["output"],
-                   "status": _tool_status(c["output"]),
-                   "summary": (c["output"] or "").split(". ")[0][:120]} for c in result.tool_calls],
-        "consolidation": {"new_facts": cons["new_facts"]} if cons else None,
-        "iterations": result.iterations,
-        "latency_ms": latency_ms,
-        # the ordered timeline (meta.steps) so the live card ends up with exactly
-        # what a reloaded historical card renders — one shape, two paths.
-        "steps": result.meta.get("steps") or [],
-        # which brain answered — shown per card; a quick graph turn was the small model
-        "model": agent.settings.small_model if quick else agent.settings.model,
-    })
-
-
-# A NAME -> runner table, never a dynamic import of whatever the browser sent.
-# "run the workflow the client named" is one careless refactor away from "import
-# and call whatever string arrives", so the indirection is a dict on purpose.
-def WORKFLOW_RUNNERS() -> dict[str, str]:  # noqa: N802 — reads as a table
-    """Discovered, not hand-listed. A hardcoded table and a slash-command list
-    are two registries of the same fact, and they drift."""
-    return commands.discover()
-
-
-def graph_stream(payload: dict, emit) -> None:
-    """Run a graph workflow, streaming its node events as SSE.
-
-    Only the engine's own events go out — graph_start / node_start / node_end /
-    route / graph_end. They already carry `workflow` and `node`, which is all a
-    card needs, and they carry no node OUTPUT, so a digest can never leak into
-    a frame. Unlike the Arena this needs no lock of its own: run_graph already
-    serialises notify() behind one (engine.py), so events arrive whole.
-    """
-    name = (payload.get("workflow") or "").strip()
-    target = WORKFLOW_RUNNERS().get(name)
-    if target is None:
-        emit("done", {"error": f"unknown workflow '{name}'"})
-        return
-    module_name, _, fn_name = target.partition(":")
-    try:
-        import importlib
-
-        run = getattr(importlib.import_module(module_name), fn_name)
-        state = run(observer=lambda kind, ev: emit(kind, ev))
-        emit("done", {
-            "workflow": name,
-            "digest": (state.get("digest") or "")[:4000],
-            "draft_path": state.get("draft_path", ""),
-            "errors": state.get("errors") or {},
-        })
-    except Exception as exc:
-        # Includes GraphStateCollision, which run_graph raises OUT (unlike node
-        # errors) — better shown in the card than dropped on the floor.
-        emit("done", {"error": f"{type(exc).__name__}: {exc}"})
-
-
-def _run_command(command: tuple[str, str], emit) -> None:
-    """Handle `/name` from the chat box.
-
-    The node events go out exactly as the engine emits them, so the topology
-    chart animates from the same trace poll that animates a normal turn — a
-    named workflow lights the picture as readily as a routed one.
-    """
-    name, arg = command
-    start = datetime.now(UTC)
-    if name in ("graphs", "help", "?"):
-        emit("done", {"reply": commands.describe(), "tools": [], "iterations": 0,
-                      "latency_ms": 0, "gate": None})
-        return
-    try:
-        state = commands.run(name, emit, arg)
-    except Exception as exc:
-        emit("done", {"reply": f"`/{name}` failed: {type(exc).__name__}: {exc}",
-                      "tools": [], "iterations": 0, "latency_ms": 0, "gate": None})
-        return
-    if state is None:
-        emit("done", {"reply": commands.unknown_reply(name), "tools": [],
-                      "iterations": 0, "latency_ms": 0, "gate": None})
-        return
-    reply = state.get("digest") or "(the workflow produced no text)"
-    if state.get("ignored_argument"):
-        reply = (f"*`/{name}` takes no input, so \u201c{state['ignored_argument']}\u201d "
-                 f"was not used — a fixed shape always fetches the same sources. "
-                 f"Ask a normal question to use the loop instead.*\n\n") + reply
-    if state.get("draft_path"):
-        reply += f"\n\n*saved to `{state['draft_path']}`*"
-    for node, err in (state.get("errors") or {}).items():
-        reply += f"\n\n*{node}: {err}*"
-    emit("done", {
-        "reply": reply, "tools": [], "gate": None, "consolidation": None,
-        "iterations": 0,
-        "latency_ms": int((datetime.now(UTC) - start).total_seconds() * 1000),
-        "workflow": name,
-    })
-
-
-def _parse_ts(ts: str):
-    try:
-        return datetime.fromisoformat(ts)
-    except (ValueError, TypeError):
-        return None
-
-
-def _tool_status(output: str) -> str:
-    """Classify a tool result for the UI: ok / warn / error — from the output
-    string alone (tools already report honestly, so trust their words)."""
-    low = (output or "").lower()
-    if "failed" in low or "timed out" in low or low.startswith("error"):
-        return "error"
-    if "already exists" in low or "not synced" in low or "skipped" in low:
-        return "warn"
-    return "ok"
-
-
-# Notion-backed episodes live across the network, so the client AND the result
-# are cached with a short TTL — collect() runs on every dashboard auto-refresh
-# and must not round-trip to Notion every few seconds (rate limits + latency).
-# The sqlite path is a local query and doesn't need this.
-_NOTION_EPISODES_TTL = 30.0   # seconds; the page polls ~every 5s
-_notion_lock = threading.Lock()
-_notion_store = None                       # built once (its constructor calls Notion)
-_notion_episodes: tuple[float, list] | None = None   # (fetched_at, items)
-
-
 def invalidate_notion_cache() -> None:
     """Forget cached Notion clients/results after connection settings change."""
     global _notion_store, _notion_episodes
@@ -283,7 +55,7 @@ def invalidate_notion_cache() -> None:
 
 
 def _get_notion_store():
-    """The ONE NotionEpisodeStore for the whole dashboard process. Its
+    """The ONE NotionEpisodeStore for the whole web process. Its
     constructor round-trips to Notion (data-source resolution), so it's built
     lazily and cached. Callers must hold _notion_lock."""
     global _notion_store
@@ -308,7 +80,7 @@ def collect(agent_id: str = "default") -> dict:
 
     def episodes_payload() -> dict:
         """Episodes from the active backend: sqlite (default) or notion.
-        A Notion outage must not take down the whole dashboard payload."""
+        A Notion outage must not take down the whole web payload."""
         if settings.episodic_store != "notion":
             return {
                 "source": "sqlite",
@@ -654,7 +426,7 @@ def _tool_source(name: str, mcp_servers: list[str]) -> str:
 
 
 def knowledge_info() -> dict:
-    """Every one of the user's knowledge notes, for the dashboard.
+    """Every one of the user's knowledge notes, for the web.
 
     Not filtered by Agent: this is the human's own knowledge base and they own
     every note in it, whatever Agent wrote it. Each row still carries its
@@ -719,7 +491,7 @@ def tools_info() -> dict:
 
         conn = connect(settings.home)
         try:
-            # Notion mode: reuse the dashboard's one cached client instead of
+            # Notion mode: reuse the web's one cached client instead of
             # letting Memory() build a fresh one per poll (issue #20).
             episode_store = None
             if settings.episodic_store == "notion":
@@ -728,7 +500,7 @@ def tools_info() -> dict:
             mem = Memory(conn, settings, None, episode_store=episode_store)
         except Exception:
             # A misconfigured optional backend (notion/supabase) must not take
-            # the dashboard down — drop the memory-admin tools from the
+            # the web down — drop the memory-admin tools from the
             # display-only catalog instead.
             mem = None
         tools = [calendar.make_tool(
@@ -828,7 +600,7 @@ def session_action(payload: dict) -> dict:
     get_profile(agent_id)
     if action == "history":
         # read-only view of a conversation — never touches the agent, so the
-        # dashboard can poll it live (e.g. to show new Telegram messages arrive).
+        # web can poll it live (e.g. to show new Telegram messages arrive).
         settings = load_settings()
         settings.ensure_home()
         conn = connect(settings.home)
@@ -895,7 +667,7 @@ def reveal_path(rel: str) -> dict:
 
 
 def memory_action(payload: dict) -> dict:
-    """Human CRUD on memory from the dashboard: update/delete facts & episodes,
+    """Human CRUD on memory from the web: update/delete facts & episodes,
     rewrite SOUL.md. Writes the same sqlite file the agent uses (busy_timeout
     covers contention); changes are live for the next agent turn."""
     from knowme.memory.episodic.store import SqliteEpisodeStore
@@ -970,7 +742,7 @@ def extras_action(payload: dict) -> dict:
          "content": "...", "selection": "...", "session_id": "..."}
 
     The earlier ``type=selection/text/source`` shape remains accepted so an old
-    open dashboard keeps working during an upgrade.
+    open web keeps working during an upgrade.
     """
     agent_id = (payload.get("agent_id") or "default").strip()
     get_profile(agent_id)
@@ -1044,7 +816,7 @@ def library_action(payload: dict) -> dict:
         search_documents,
         text_window,
     )
-    from knowme.applications.reader import ReaderError, fetch_url
+    from knowme.applications.reader import fetch_url
     from knowme.db import connect
 
     settings = load_settings()
@@ -1125,7 +897,7 @@ def library_file(conn, home, doc_id: str):
 def knowledge_action(payload: dict) -> dict:
     """Store, retrieve, and delete knowledge notes with [[links]] support.
 
-    The dashboard is the human's own view, so reading, editing and deleting all
+    The web is the human's own view, so reading, editing and deleting all
     span every Agent — you can open and save any note you can see, whichever
     Agent wrote it, and the note keeps its original agent_id. Only `create`
     still uses the selected Agent, because a NEW note has to be stamped with
@@ -1221,245 +993,3 @@ def events_since(cursor):
         except json.JSONDecodeError:
             pass
     return {"events": out, "cursor": len(lines)}
-
-
-class Handler(BaseHTTPRequestHandler):
-    def _send(self, body: bytes, ctype: str, *, no_cache: bool = False,
-              status: int = 200) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        # The frontend files (app.js/style.css) change as we develop; without
-        # this the browser serves a stale cached copy and edits look "missing".
-        if no_cache:
-            self.send_header("Cache-Control", "no-cache, must-revalidate")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):
-        if self.path == "/api/data":
-            self._send(json.dumps(collect(), default=str).encode(), "application/json")
-        elif self.path.startswith("/api/data?"):
-            from urllib.parse import parse_qs, urlparse
-
-            agent_id = parse_qs(urlparse(self.path).query).get("agent_id", ["default"])[0]
-            try:
-                payload = collect(agent_id or "default")
-            except ValueError as exc:
-                payload = {"error": str(exc)}
-            self._send(json.dumps(payload, default=str).encode(), "application/json")
-        elif self.path == "/api/agents":
-            live = browser_agent.current_agents()
-            payload = [
-                {**profile.to_public(),
-                 "status": "ready" if profile.id in live else "idle",
-                 "session_id": (
-                     live[profile.id].session.session_id
-                     if profile.id in live else dash_session(profile.id)
-                 )}
-                for profile in list_profiles()
-            ]
-            self._send(json.dumps(payload).encode(), "application/json")
-        elif self.path.startswith("/api/models"):
-            from urllib.parse import parse_qs, urlparse
-
-            prov = parse_qs(urlparse(self.path).query).get("provider", [None])[0]
-            self._send(json.dumps(list_models(prov)).encode(), "application/json")
-        elif self.path.startswith("/api/events"):
-            from urllib.parse import parse_qs, urlparse
-
-            raw = parse_qs(urlparse(self.path).query).get("cursor", [None])[0]
-            cursor = int(raw) if raw and raw.lstrip("-").isdigit() else None
-            self._send(json.dumps(events_since(cursor)).encode(), "application/json")
-        elif self.path.startswith("/api/workspace"):
-            from urllib.parse import parse_qs, urlparse
-
-            relative = parse_qs(urlparse(self.path).query).get("path", [""])[0]
-            self._send(json.dumps(workspace_info(relative or None), default=str).encode(),
-                       "application/json")
-        elif self.path.startswith("/api/reveal"):
-            from urllib.parse import parse_qs, unquote, urlparse
-
-            rel = unquote(parse_qs(urlparse(self.path).query).get("path", [""])[0])
-            self._send(json.dumps(reveal_path(rel)).encode(), "application/json")
-        elif self.path.startswith("/api/library/file"):
-            # The ORIGINAL bytes of a library document. pdf.js needs the real
-            # file — our extracted text has no figures and no layout — so the
-            # browser fetches it here rather than re-uploading it.
-            from urllib.parse import parse_qs, urlparse
-
-            from knowme.db import connect
-
-            doc_id = parse_qs(urlparse(self.path).query).get("id", [""])[0]
-            settings = load_settings()
-            settings.ensure_home()
-            body, _kind, suffix = library_file(connect(settings.home), settings.home, doc_id)
-            if body is None:
-                self.send_response(404)
-                self.end_headers()
-                return
-            ctype = {".pdf": "application/pdf", ".html": "text/html; charset=utf-8",
-                     ".htm": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8"
-                     }.get(suffix, "text/plain; charset=utf-8")
-            self._send(body, ctype, no_cache=True)
-        elif self.path.startswith("/static/"):
-            self._serve_static(self.path)
-        else:
-            self._send((STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
-
-    def _serve_static(self, path: str) -> None:  # the frontend files
-        name = path.split("/static/", 1)[1].split("?")[0]
-        target = (STATIC / name).resolve()
-        if STATIC.resolve() not in target.parents or not target.is_file():
-            self.send_response(404)
-            self.end_headers()
-            return
-        # The MIME type has to be right, not just present: a browser refuses to
-        # EXECUTE a module served as application/octet-stream, so `.mjs` (the
-        # vendored pdf.js build) fails with a console error and no pdf at all.
-        # `.wasm` and the fonts are the same class of requirement.
-        ctype = {".css": "text/css", ".js": "text/javascript",
-                 ".mjs": "text/javascript",           # pdf.js ships ESM
-                 ".svg": "image/svg+xml",
-                 ".html": "text/html; charset=utf-8",
-                 ".wasm": "application/wasm",         # JBIG2/JPEG2000 decoders
-                 ".ttf": "font/ttf", ".pfb": "application/octet-stream",
-                 ".json": "application/json",
-                 }.get(target.suffix, "application/octet-stream")
-        self._send(target.read_bytes(), ctype, no_cache=True)
-
-    def do_POST(self):
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            payload = json.loads(self.rfile.read(length) or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            self._send(
-                json.dumps({"ok": False, "error": f"请求 JSON 无效：{exc}"}).encode(),
-                "application/json", status=400,
-            )
-            return
-
-        # /api/chat/stream streams harness events (SSE) as the turn runs.
-        if self.path == "/api/chat/stream":
-            message = (payload.get("message") or "").strip()
-            agent_id = payload.get("agent_id") or "default"
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-
-            def emit(kind, ev):
-                try:
-                    self.wfile.write(f"data: {json.dumps({'kind': kind, **ev}, default=str)}\n\n".encode())
-                    self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass  # the browser navigated away mid-stream — fine
-
-            if not message:
-                emit("done", {"error": "empty message"})
-                return
-            try:
-                chat_stream(message, emit, agent_id=agent_id)
-            except Exception as exc:  # surface as a terminal event, don't 500
-                emit("done", {"error": f"{type(exc).__name__}: {exc}"})
-            return
-        if self.path == "/api/graph/stream":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-
-            def emit(kind, ev):
-                try:
-                    self.wfile.write(f"data: {json.dumps({'kind': kind, **ev}, default=str)}\n\n".encode())
-                    self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-            graph_stream(payload, emit)
-            return
-        routes = {"/api/chat": None, "/api/memory": memory_action, "/api/settings": apply_settings,
-                  "/api/query": run_query, "/api/session": session_action, "/api/pin": pin_action,
-                  "/api/knowledge": knowledge_action,
-                  "/api/library": library_action,
-                  "/api/workspace": workspace_action,
-                  "/api/reader": None,
-                  "/api/connections": None, "/api/connections/test": None,
-                  "/api/providers": None, "/api/extras": extras_action}
-        if self.path not in routes:
-            self._send(
-                json.dumps({"ok": False, "error": f"没有这个 API：{self.path}"}).encode(),
-                "application/json", status=404,
-            )
-            return
-        try:
-            if self.path == "/api/chat":
-                message = (payload.get("message") or "").strip()
-                out = chat(message, payload.get("agent_id") or "default") if message else {
-                    "error": "empty message"
-                }
-            elif self.path == "/api/extras":
-                out = extras_action(payload)
-            elif self.path == "/api/reader":
-                if payload.get("action") == "url":
-                    out = {"ok": True, "document": load_url(str(payload.get("url", "")).strip())}
-                elif payload.get("action") == "upload":
-                    out = {"ok": True, "document": load_upload(str(payload.get("name", "")), str(payload.get("data", "")))}
-                else:
-                    raise ReaderError("Reader action 必须是 url 或 upload")
-            elif self.path == "/api/connections":
-                result = apply_integration(payload.get("key", ""), payload.get("values") or {},
-                                           tuple(payload.get("clear") or ()), force=bool(payload.get("force")))
-                if result.ok and payload.get("key") == "notion":
-                    invalidate_notion_cache()
-                out = asdict(result)
-            elif self.path == "/api/connections/test":
-                out = asdict(test_integration(payload.get("key", "")))
-            elif self.path == "/api/providers":
-                # A payload that only toggles availability goes to the enable/
-                # disable path; everything else is the existing provider apply.
-                if "disabled" in payload and set(payload) <= {"provider", "disabled"}:
-                    out = asdict(apply_provider_disabled(payload.get("provider", ""),
-                                                         disabled=bool(payload["disabled"])))
-                else:
-                    out = asdict(apply_provider(**payload))
-            else:
-                out = routes[self.path](payload)
-        except Exception as exc:  # surface, don't 500 — the browser shows it
-            out = {"error": f"{type(exc).__name__}: {exc}"}
-        self._send(json.dumps(out, default=str).encode(), "application/json")
-
-    def log_message(self, *args):  # keep the terminal quiet
-        pass
-
-
-def main() -> None:
-    # Port precedence: KNOWME_DASHBOARD_PORT, then the conventional PORT (used by
-    # deploy platforms and IDE preview panes), then the platform default. If it
-    # is unavailable, walk on rather than failing the dashboard startup.
-    base = int(os.getenv("KNOWME_DASHBOARD_PORT") or os.getenv("PORT") or PORT)
-    for port in range(base, base + 10):  # walk past a busy port instead of crashing
-        try:
-            server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-        except OSError as exc:
-            # A Windows port exclusion raises WSAEACCES/10013, not
-            # WSAEADDRINUSE/10048. Calling both "busy" sent people looking for
-            # a phantom process, even though no process owned the port.
-            if exc.errno == errno.EADDRINUSE or getattr(exc, "winerror", None) == 10048:
-                reason = "already in use"
-            elif exc.errno == errno.EACCES or getattr(exc, "winerror", None) == 10013:
-                reason = "reserved by the system or access is denied"
-            else:
-                reason = f"unavailable ({exc})"
-            print(f"port {port} {reason}, trying {port + 1}…")
-            continue
-        print(f"KnowMe dashboard → http://localhost:{port}  (Ctrl-C to stop)")
-        server.serve_forever()
-        return
-    raise SystemExit(
-        f"no usable local port in {base}–{base + 9}; "
-        "set KNOWME_DASHBOARD_PORT to an available port and try again"
-    )
-
-
-if __name__ == "__main__":
-    main()

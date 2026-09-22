@@ -1,4 +1,4 @@
-// knowme dashboard — formatters + chat card renderers + chatlog + streaming + send.
+// knowme web — formatters + chat card renderers + chatlog + streaming + send.
 // Split out of app.js: classic <script>, shared global scope (no build
 // step, no modules). Load order + rules: static/README.md.
 

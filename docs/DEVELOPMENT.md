@@ -1,13 +1,33 @@
 # KnowMe 开发文档
 
+## Phase 18：核心目录收敛与 Web 入口整理（2026-09-22）
+
+这一轮没有改变 Agent 的行为，专门处理代码组织问题：
+
+- `knowme/core/` 是唯一的核心实现目录。旧的 `knowme/loop/` 和
+  `knowme/runtime/` 重复文件已删除；旧 import 由 `knowme/__init__.py`
+  集中映射到 `core`，所以历史代码仍然可以运行，但新代码只应使用
+  `knowme.core.*`。
+- 本地浏览器入口统一叫 **Web**：启动命令是 `knowme web` 或 `make web`。
+  `knowme dashboard` 仍是一个兼容别名，方便已有脚本平滑迁移。
+- 原来的单体服务文件拆为四层：`ops/web.py`（兼容门面）、
+  `ops/web_runtime.py`（聊天和工作流）、`ops/web_data.py`（数据和写操作）、
+  `ops/web_server.py`（HTTP/SSE 传输）。
+- 前端由 `static/js/bootstrap.js` 作为唯一的原生 ES Module 入口；
+  `index.html` 不再维护一长串脚本加载顺序。现有功能脚本保留稳定的浏览器
+  handler 名称，后续可以逐个迁移为显式 `export`，而不必再改服务端 API。
+
+验证：核心布局、旧 import 兼容、Web 路由、Agent 池和静态前端定向测试
+`42 passed`，Ruff 检查通过。
+
 ## Phase 11：先把 Reader 的上传链路做稳（2026-09-22）
 
-这一轮没有改 Dashboard 的两栏布局。左边仍然是 Agent 和应用入口，右边仍然显示当前 Agent 的对话，或者当前应用（阅读器、知识库、记忆等）。这次只处理 Reader 真正影响使用的问题。
+这一轮没有改 Web 的两栏布局。左边仍然是 Agent 和应用入口，右边仍然显示当前 Agent 的对话，或者当前应用（阅读器、知识库、记忆等）。这次只处理 Reader 真正影响使用的问题。
 
 ### 这次修了什么
 
 - 修复了浏览器端请求遇到空响应时的错误提示。以前 `postJSON()` 不管响应状态，直接调用 `response.json()`；服务端返回空的 404 或连接中断时，浏览器只会显示 `Unexpected end of JSON input`，看不出到底是哪一个接口失败。现在会先读取响应文本，再显示 HTTP 状态或服务端返回的错误。
-- Dashboard 收到无效 JSON 时不再直接断开连接，而是返回一个带状态码的 JSON 错误。不存在的 POST API 也会返回 JSON，而不是空响应。
+- Web 收到无效 JSON 时不再直接断开连接，而是返回一个带状态码的 JSON 错误。不存在的 POST API 也会返回 JSON，而不是空响应。
 - 去掉了左侧导航里两个都跳到 `#memory` 的入口。现在只保留“记忆管理”；需要看原始记忆数据时，进入已有的“数据库”页面，不会再出现点两个菜单却看到同一页的情况。
 
 ### Reader 的正确数据流
@@ -20,9 +40,9 @@
 
 ### 调试上传失败时先看这三件事
 
-- 确认浏览器连接的是刚启动的 Dashboard 端口。旧的 Dashboard 进程如果还占着端口，旧版本可能没有 `/api/library`，这时 PDF 会表现为 `Failed to fetch`。
+- 确认浏览器连接的是刚启动的 Web 端口。旧的 Web 进程如果还占着端口，旧版本可能没有 `/api/library`，这时 PDF 会表现为 `Failed to fetch`。
 - 打开浏览器 Network 面板，检查 `POST /api/library` 的状态和响应 JSON；现在即使失败也会返回可读错误，不会再只显示 JSON 解析错误。
-- PDF 仍然打不开时，直接访问 Network 里返回的 `/api/library/file?id=...`。如果它返回 `application/pdf`，说明上传和保存成功，问题只在浏览器端 PDF 渲染；如果返回 404，说明连接的不是包含文档库路由的 Dashboard 实例。
+- PDF 仍然打不开时，直接访问 Network 里返回的 `/api/library/file?id=...`。如果它返回 `application/pdf`，说明上传和保存成功，问题只在浏览器端 PDF 渲染；如果返回 404，说明连接的不是包含文档库路由的 Web 实例。
 
 ### 还没有做的事情
 
@@ -30,7 +50,7 @@
 
 ## Phase 12：知识库第一轮可用化（2026-09-22）
 
-Reader 链路稳定后，开始补自己的知识库。这里也没有改变 Dashboard 的整体两栏布局，只把知识库应用内部整理成更接近笔记工具的工作区：左边看笔记，右边编辑当前笔记。
+Reader 链路稳定后，开始补自己的知识库。这里也没有改变 Web 的整体两栏布局，只把知识库应用内部整理成更接近笔记工具的工作区：左边看笔记，右边编辑当前笔记。
 
 ### 这次加了什么
 
@@ -40,7 +60,7 @@ Reader 链路稳定后，开始补自己的知识库。这里也没有改变 Das
 - `[[笔记标题]]` 会在预览中变成可点击链接；点击后会在当前 Agent 的笔记中查找并打开目标笔记。
 - 打开笔记时额外读取反向链接，编辑器底部会显示“哪些笔记链接到了这里”。
 - 所有失败都通过页面提示，不把网络异常留在控制台里；删除仍然需要确认。
-- 编辑中的新笔记或旧笔记会避开 Dashboard 的 5 秒刷新，草稿不会因为后台轮询而消失；保存、删除或离开页面后再恢复正常刷新。
+- 编辑中的新笔记或旧笔记会避开 Web 的 5 秒刷新，草稿不会因为后台轮询而消失；保存、删除或离开页面后再恢复正常刷新。
 
 ### 为什么先做这些
 
@@ -69,7 +89,7 @@ Phase 12 只让"页面不主动刷新"这一条成立了：5 秒轮询不再重�
 
 ### 元凶：`render()` 每次调用都抛异常
 
-`main.js` 的 `render()` 是 Dashboard 的渲染主循环，每 5 秒被轮询调用一次。它最后有一段给左侧导航写数字的代码：
+`main.js` 的 `render()` 是 Web 的渲染主循环，每 5 秒被轮询调用一次。它最后有一段给左侧导航写数字的代码：
 
 ```js
 document.getElementById("n-mem").textContent = ...;
@@ -168,7 +188,7 @@ if (typeof Uint8Array.prototype.fromBase64 !== "function") return "浏览器不�
 
 | | 谁在用 | 应该看到什么 |
 |---|---|---|
-| **Dashboard 知识库** | **你（人）** | 所有 Agent 的笔记。这是你自己的知识库，你有全部所有权 |
+| **Web 知识库** | **你（人）** | 所有 Agent 的笔记。这是你自己的知识库，你有全部所有权 |
 | **Agent 自己的工具** | **模型** | 只有它自己的笔记 |
 
 **只有第一行改了。** `make_knowledge_tools()`（模型调用的 `save_note`/`list_notes` 这些工具）**完全没动**——Coding Agent 依然看不到你 Learning 的笔记。这是 Agent 隔离这个功能本身，你没有要求去掉它，去掉会让每个 Agent 都能读到你的私人笔记。
@@ -185,7 +205,7 @@ if (typeof Uint8Array.prototype.fromBase64 !== "function") return "浏览器不�
 def _agent_conds(agent_id):
     """把查询限定到某个 Agent 的条件。
 
-    agent_id=None 表示不限定 —— 所有 Agent 的笔记。Dashboard 的知识库就是
+    agent_id=None 表示不限定 —— 所有 Agent 的笔记。Web 的知识库就是
     这么调的，因为看它的人拥有全部笔记。Agent 自己的工具永远不传 None
     （它们闭包持有自己的 id），所以 Agent 依然读不到别的 Agent 的笔记。
     None 是刻意写成"必须显式传"的：这样没有任何现有调用会不小心放宽范围。
@@ -201,7 +221,7 @@ def _agent_conds(agent_id):
 
 **默认值仍是 `"default"`**，所以所有老调用行为不变。只有显式写 `agent_id=None` 才会放宽。
 
-**`dashboard.py`**：
+**`web.py`**：
 
 - `knowledge_info()` 去掉了 `agent_id` 参数（它已经不用了，留着会误导），列出全部笔记和全部文件夹。
 - `knowledge_action()`：`list` / `get` / `update` / `delete` / `search` / `links` 都传 `agent_id=None`；**只有 `create` 还用当前 Agent**——新笔记总得盖上某个 Agent 的章。
@@ -512,7 +532,7 @@ PASS  换线程之后 reader agent 还是看得到那篇文档 application_chars
 ### Phase 3：Knowledge Base MVP
 - ✅ SQLite notes 表支持 `agent_id`，旧数据库启动时自动迁移
 - ✅ 知识库 CRUD、搜索、文件夹和 `[[双向链接]]`
-- ✅ Agent 工具和 Dashboard API 均按当前 Agent 隔离
+- ✅ Agent 工具和 Web API 均按当前 Agent 隔离
 - ✅ 标题更新、UUID、空标题校验、删除结果和 wiki-link 转义
 - ✅ `evals/deterministic/test_knowledge_base.py` 覆盖核心行为
 
@@ -523,15 +543,15 @@ PASS  换线程之后 reader agent 还是看得到那篇文档 application_chars
 - ✅ 打开文件后通过 `application: coding` 写入 Context Bridge
 - ✅ 暂不开放任意写入和 Terminal；变更仍通过显式 `delegate_task(cwd=...)` 完成
 
-### Phase 5：Dashboard Agent 隔离收口
+### Phase 5：Web Agent 隔离收口
 - ✅ `/api/data?agent_id=...` 只返回当前 Agent 的 facts、episodes、chat log、Trace 和数据库样本
 - ✅ 切换 Agent 后前端重新拉取对应数据，避免只靠浏览器端过滤
 - ✅ 未知 Agent 在数据接口和 Workspace API 中都会被拒绝
-- ✅ 新增 Dashboard 隔离回归测试
+- ✅ 新增 Web 隔离回归测试
 
 ### Phase 6：Memory Manager 合并
 - ✅ Semantic facts 可以在同一 Agent 内合并，目标事实保留、来源事实删除
-- ✅ Agent 工具 `manage_memory(action="merge")` 和 Dashboard UI 共用同一个 Store 方法
+- ✅ Agent 工具 `manage_memory(action="merge")` 和 Web UI 共用同一个 Store 方法
 - ✅ 合并操作失败时不会跨 Agent 修改数据
 
 ### Phase 7：修复阅读器「选择文件」误报 Bug（2026-09-21）
@@ -539,7 +559,7 @@ PASS  换线程之后 reader agent 还是看得到那篇文档 application_chars
 **现象**：在阅读器里点「选择文件」，选完文件后偶尔弹出「请选择一个文件」。
 时好时坏，没有明显规律。
 
-**原因**：Dashboard 每 5 秒整体刷新一次（`refresh()` → `render()`）。以前的
+**原因**：Web 每 5 秒整体刷新一次（`refresh()` → `render()`）。以前的
 `render()` 对阅读器视图没有任何保护，每次刷新都把整块 HTML 重新生成一遍——
 **包括那个 `<input type="file">`**。于是：
 
@@ -721,7 +741,7 @@ knowme/
 ├── core/loop.py         # observe → reason → act 循环
 ├── tools/reader.py      # Reader 工具
 ├── applications/context_bridge.py  # Context 桥接
-└── ops/dashboard.py     # Dashboard + API
+└── ops/web.py     # Web + API
 ```
 
 ### 前端
@@ -746,9 +766,9 @@ static/
 ## 使用示例
 
 ```bash
-# 启动 Dashboard
+# 启动 Web
 cd D:\LLM\Agent\knowme-agent
-.\.venv\Scripts\python.exe -m knowme.ops.dashboard
+.\.venv\Scripts\python.exe -m knowme.ops.web
 ```
 
 访问 http://localhost:8888
@@ -771,23 +791,24 @@ cd D:\LLM\Agent\knowme-agent
 
 ### 调试提示
 - 测试文件：`evals/deterministic/`
-- 查看日志：Dashboard 5 秒刷新，实时显示 trace
+- 查看日志：Web 5 秒刷新，实时显示 trace
 - 数据库：`.knowme/state.db`
 - **加新视图时的坑**：`render()` 只在**真正切换页面**时才重建 DOM。
   凡是自己持有状态的视图（阅读器的文件框和 URL 输入框、各种编辑器），
   都不能每 5 秒重建一次，否则用户正在输入或正在选的内容会被清掉。
   加视图时照着 `render()` 里已有的分支写。
-- 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 dashboard**。
+- 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 Web**。
 - **已知失败的 3 个测试**（动手前先看一眼，别把它们算到自己头上）：
   `test_delegate_env.py` ×2、`test_packaging.py::test_the_bundled_skills_are_findable`。
   干净工作区就失败，与前端无关。另外 `evals/judge/` 有 26 个 ERROR，是没装 `deepeval`。
   当前基线：**619 passed / 3 failed / 62 skipped**。
-- **改完 `.py` 一定要重启 dashboard**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
-  硬刷新就能看到；但 `dashboard.py` 及其 import 的一切都在内存里。
+- **改完 `.py` 一定要重启 Web**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
+  硬刷新就能看到；但 `web.py` 及其 import 的一切都在内存里。
   （2026-09-21 亲自踩到：改了 `library.py` 后接口还是旧行为，以为改错了。）
 - **改了接口/后端，建议起真实服务用 curl 验一遍**，比只跑测试多抓到问题——
   文档库那两个 bug（拒绝扫描件、`.mjs` 的 MIME）都是这样发现的。
-  端口被系统保留时换一个高的：`KNOWME_DASHBOARD_PORT=31236`。
+  端口被系统保留时换一个高的：`KNOWME_WEB_PORT=31236`（旧的
+  `KNOWME_DASHBOARD_PORT` 仍可用）。
 - `evals/*` 被 gitignore，但开发中新增的回归锁测试要 `git add -f` 进库。
 - `test_static_assets.py` 里那个"剥工具块"的测试，会**从 `render.js` 里抽出**
   `stripTools` 用到的正则，再拿去跑后端真实产出的字符串——因为这条逻辑跨了

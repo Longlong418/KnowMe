@@ -29,7 +29,7 @@ class KnowMe:
     def __init__(self, settings: Settings | None = None, client=None, conn=None,
                  spec: AgentSpec = DEFAULT_SPEC):
         # `client` and `conn` are injectable: evals swap in a scripted model,
-        # the dashboard injects a cross-thread connection. Same seam either way.
+        # the web gateway injects a cross-thread connection. Same seam either way.
         self.settings = settings or load_settings()
         self.settings.ensure_home()
         self.conn = conn or connect(self.settings.home)
@@ -56,7 +56,7 @@ class KnowMe:
 
     def close(self) -> None:
         """Release external resources (MCP subprocesses). Called when the
-        dashboard rebuilds the agent after a settings change."""
+        web gateway rebuilds the agent after a settings change."""
         if self.mcp_bridge is not None:
             self.mcp_bridge.close()
 

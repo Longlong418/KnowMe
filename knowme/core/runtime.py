@@ -118,7 +118,7 @@ class AgentRuntime:
                  stream: bool = False, extra_context: str = "",
                  front_door: FrontDoor | None = None) -> TurnResult:
         """One full turn: assemble working memory → run the loop → persist.
-        `source` tags whether the message arrived through the CLI or dashboard,
+        `source` tags whether the message arrived through the CLI or web client,
         so the unified chat can show its origin. `stream=True` streams the reply
         text token by token to the observer. Everything that happens is both
         shown (observer) and recorded (tracer)."""

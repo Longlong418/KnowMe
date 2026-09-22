@@ -1,4 +1,4 @@
-// knowme dashboard — the turn timeline: what the agent did, in order.
+// knowme web — the turn timeline: what the agent did, in order.
 //
 // Pure rendering, no state of its own. A step is {kind, label, ms, detail,
 // status} and comes from one of three places, all producing the SAME shape so

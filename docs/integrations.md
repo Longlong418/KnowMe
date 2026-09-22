@@ -63,7 +63,7 @@ pip install -e '.[mcp]'
 
 ```bash
 cp examples/mcp.demo.json .knowme/mcp.json   # 指向 examples/mcp_demo_server.py
-make dashboard                               # demo_word_count / demo_reverse_text 出现在 Tools 里
+make web                               # demo_word_count / demo_reverse_text 出现在 Tools 里
 ```
 
 同样的模式可以扩展到任何服务器,你自己写的或厂商提供的 —— **不需要改 KnowMe 一行代码**。

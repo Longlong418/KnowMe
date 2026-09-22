@@ -1,4 +1,4 @@
-// knowme dashboard — the Knowledge Base (Sapphire-style notes with [[links]]).
+// knowme web — the Knowledge Base (Sapphire-style notes with [[links]]).
 // Moved out of main.js, which is the render loop and not a home for app code.
 // Classic <script>, shared global scope (no build step, no modules).
 // Load order + rules: static/README.md.

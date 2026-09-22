@@ -52,7 +52,7 @@ class Settings:
     model: str = field(default_factory=lambda: os.getenv("KNOWME_MODEL", ""))
     # Cheap model used by the retrieval gate and the consolidation summarizer.
     small_model: str = field(default_factory=lambda: os.getenv("KNOWME_SMALL_MODEL", ""))
-    # Providers the user turned off in the dashboard (comma-separated ids).
+    # Providers the user turned off in the web client (comma-separated ids).
     # Disabled providers are hidden from pickers/switchers; the ACTIVE provider
     # can't be disabled (guarded in integrations.apply_provider_disabled).
     disabled_providers: frozenset[str] = field(default_factory=lambda: frozenset(

@@ -7,7 +7,7 @@
 flowchart TB
     subgraph GW["Gateway 入口层 — knowme/gateway/"]
         CLI["cli.py(默认)"]
-        WEB["ops/dashboard.py(网页)"]
+        WEB["ops/web.py(网页)"]
     end
 
     subgraph RUN["一次性的 Agent 运行 —— 这里的一切每轮对话都重建"]

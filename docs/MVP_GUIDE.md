@@ -4,7 +4,7 @@
 
 ## 现在能做什么
 
-启动 Dashboard 后，左侧可以切换四个 Agent：
+启动 Web 后，左侧可以切换四个 Agent：
 
 - **General**：通用助理，可以使用当前配置里全部已启用工具。
 - **Coding**：面向代码理解和编码任务。只有显式允许的工具；实验性的 `delegate_task` 没开启时不会出现。
@@ -13,7 +13,7 @@
 
 知识库笔记也按当前 Agent 隔离。Learning Agent 创建的笔记不会出现在 Coding Agent 的列表中；Agent 通过工具创建、搜索、更新和删除笔记时也遵守同一个边界。
 
-Dashboard 的 Memory、聊天、Trace 和数据库预览也按当前 Agent 拉取；切换左侧 Agent 会重新请求对应范围的数据。
+Web 的 Memory、聊天、Trace 和数据库预览也按当前 Agent 拉取；切换左侧 Agent 会重新请求对应范围的数据。
 
 Memory Manager 支持编辑、删除和合并事实。合并时保留目标事实、删除来源事实，且只能操作当前 Agent 的记录。
 
@@ -36,7 +36,7 @@ Agent = Prompt + Tools + Memory + Context Policy + Model
 
 ```powershell
 cd D:\LLM\Agent\knowme-agent
-.\.venv\Scripts\python.exe -m knowme.ops.dashboard
+.\.venv\Scripts\python.exe -m knowme.ops.web
 ```
 
 终端会打印实际地址。Windows 默认从 `http://127.0.0.1:8888` 开始；端口被占用时会顺延查找。
@@ -66,7 +66,7 @@ cd D:\LLM\Agent\knowme-agent
 3. `knowme/core/loop.py`：最核心的 observe → reason → act 循环。
 4. `knowme/applications/context_bridge.py`：Reader 页面状态如何安全进入当前 Agent。
 5. `knowme/ops/browser_agent.py`：浏览器如何按需创建 Agent，并保持各自会话。
-6. `knowme/ops/dashboard.py`：本地 HTTP API 和 SSE 流式事件。
+6. `knowme/ops/web.py`：本地 HTTP API 和 SSE 流式事件；实现拆在 `web_runtime.py`、`web_data.py`、`web_server.py`。
 7. `knowme/ops/static/`：无构建步骤的 HTML/CSS/JavaScript 前端。
 
 ## 为什么 MVP 继续使用原生前端

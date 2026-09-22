@@ -1,4 +1,4 @@
-// knowme dashboard — render/refresh loop, resizers/chrome, bootstrap (LOADS LAST).
+// knowme web — render/refresh loop, resizers/chrome, bootstrap (LOADS LAST).
 // Split out of app.js: classic <script>, shared global scope (no build
 // step, no modules). Load order + rules: static/README.md.
 //

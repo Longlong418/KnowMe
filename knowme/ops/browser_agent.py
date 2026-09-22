@@ -1,6 +1,6 @@
 """The browser gateway's agent pool — one lazy KnowMe per agent profile.
 
-The dashboard is a gateway like the CLI or Telegram: it only moves text. But
+The web client is a gateway like the CLI or Telegram: it only moves text. But
 unlike those it is multi-threaded (a stdlib ThreadingHTTPServer) and long-lived
 across page refreshes, so it needs two things the other gateways don't:
 
@@ -8,7 +8,7 @@ across page refreshes, so it needs two things the other gateways don't:
   `agent_lock` so turns run one at a time.  All instances run the same core;
   only their AgentSpec, session and memory scope differ.
 
-  ONE chat thread per dashboard RUN, dated, resumed on restart. Never the
+  ONE chat thread per web RUN, dated, resumed on restart. Never the
   eternal "default" session — a returning user should see their conversation,
   not an infinite scroll of every chat they have ever had. `maybe_rotate_session`
   handles the other half of that: come back after an idle gap and you get a new
@@ -17,7 +17,7 @@ across page refreshes, so it needs two things the other gateways don't:
   32-message thread.)
 
 This lives in its own module because several callers share and rebuild the
-pool: dashboard.py lazily creates profiles for chat, while settings changes
+pool: web.py lazily creates profiles for chat, while settings changes
 rebuild every live profile.  Import the module and call its functions rather
 than importing a mutable global directly.
 """
@@ -38,18 +38,20 @@ from knowme.db import connect
 _agent = None
 _agents = {}
 agent_lock = threading.Lock()
-_dashboard_session = None  # this dashboard run's chat thread (dated; stable across refreshes)
-_dashboard_sessions = {}
+_dashboard_session = None  # legacy name; this web run's thread
+_dashboard_sessions = {}  # legacy name; keyed by Agent id
 
 
 def _new_session_id(agent_id: str) -> str:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    # Keep the persisted session prefix for existing history and integrations;
+    # the user-facing gateway is now called Web.
     return f"dashboard-{stamp}" if agent_id == "default" else f"dashboard-{agent_id}-{stamp}"
 
 
 def dash_session(agent_id: str = "default") -> str:
-    """The thread new dashboard chats belong to. Resolved once per process:
-    RESUME the most recent recent dashboard thread (so a restart keeps the chat
+    """The thread new web chats belong to. Resolved once per process:
+    RESUME the most recent recent web thread (so a restart keeps the chat
     on screen), else start a fresh dated one. Never the eternal 'default'."""
     global _dashboard_session
     get_profile(agent_id)  # validate before this value is used in SQL or UI
@@ -71,12 +73,12 @@ def dash_session(agent_id: str = "default") -> str:
 
 
 def resume_or_new_session(conn, agent_id: str = "default") -> str:
-    """Resume this agent's recent dashboard thread, otherwise make a new one."""
+    """Resume this agent's recent web thread, otherwise make a new one."""
     get_profile(agent_id)
     idle_min = int(os.getenv("KNOWME_SESSION_IDLE_MINUTES", "60"))
     row = conn.execute(
         "SELECT session_id, MAX(created_at) AS last_at FROM chat_log "
-        "WHERE source='dashboard' AND agent_id=? GROUP BY session_id "
+        "WHERE source IN ('web', 'dashboard') AND agent_id=? GROUP BY session_id "
         "ORDER BY last_at DESC LIMIT 1",
         (agent_id,),
     ).fetchone()

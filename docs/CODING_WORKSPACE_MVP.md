@@ -4,11 +4,11 @@
 
 ## 怎么用
 
-启动 Dashboard 前，可以用 `KNOWME_PROJECT_ROOT` 指定项目目录；不设置时使用启动命令所在的目录：
+启动 Web 前，可以用 `KNOWME_PROJECT_ROOT` 指定项目目录；不设置时使用启动命令所在的目录：
 
 ```powershell
 $env:KNOWME_PROJECT_ROOT = "D:\LLM\Agent\knowme-agent"
-.\.venv\Scripts\python.exe -m knowme.ops.dashboard
+.\.venv\Scripts\python.exe -m knowme.ops.web
 ```
 
 左侧打开 **Coding Workspace**，点击文件即可预览。打开的文件会以 `application: coding` 发布到当前 Agent，随后在右侧聊天框提问时，Agent 会收到文件上下文和对应的 trace/context 统计。
@@ -24,7 +24,7 @@ $env:KNOWME_PROJECT_ROOT = "D:\LLM\Agent\knowme-agent"
 ## 主要代码
 
 - `knowme/applications/coding_workspace.py`：路径边界、文件树和只读读取逻辑。
-- `knowme/ops/dashboard.py`：`/api/workspace` 和 `/api/data.workspace`。
+- `knowme/ops/web.py`：`/api/workspace` 和 `/api/data.workspace`。
 - `knowme/ops/static/js/views.js`：文件树与预览界面。
 - `knowme/ops/static/js/main.js`：读取文件并发布 Context Bridge。
 - `evals/deterministic/test_coding_workspace.py`：路径隔离、隐藏文件、读取和 API 行为测试。

@@ -43,18 +43,6 @@
   <div id="view"></div>
 </main>
 <button id="nav-reopen" title="显示侧栏">&#9776;</button>
-<!-- Frontend is split into focused classic scripts sharing one global scope
-     (no build step, no modules). Order matters only in that main.js runs the
-     bootstrap and must load LAST. See static/README.md for the file map. -->
-<script src="/static/js/util.js"></script>
-<script src="/static/js/memory.js"></script>
-<script src="/static/js/models.js"></script>
-<script src="/static/js/render.js"></script>
-<script src="/static/js/trace.js"></script>
-<script src="/static/js/diagram.js"></script>
-<script src="/static/js/graph.js"></script>
-<script src="/static/js/views.js"></script>
-<script src="/static/js/chat.js"></script>
-<script src="/static/js/reader.js"></script>
-<script src="/static/js/knowledge.js"></script>
-<script src="/static/js/main.js"></script></body></html>
+<!-- One native module owns loading and bootstrapping the feature bundles. -->
+<script type="module" src="/static/js/bootstrap.js"></script>
+</body></html>

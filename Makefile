@@ -8,7 +8,7 @@
 # `source .venv/bin/activate` — both work, this is just fewer steps.
 PY := $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 
-.PHONY: run brief dashboard trace eval eval-judge gate lint
+.PHONY: run brief web trace eval eval-judge gate lint
 
 run:            ## chat with KnowMe in the terminal
 	$(PY) -m knowme
@@ -19,11 +19,11 @@ brief:          ## morning briefing from calendar + mail + memory (as a LOOP)
 gather:         ## same job as a GRAPH: 4 sources in parallel, then one digest
 	$(PY) -m knowme gather
 
-# The server holds dashboard.py in memory: static JS/CSS reload on refresh, but
-# Python routes do NOT. After pulling a change that touches dashboard.py (or any
+# The server holds web.py in memory: static JS/CSS reload on refresh, but
+# Python routes do NOT. After pulling a change that touches web.py (or any
 # imported module), stop this and re-run it, or the UI shows stale backend data.
-dashboard:      ## everything on one page — http://localhost:8888 on Windows
-	$(PY) -m knowme.ops.dashboard
+web:            ## local web client — http://localhost:8888 on Windows
+	$(PY) -m knowme.ops.web
 
 trace:          ## deep trace waterfalls (Phoenix) at http://localhost:6006
 	$(PY) -m phoenix.server.main serve

@@ -9,7 +9,7 @@ serious agent: **Harness · Loop · Memory · Eval/LLM-Ops**. No frameworks hidi
 - **Memory is the hero.** Semantic + episodic + procedural — with a gate that decides *whether*
   to remember, and a pass that decides *what* to keep.
 - **The loop is ~95 lines** of plain Python. Step through it.
-- **Watch it think.** A local dashboard lights up every message as it flows through the harness.
+- **Watch it think.** A local web lights up every message as it flows through the harness.
 - **Eval built in.** Deterministic tests *and* LLM-as-judge, side by side, with a release gate.
 
 ![knowme-agent architecture — the whiteboard](docs/architecture-whiteboard.png)
@@ -24,7 +24,7 @@ Just want to run it:
 ```bash
 uv sync
 uv run knowme                             # talk to your KnowMe in the terminal
-uv run knowme dashboard                   # browser cockpit → localhost:7777 (Windows: 8888)
+uv run knowme web                   # browser cockpit → localhost:7777 (Windows: 8888)
 ```
 
 It will tell you which key to set the first time. Want to **read the code** (the
@@ -35,20 +35,20 @@ git clone <your-repository-url> knowme-agent && cd knowme-agent
 uv venv && uv pip install -e .          # create the env + install the `knowme` command
 cp .env.example .env                    # pick a provider, paste ONE key
 uv run knowme                             # talk to your KnowMe in the terminal
-uv run knowme dashboard                   # …or the browser cockpit → localhost:7777 (Windows: 8888)
+uv run knowme web                   # …or the browser cockpit → localhost:7777 (Windows: 8888)
 ```
 
 `uv run knowme …` needs **no venv activation**. Three ways to run it:
 
 | Command | When |
 |---|---|
-| `uv run knowme dashboard` | quick start, zero activation (recommended) |
-| `source .venv/bin/activate` → `knowme dashboard` | activate once, bare `knowme` all session |
-| `uv tool install .` → `knowme dashboard` | install `knowme` **globally**, forever |
+| `uv run knowme web` | quick start, zero activation (recommended) |
+| `source .venv/bin/activate` → `knowme web` | activate once, bare `knowme` all session |
+| `uv tool install .` → `knowme web` | install `knowme` **globally**, forever |
 
-`knowme` and `knowme dashboard` are two doors into the **same** KnowMe. The dashboard is a tiny web
+`knowme` and `knowme web` are two doors into the **same** KnowMe. The web is a tiny web
 server on *your* machine — chat in the browser, that process runs the turn. Nothing leaves your
-laptop. The CLI and dashboard share the same local memory. (`make dashboard` works as well.)
+laptop. The CLI and web share the same local memory. (`make web` works as well.)
 
 **Now try it.** *"Remember that Alex prefers morning meetings."* Quit. Restart.
 *"Book a catch-up with Alex on Friday."* → it remembers, and books 9am. Your memory is one
@@ -59,10 +59,10 @@ Kimi, GLM, OpenRouter (one key, hundreds of hosted models), OpenCode Zen, or Ope
 set `KNOWME_PROVIDER=`, paste the key, done. One dialect in the loop;
 a [~60-line adapter](knowme/core/models.py) handles the rest.
 
-## Watch the harness run — the dashboard
+## Watch the harness run — the web
 
 ```bash
-knowme dashboard          # starts a local server → http://localhost:7777 (Windows: 8888)
+knowme web          # starts a local server → http://localhost:7777 (Windows: 8888)
 ```
 
 A small web server you own (`127.0.0.1`, no cloud). The browser is just the UI — the same
@@ -77,7 +77,7 @@ Each tab is one pillar, linked to the real files:
 | Tab | What you see |
 |---|---|
 | **Overview** | cost, latency, the gate skip/retrieve split, the clickable architecture map |
-| **Gateway** | CLI and dashboard conversations, with each message tagged by source |
+| **Gateway** | CLI and web conversations, with each message tagged by source |
 | **Loop** | every turn with its gate decision, tool calls, tokens, and cost |
 | **Graph** | graph workflows: the live triage topology (drawn from the engine itself) + which door each turn took |
 | **Memory** | sub-tabs per pillar — semantic facts, episodes, editable skills + SOUL, consolidation |
@@ -90,7 +90,7 @@ history like any chat app.
 
 ## Things to try (each shows off a pillar)
 
-Type these in the chat dock (or `make run`) and watch the dashboard light up:
+Type these in the chat dock (or `make run`) and watch the web light up:
 
 | Try this | What it shows | Where to watch |
 |---|---|---|
@@ -99,7 +99,7 @@ Type these in the chat dock (or `make run`) and watch the dashboard light up:
 | *"When am I swimming with Sergey?"* then *"what's 12 × 8?"* | the **retrieval gate** — retrieve vs skip | Overview gate bar; **Ops** shows the per-turn decision |
 | *"Remember that Raj prefers evening games"* | memory self-management (`save_note`) | **Memory ▸ Semantic** gains a fact; `MEMORY.md` updates |
 | *"Search for the World Cup games still left to play and add each one to my calendar"* | **multi-tool loop engineering** | **Loop** tab shows `iter 8`: `search_web` × N → `create_event` × N |
-| chat from `make run` **and** the browser | one brain, many gateways | the **Gateway** tab tags each message `cli` / `dashboard` |
+| chat from `make run` **and** the browser | one brain, many gateways | the **Gateway** tab tags each message `cli` / `web` |
 
 **The money shot** is the World Cup one. In one turn, KnowMe searches the web a few times, reasons
 over the results, and books every remaining match — **8 loop iterations**, live. Needs a free
@@ -137,7 +137,7 @@ image — edit it in a PR):
 
 ```mermaid
 flowchart LR
-  GW["Interface<br/>CLI · dashboard"] --> WM["Working memory<br/>SOUL.md + memory + history"]
+  GW["Interface<br/>CLI · web"] --> WM["Working memory<br/>SOUL.md + memory + history"]
   WM --> LLM
   subgraph LOOP["The Loop — loop/agent.py"]
     LLM["LLM"] -->|tool call| TOOLS["Tools<br/>create_event · list_events<br/>search_web · save_note · …"]
@@ -156,7 +156,7 @@ Every box is one module (full version with every file path: [docs/architecture.m
 
 | Diagram box | Module |
 |---|---|
-| Interface (CLI / web) | [`knowme/gateway/`](knowme/gateway) + [`knowme/ops/dashboard.py`](knowme/ops/dashboard.py) |
+| Interface (CLI / web) | [`knowme/gateway/`](knowme/gateway) + [`knowme/ops/web.py`](knowme/ops/web.py) |
 | Ephemeral Agent Run → Working Memory | [`knowme/core/session.py`](knowme/core/session.py) |
 | The Loop (LLM ↔ tools, end-loop guardrails) | [`knowme/core/loop.py`](knowme/core/loop.py) |
 | Graph workflows (structure around the loop) | [`knowme/graph/`](knowme/graph) |
@@ -174,7 +174,7 @@ Every box is one module (full version with every file path: [docs/architecture.m
 single `MEMORY.md` markdown file. KnowMe keeps the *queryable* source in `state.db` (the `facts` and
 `episodes` tables, keyword-searchable via FTS5) **and** regenerates a human-readable
 `.knowme/MEMORY.md` mirror after every turn — so you get both: a real file you can open, backed by a
-sturdy database. The dashboard's **Memory** tab is the friendly view; the **Database** tab shows the
+sturdy database. The web's **Memory** tab is the friendly view; the **Database** tab shows the
 raw `state.db` tables.
 
 ## The Loop — reason → act → repeat
@@ -245,7 +245,7 @@ flowchart LR
 ```
 
 **The shipped example: triage.** Flip `KNOWME_GRAPH_WORKFLOWS=1` (in `.env`, or the
-dashboard's Settings) and *every* message enters the triage graph first — you never
+web's Settings) and *every* message enters the triage graph first — you never
 choose a mode, the harness decides. A small model classifies the message **while**
 today's calendar loads in parallel; *"thanks!"* gets a fast small-model reply and never
 wakes the big model; *"schedule a swim Saturday"* routes into the exact same loop as
@@ -299,7 +299,7 @@ ones use DeepEval in [`evals/judge/`](evals/judge). Keeping them apart is the wh
 conflating "did it do the thing" (a unit test) with "was it any good" (a scored judgement) is
 the most common eval mistake.
 
-**Where the results show:** the terminal, and the dashboard's **Ops** tab — the release-gate
+**Where the results show:** the terminal, and the web's **Ops** tab — the release-gate
 verdict, an **eval-history** table (one row per `make gate`, so you can see it grow), the actual
 per-turn gate decisions, and the raw traces inline.
 
@@ -340,7 +340,7 @@ The agent has tools to keep itself useful — no black box:
 - **create_skill** — when you teach it a repeatable workflow, it offers to save it
   as a skill (written to `.knowme/skills/`, live the same session).
 
-You can also edit any of this by hand on the dashboard's Memory tab (edit/delete
+You can also edit any of this by hand on the web's Memory tab (edit/delete
 facts, rewrite `SOUL.md`) or in Settings (switch provider/model, paste keys — BYOK,
 kept in your local `.env`, never sent to the browser).
 
@@ -363,7 +363,7 @@ The `knowme` command is installed with the package; the `make` targets are equiv
 | Command | Does |
 |---|---|
 | `knowme` | chat in the terminal |
-| `knowme dashboard` | the local web cockpit at localhost:7777 (Windows: 8888) |
+| `knowme web` | the local web cockpit at localhost:7777 (Windows: 8888) |
 | `knowme brief` | morning briefing from Calendar + Mail + memory |
 | `make trace` | deep trace waterfalls (Phoenix) at localhost:6006 |
 | `make eval` | deterministic evals (0/1, no judge) |
@@ -390,7 +390,7 @@ The full pi transcript lands in `.knowme/outbox/delegate-*.log`; tune the budget
 `KNOWME_DELEGATE_TIMEOUT` (default 300s).
 
 The rest are still deliberate **skeletons** — the intent is drawn so the diagram maps to
-something, but nothing is over-promised (they report "coming soon", and the dashboard's
+something, but nothing is over-promised (they report "coming soon", and the web's
 **Tools** tab lists them under **Coming soon**):
 
 | Whiteboard box | Tool | Status |

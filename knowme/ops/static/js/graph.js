@@ -1,4 +1,4 @@
-// knowme dashboard — graph workflows: the topology chart + its live animation.
+// knowme web — graph workflows: the topology chart + its live animation.
 // Split out: classic <script>, shared global scope. Load order: static/README.md.
 //
 // The chart is DATA-DRIVEN: it renders Graph.describe() served in /api/data

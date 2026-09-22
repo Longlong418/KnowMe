@@ -167,7 +167,7 @@ knowme/ops/gather.py               纯工作流与这台机器相遇的地方
 ```bash
 make gather            # 图 —— 四个来源同时抓
 make brief             # 循环 —— 同样的活,模型自己决定
-make dashboard         # localhost:7777 → Graph → Run gather
+make web         # localhost:7777 → Graph → Run gather
 ```
 
 Graph 标签页同时显示拓扑**和**一排实时卡片。图显示形状;卡片显示它正在发生 ——

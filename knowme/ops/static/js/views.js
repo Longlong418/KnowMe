@@ -1,4 +1,4 @@
-// knowme dashboard — subtab/db helpers, SQL console, Memory/Tools sub-views, VIEWS.
+// knowme web — subtab/db helpers, SQL console, Memory/Tools sub-views, VIEWS.
 // Split out of app.js: classic <script>, shared global scope (no build
 // step, no modules). Load order + rules: static/README.md.
 
@@ -240,7 +240,7 @@ function connectionField(key, field, prefix="connection"){
 }
 
 // Connections are shared with the English CLI, so localize their registry
-// metadata at the Dashboard boundary instead of changing the API contract.
+// metadata at the Web boundary instead of changing the API contract.
 const CONNECTION_WHAT_ZH = {
   google_calendar:"让 KnowMe 创建和更新 Google 日历事件。",
   apple_calendar:"让 KnowMe 在这台 Mac 上使用 Apple 日历。",

@@ -1,4 +1,4 @@
-// knowme dashboard — inline Memory/SOUL/skill editing actions.
+// knowme web — inline Memory/SOUL/skill editing actions.
 // Split out of app.js: classic <script>, shared global scope (no build
 // step, no modules). Load order + rules: static/README.md.
 

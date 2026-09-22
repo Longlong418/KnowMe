@@ -1,4 +1,4 @@
-// knowme dashboard — model picker/catalog/pins, and the remaining Settings toggle.
+// knowme web — model picker/catalog/pins, and the remaining Settings toggle.
 // Split out of app.js: classic <script>, shared global scope (no build
 // step, no modules). Load order + rules: static/README.md.
 

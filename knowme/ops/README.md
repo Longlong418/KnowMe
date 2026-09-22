@@ -1,7 +1,7 @@
 # knowme/ops — the Eval/LLM-Ops pillar
 
 Everything here answers one of two questions: **what did the agent just do?**
-(tracing, the dashboard) and **is it any good?** (arena, judge, scoring, the
+(tracing, the web) and **is it any good?** (arena, judge, scoring, the
 release gate). Nothing here is part of the agent loop — you can delete this
 whole directory and knowme still runs. That's deliberate: ops observes, it never
 participates.
@@ -13,7 +13,7 @@ frontend.
 
 | File | Owns |
 |---|---|
-| `dashboard.py` | The stdlib HTTP server: routes, SSE, `collect()`. Serves everything below. |
+| `web.py` | The Web facade; runtime, data, and HTTP transport live in `web_runtime.py`, `web_data.py`, and `web_server.py`. |
 | `browser_agent.py` | The lazy browser Agent pool: one `KnowMe` + dated session per profile. |
 | `arena.py` | Racing N models through the same harness, in isolated temp homes. |
 | `catalog.py` | What models a provider can serve + your pinned `provider:model` shortlist. |
@@ -32,7 +32,7 @@ frontend.
 ## Which way the arrows point
 
 ```
-dashboard  ──→  arena  ──→  pricing        scoring · judge · compare_history
+web  ──→  arena  ──→  pricing        scoring · judge · compare_history
     │                        ↑
     ├───────→  settings_api ─┼─→  catalog  ──→  pricing
     │                        │
@@ -44,7 +44,7 @@ know settings_api exists; `pricing` doesn't know anything exists. If you find
 yourself needing an import that reverses one of these arrows, the function is
 probably in the wrong file.
 
-`dashboard.py` is the only module that knows what an HTTP request is. Everything
+`web_server.py` is the only module that knows what an HTTP request is. Everything
 else takes plain Python arguments and returns plain dicts — which is why they're
 testable without starting a server, and why `evals/deterministic/` can call them
 directly.
@@ -52,7 +52,7 @@ directly.
 ## The browser Agent pool
 
 `browser_agent` keeps one lazy instance for each selected Agent profile. The
-dashboard is multi-threaded and long-lived in a way the CLI is not, so access is
+web is multi-threaded and long-lived in a way the CLI is not, so access is
 serialized by one lock; a provider/model change rebuilds all live profiles while
 preserving their current sessions. **Import the module, not a mutable slot**:
 

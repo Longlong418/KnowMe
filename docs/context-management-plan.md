@@ -335,7 +335,7 @@ create_event → 完整保留（本来就短）
 2. **写入账本** —— `ops/tracing.py:103 _record_usage`：加 `cache_read` / `cache_write` 字段，**并改用实际应答的模型**（修 P4）
 3. **补齐缺失的调用** —— 门控与归纳（修 P3）：让 `retrieval_gate` / `consolidation` 也上报 usage，或统一走一个 `_metered_call()` 包装
 4. **计价** —— `ops/pricing.py`：`price_for` 需要区分缓存读/写价。注意 `:53` 的注释明写「cache/batch discounts not modelled」，要改。保持「账本只存 token，价格读取时推算」的设计（`:5-8`）—— 这正是让历史行能被重新定价的优点，加字段后依然成立
-5. **展示** —— `ops/dashboard.py`：Overview 加缓存命中率磁贴，Loop 页每轮显示命中情况
+5. **展示** —— `ops/web.py`：Overview 加缓存命中率磁贴，Loop 页每轮显示命中情况
 
 #### D5 实现细节：命中率怎么算（两个陷阱）
 
@@ -488,7 +488,7 @@ compaction.py   chat_log → 滚动摘要（工作记忆），
 | **P1** | **D1 提示词重排** | ✅ **已完成 2026-09-19** |
 | P2 | D6 断点（anthropic wire） | 暂不需要（deepseek 是自动前缀缓存） |
 | P3 | D3 工具输出压缩 + D4 token 预算 + D2 定长头 | 待做 |
-| P4 | Dashboard 可见性 | 待做 |
+| P4 | Web 可见性 | 待做 |
 | P5 | D8 compaction 接入 summaries 表 + D9 杂项 | 待做 |
 
 ### 为什么取消 P0（原方案里的排序是错的）
@@ -548,7 +548,7 @@ D1 重排的正确性来自**机制**，不来自测量：prompt cache 是前缀
 ```bash
 make eval          # 确定性全绿（含新增用例）
 make gate          # 发布门禁
-uv run knowme dashboard   # 肉眼确认缓存磁贴 + Loop 页命中率
+uv run knowme web   # 肉眼确认缓存磁贴 + Loop 页命中率
 ```
 
 **回归验证的具体手法**（参考文档给的做法）：记录连续几次请求的完整 JSON body，剥掉 `cache_control` 标记后逐对 diff。

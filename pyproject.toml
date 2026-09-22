@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.scripts]
-# Branded CLI: `knowme dashboard`, or bare `knowme` to chat.
+# Branded CLI: `knowme web`, or bare `knowme` to chat.
 knowme = "knowme.__main__:main"
 
 [project.optional-dependencies]
@@ -37,7 +37,7 @@ eval = [
     "pytest>=8.0",
     "deepeval>=2.0",
 ]
-# LLM-Ops pillar: local trace dashboard (traces also always land in traces/*.jsonl)
+# LLM-Ops pillar: local trace web (traces also always land in traces/*.jsonl)
 tracing = [
     "arize-phoenix>=7.0",
     "opentelemetry-sdk>=1.27",
@@ -104,7 +104,7 @@ packages = ["knowme"]
 # add them (`skills/community/`).
 # But `packages = ["knowme"]` ships only the package, so before 2026-07-31 a
 # `pip install knowme-agent` arrived with ZERO skills — procedural memory, one of
-# the four pillars, silently absent while the dashboard shipped fine (it lives
+# the four pillars, silently absent while the web shipped fine (it lives
 # under knowme/ops/static). Copying them in at build time keeps one contributor-
 # facing location and still ships them; knowme.memory.bundled_skill_dirs() looks
 # in both places and explains why.

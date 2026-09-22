@@ -28,7 +28,7 @@
 ```bash
 pip install knowme-agent
 knowme                                    # 在终端中与 KnowMe 对话
-knowme dashboard                          # 或打开浏览器控制台 → localhost:7777
+knowme web                          # 或打开浏览器控制台 → localhost:7777
 ```
 
 首次运行时，它会提示你需要设置哪个密钥。如果你想**阅读代码**（这正是本仓库的意义）或参与贡献，请克隆仓库：
@@ -38,18 +38,18 @@ git clone <your-repository-url> knowme-agent && cd knowme-agent
 uv venv && uv pip install -e .          # 创建环境并安装 `knowme` 命令
 cp .env.example .env                    # 选择一个服务商，填入一个密钥
 uv run knowme                             # 在终端中与 KnowMe 对话
-uv run knowme dashboard                   # 或打开浏览器控制台 → localhost:7777
+uv run knowme web                   # 或打开浏览器控制台 → localhost:7777
 ```
 
 运行 `uv run knowme …` **不需要激活虚拟环境**。共有三种运行方式：
 
 | 命令 | 适用场景 |
 |---|---|
-| `uv run knowme dashboard` | 快速开始，无需激活环境（推荐） |
-| `source .venv/bin/activate` → `knowme dashboard` | 激活一次环境，之后整个终端会话中都可直接使用 `knowme` |
-| `uv tool install .` → `knowme dashboard` | 将 `knowme` **全局安装**，长期使用 |
+| `uv run knowme web` | 快速开始，无需激活环境（推荐） |
+| `source .venv/bin/activate` → `knowme web` | 激活一次环境，之后整个终端会话中都可直接使用 `knowme` |
+| `uv tool install .` → `knowme web` | 将 `knowme` **全局安装**，长期使用 |
 
-`knowme` 和 `knowme dashboard` 是进入**同一个** KnowMe 的两扇门。仪表盘是运行在本机的小型 Web 服务器，与 CLI 共用同一套记忆和 Agent 循环。（也可以使用 `make dashboard`。）
+`knowme` 和 `knowme web` 是进入**同一个** KnowMe 的两扇门。仪表盘是运行在本机的小型 Web 服务器，与 CLI 共用同一套记忆和 Agent 循环。（也可以使用 `make web`。）
 
 **现在试一试。** 输入：“记住 Alex 更喜欢上午开会。”退出并重新启动，然后输入：“周五帮我约一次和 Alex 的叙旧会。”→ 它会记得这一偏好，并安排在上午 9 点。你的全部记忆都在一个文件里：`.knowme/state.db`。
 
@@ -58,7 +58,7 @@ uv run knowme dashboard                   # 或打开浏览器控制台 → loca
 ## 观察运行框架执行——仪表盘
 
 ```bash
-knowme dashboard          # 启动本地服务器 → http://localhost:7777
+knowme web          # 启动本地服务器 → http://localhost:7777
 ```
 
 这是一个完全由你掌控的小型 Web 服务器（`127.0.0.1`，不依赖云端）。浏览器只是界面——每一轮对话仍由同一个进程执行。这是理解整个系统最快的方式。
@@ -70,7 +70,7 @@ knowme dashboard          # 启动本地服务器 → http://localhost:7777
 | 标签页 | 你能看到什么 |
 |---|---|
 | **Overview** | 成本、延迟、门控的跳过/检索比例，以及可点击的架构图 |
-| **Gateway** | 统一展示 CLI 和 Dashboard 对话，每条消息都标注来源 |
+| **Gateway** | 统一展示 CLI 和 Web 对话，每条消息都标注来源 |
 | **Loop** | 每轮对话的门控决定、工具调用、Token 数和成本 |
 | **Graph** | 图工作流：从引擎本身绘制的实时分流拓扑，以及每轮对话走过的路径 |
 | **Memory** | 三类记忆各自的子标签页——语义事实、情景记录、可编辑技能与 SOUL、记忆整理 |
@@ -91,7 +91,7 @@ knowme dashboard          # 启动本地服务器 → http://localhost:7777
 | 先问“When am I swimming with Sergey?”，再问“what's 12 × 8?” | **检索门控**——检索与跳过 | Overview 的门控条；**Ops** 中每轮对话的决策 |
 | “Remember that Raj prefers evening games” | 记忆自管理（`save_note`） | **Memory ▸ Semantic** 新增一条事实；`MEMORY.md` 同步更新 |
 | “Search for the World Cup games still left to play and add each one to my calendar” | **多工具循环工程** | **Loop** 标签页显示 `iter 8`：`search_web` × N → `create_event` × N |
-| 同时从 `make run` 和浏览器聊天 | 一个大脑，多个网关 | **Gateway** 标签页将消息标记为 `cli` / `dashboard` |
+| 同时从 `make run` 和浏览器聊天 | 一个大脑，多个网关 | **Gateway** 标签页将消息标记为 `cli` / `web` |
 
 **最精彩的演示**是世界杯示例。在同一轮对话中，KnowMe 会多次搜索网页、推理搜索结果，并把所有剩余比赛加入日历——整个过程包含 **8 次循环迭代**，并且实时可见。该演示需要免费的 `TAVILY_API_KEY`（可在 **Connections** 中填写）。观察 **LOOP** 方框在每次循环时闪烁，这就是现场可见的循环工程。
 
@@ -119,7 +119,7 @@ ChatGPT 和 Claude Desktop 是你所**使用**的产品；这个项目则是一�
 
 ```mermaid
 flowchart LR
-  GW["入口<br/>CLI · Dashboard"] --> WM["工作记忆<br/>SOUL.md + 记忆 + 历史"]
+  GW["入口<br/>CLI · Web"] --> WM["工作记忆<br/>SOUL.md + 记忆 + 历史"]
   WM --> LLM
   subgraph LOOP["循环——loop/agent.py"]
     LLM["LLM"] -->|工具调用| TOOLS["工具<br/>create_event · list_events<br/>search_web · save_note · …"]
@@ -138,7 +138,7 @@ flowchart LR
 
 | 图中方框 | 模块 |
 |---|---|
-| 交互入口（CLI / Web） | [`knowme/gateway/`](../../knowme/gateway/) + [`knowme/ops/dashboard.py`](../../knowme/ops/dashboard.py) |
+| 交互入口（CLI / Web） | [`knowme/gateway/`](../../knowme/gateway/) + [`knowme/ops/web.py`](../../knowme/ops/web.py) |
 | 临时智能体运行 → 工作记忆 | [`knowme/runtime/session.py`](../../knowme/runtime/session.py) |
 | 循环（LLM ↔ 工具、循环结束保护） | [`knowme/loop/agent.py`](../../knowme/loop/agent.py) |
 | 图工作流（在循环外围提供结构） | [`knowme/graph/`](../../knowme/graph/) |
@@ -281,7 +281,7 @@ python -m knowme skill install https://github.com/<someone>/<repo>/blob/main/ski
 | 命令 | 功能 |
 |---|---|
 | `knowme` | 在终端中聊天 |
-| `knowme dashboard` | 在 localhost:7777（Windows 默认 8888）打开本地网页端 |
+| `knowme web` | 在 localhost:7777（Windows 默认 8888）打开本地网页端 |
 | `knowme brief` | 根据日历、邮件和记忆生成晨间简报 |
 | `make trace` | 在 localhost:6006 打开 Phoenix 深度追踪瀑布图 |
 | `make eval` | 确定性评测（0/1，不使用评判模型） |

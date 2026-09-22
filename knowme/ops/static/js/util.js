@@ -1,4 +1,4 @@
-// knowme dashboard — escaping, markdown, core globals (D/editing), postJSON, reveal.
+// knowme web — escaping, markdown, core globals (D/editing), postJSON, reveal.
 // Split out of app.js: classic <script>, shared global scope (no build
 // step, no modules). Load order + rules: static/README.md.
 
@@ -117,7 +117,7 @@ async function postJSON(url, body){
       body: JSON.stringify(body),
     });
   } catch (error) {
-    throw new Error(`无法连接 Dashboard（${error.message || error}）`);
+    throw new Error(`无法连接 Web（${error.message || error}）`);
   }
 
   const text = await response.text();

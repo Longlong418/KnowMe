@@ -1,4 +1,4 @@
-// knowme dashboard — the architecture SVG (archSVG, byte-frozen) + its live animation.
+// knowme web — the architecture SVG (archSVG, byte-frozen) + its live animation.
 // Split out of app.js: classic <script>, shared global scope (no build
 // step, no modules). Load order + rules: static/README.md.
 
