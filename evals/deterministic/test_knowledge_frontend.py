@@ -89,7 +89,9 @@ pendingTests.push((function testKnowledgePane() {
   async function refresh(){ refreshes++; render(); }
 
   // render() is sliced out of main.js by shape, like the Reader's lock does.
-  const renderFn = src.slice(src.indexOf("function render(){"),
+  // The slice starts at setCount() because render() calls it: the counters moved
+  // behind that helper when one of them was found to be able to crash the loop.
+  const renderFn = src.slice(src.indexOf("function setCount("),
                              src.indexOf("\nlet lastFetch"));
   let activeView = null, activeSub = null, animating = false;
   let built = 0;

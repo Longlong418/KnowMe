@@ -21,6 +21,16 @@ const TITLES = {agent:"对话", overview:"总览", gateway:"网关", loop:"循�
                 settings:"行为——每轮对话如何运行",
                 database:"数据库——KnowMe 在 state.db 中保存的一切"};
 TITLES.coding = "Coding Workspace";
+// The sidebar counters. These used to be bare getElementById(...).textContent
+// writes, and when 6ee4900 removed the duplicate 记忆数据 nav entry it took that
+// entry's <span id="n-mem"> with it — so render() threw HERE, and everything
+// below it (restoreReaderState, restoreKnowledgeState, wireChat) silently never
+// ran again. A counter whose element is gone is now just a counter that is not
+// painted; it must never be able to take the rest of the loop down with it.
+function setCount(id, value){
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
 function render(){
   if (!D) return;
   const [v, subRaw] = (location.hash||"#overview").slice(1).split("/");
@@ -78,14 +88,13 @@ function render(){
   activeView = view; activeSub = sub;
   document.getElementById("model").textContent = `${D.provider} · ${D.model}`;
   syncAgentChrome();
-  document.getElementById("n-gw").textContent = (D.chat_log||[]).length;
-  document.getElementById("n-loop").textContent = D.stats.turns;
-  document.getElementById("n-graph").textContent =
-    (D.graph && (D.graph.stats.quick + D.graph.stats.full)) || "";
-  document.getElementById("n-mem").textContent = D.facts.length + D.episodes.length;
-  document.getElementById("n-tools").textContent = D.calendar.length + D.outbox.length;
-  document.getElementById("n-db").textContent = (D.db && D.db.all_tables.length) || "";
-  document.getElementById("n-ops").textContent = D.stats.tool_errors || (D.eval_report ? "" : "!");
+  setCount("n-gw", (D.chat_log||[]).length);
+  setCount("n-loop", D.stats.turns);
+  setCount("n-graph", (D.graph && (D.graph.stats.quick + D.graph.stats.full)) || "");
+  setCount("n-mem", D.facts.length + D.episodes.length);
+  setCount("n-tools", D.calendar.length + D.outbox.length);
+  setCount("n-db", (D.db && D.db.all_tables.length) || "");
+  setCount("n-ops", D.stats.tool_errors || (D.eval_report ? "" : "!"));
   // Restore reader state if on reader view. Its ask panel rides on the chat
   // machine, so the same rebuild needs its composer bound — wireChat() also
   // wires the reader panel (wireAsk) for exactly this reason.

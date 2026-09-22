@@ -45,7 +45,7 @@ const assert = (ok, msg) => {
 
 // ---- render(): does the 5s poll rebuild the Reader's DOM? -------------------
 (function testRender() {
-  const renderFn = src.slice(src.indexOf("function render(){"),
+  const renderFn = src.slice(src.indexOf("function setCount("),
                              src.indexOf("\nlet lastFetch"));
   let activeView = null, activeSub = null, animating = false;
   const VIEWS = { reader: () => "<reader>", loop: () => "<loop>" };
@@ -257,7 +257,7 @@ pendingTests.push((function testReaderPane() {
 // it on every navigation -- if the 5s poll rebuilt it too, the draft in #dmsg
 // and the scroll position would die mid-sentence every five seconds.
 (function testAgentPollGuard() {
-  const renderFn = src.slice(src.indexOf("function render(){"),
+  const renderFn = src.slice(src.indexOf("function setCount("),
                              src.indexOf("\nlet lastFetch"));
   let activeView = null, activeSub = null, animating = false, editing = false;
   const VIEWS = { agent: (d, sub) => "<agent:" + sub + ">", loop: () => "<loop>" };
