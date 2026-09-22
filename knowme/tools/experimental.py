@@ -67,7 +67,7 @@ def _pi_supports_json(pi_bin: str) -> bool:
     if _PI_JSON_MODE is None:
         try:
             probe = subprocess.run([*_pi_command(pi_bin), "--help"], capture_output=True, text=True,
-                                   timeout=10, check=False)
+                                   timeout=10, check=False, env=_delegate_env())
             _PI_JSON_MODE = "--mode" in (probe.stdout or "")
         except (OSError, subprocess.TimeoutExpired):
             _PI_JSON_MODE = False
@@ -353,4 +353,3 @@ PI_PROVIDER = {
 def _provider_key(provider: str) -> str:
     definition = PROVIDERS.get(provider)
     return os.getenv(definition.key_env, "") if definition else ""
-
