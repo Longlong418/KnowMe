@@ -20,6 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from knowme.core import custom_providers
 from knowme.core.models import PROVIDERS, Provider
 from knowme.memory.episodic.notion_store import normalize_database_id
 
@@ -114,6 +115,9 @@ class IntegrationView:
     fields: tuple[FieldView, ...]
     install_command: str
     setup_url: str
+    # True for a provider the user defined themselves (knowme/core/custom_providers.py).
+    # The Models grid shows its 删除 button only on those cards.
+    custom: bool = False
 
 
 @dataclass(frozen=True)
@@ -219,14 +223,20 @@ INTEGRATIONS: tuple[Integration, ...] = (
 
 
 def _integration_from_provider(name: str, provider: Provider) -> Integration:
+    label = provider.label or name.replace("_", " ").title()
     fields = (EnvField(provider.key_env, "API Key", secret=True),)
     if provider.base_url_env and provider.endpoints:
         fields += (EnvField(provider.base_url_env, "Base URL", FieldKind.CHOICE,
                             default=provider.base_url or "",
                             options=tuple(endpoint.base_url for endpoint in provider.endpoints),
                             option_labels=tuple(endpoint.label for endpoint in provider.endpoints)),)
-    return Integration(name, "AI Providers", name.replace("_", " ").title(),
-                       f"Uses {name.replace('_', ' ').title()} models.",
+    elif provider.base_url_env:
+        # A user-defined provider has exactly one endpoint and no regional list
+        # to pick from, so its Base URL is a plain text field.
+        fields += (EnvField(provider.base_url_env, "Base URL",
+                            default=provider.base_url or ""),)
+    return Integration(name, "AI Providers", label,
+                       f"Uses {label} models.",
                        fields, None, None, "",
                        ReloadMode.AGENT, lambda env, key=provider.key_env: bool(env.get(key)), _provider_probe)
 
@@ -343,7 +353,8 @@ def list_integrations() -> tuple[IntegrationView, ...]:
         views.append(IntegrationView(integration.key, integration.group, integration.name, integration.what,
                                      _status(integration, env), fields,
                                      f"pip install -e '.[{integration.extra}]'" if integration.extra else "",
-                                     integration.setup_url))
+                                     integration.setup_url,
+                                     custom=custom_providers.is_custom(integration.key)))
     return tuple(views)
 
 
@@ -751,6 +762,34 @@ def apply_provider(provider: str, *, key: str | None = None, model: str | None =
         result = _safe_error(exc, changed_updates, _find_integration(provider) or provider_integrations()[0])
         return ApplyResult(False, error=result, can_force=bool(key or os.environ.get(selected.key_env)))
     return ApplyResult(True, _current_view(provider))
+
+
+def remove_custom_provider(provider: str) -> None:
+    """Drop a user-defined provider's key and endpoint from .env.
+
+    Called while the provider is still in PROVIDERS (that is where its two
+    variable names come from) and before it is unregistered.
+
+    If it is the ACTIVE provider, the selection is handed back to a built-in
+    first: ``get_client`` reads ``PROVIDERS[settings.provider]`` directly, so a
+    selection left pointing at a provider that no longer exists raises KeyError
+    on the very next message instead of falling back to anything.
+    """
+    selected = PROVIDERS.get(provider)
+    if selected is None:
+        return
+    updates: dict[str, str] = {}
+    if os.environ.get("KNOWME_PROVIDER", "") == provider:
+        # The model ids belong to the provider being removed, so they go too —
+        # Settings refills them from the new provider's own defaults.
+        updates.update({"KNOWME_PROVIDER": "anthropic",
+                        "KNOWME_MODEL": "", "KNOWME_SMALL_MODEL": ""})
+    disabled = {name.strip() for name in os.environ.get("KNOWME_DISABLED_PROVIDERS", "").split(",") if name.strip()}
+    if provider in disabled:
+        # Otherwise the id would be born disabled if it were ever added again.
+        updates["KNOWME_DISABLED_PROVIDERS"] = ",".join(sorted(disabled - {provider}))
+    _write_updates(updates, (selected.key_env, selected.base_url_env))
+    invalidate_health(provider)
 
 
 def apply_provider_disabled(provider: str, *, disabled: bool) -> ApplyResult:

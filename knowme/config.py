@@ -202,4 +202,15 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    # Providers the user added on the 模型 page live in .knowme/providers.json and
+    # are registered into PROVIDERS here, lazily. This is the one function every
+    # entry point (web, CLI, brief, gather) goes through, and the call is a
+    # no-op after the first one for a given home. It deliberately does NOT run
+    # at import time: PROVIDERS is read at import time by the .env.example
+    # generator and by parametrized tests, and the table must not depend on
+    # whose providers.json happens to exist on this machine.
+    from knowme.core import custom_providers
+
+    custom_providers.load(settings.home)
+    return settings

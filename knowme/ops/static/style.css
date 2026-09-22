@@ -671,6 +671,13 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 .provmodal{ background:var(--panel); border:1px solid var(--line); border-radius:12px;
   padding:20px; width:min(520px, 92vw); max-height:90vh; overflow-y:auto; }
 .provmodal-models{ width:min(640px, 92vw); min-height:min(430px, 90vh); padding:24px; }
+/* The "add provider" card: same footprint as a provider card, dashed so it
+   reads as an empty slot rather than a provider. */
+.provadd{ border-style:dashed; cursor:pointer; align-items:center; text-align:center; }
+.provadd:hover{ border-color:var(--accent); }
+.provadd .provplus{ font-size:34px; line-height:1; color:var(--ink2); }
+.provadd .provname{ font-weight:600; }
+.provdel:hover{ border-color:var(--bad) !important; color:var(--bad) !important; }
 
 .model-picker{ position:relative; }
 .model-picker-input{ display:flex; align-items:stretch; }

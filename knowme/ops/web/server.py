@@ -33,7 +33,7 @@ from knowme.ops import browser_agent, commands
 from knowme.ops.browser_agent import agent_lock, dash_session, get_agent, maybe_rotate_session
 from knowme.ops.catalog import list_models
 from knowme.ops.pricing import price_for, usage_summary
-from knowme.ops.settings_api import apply_settings, pin_action, settings_info
+from knowme.ops.settings_api import apply_settings, custom_provider_action, pin_action, settings_info
 from knowme.ops.tracing import TraceEncodingError, iter_trace_lines
 
 # Windows commonly reserves 7777 (for example through Hyper-V/WSL port
@@ -241,8 +241,11 @@ class Handler(BaseHTTPRequestHandler):
                 out = asdict(test_integration(payload.get("key", "")))
             elif self.path == "/api/providers":
                 # A payload that only toggles availability goes to the enable/
-                # disable path; everything else is the existing provider apply.
-                if "disabled" in payload and set(payload) <= {"provider", "disabled"}:
+                # disable path; the ＋ card's add/remove goes to its own action;
+                # everything else is the existing provider apply.
+                if payload.get("action") in ("add_custom", "remove_custom"):
+                    out = custom_provider_action(payload)
+                elif "disabled" in payload and set(payload) <= {"provider", "disabled"}:
                     out = asdict(apply_provider_disabled(payload.get("provider", ""),
                                                          disabled=bool(payload["disabled"])))
                 else:

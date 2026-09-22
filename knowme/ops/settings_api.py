@@ -10,9 +10,56 @@ from __future__ import annotations
 
 import shutil
 
+from knowme import integrations
 from knowme.config import load_settings
+from knowme.core import custom_providers
 from knowme.core.models import PROVIDERS
 from knowme.ops import catalog
+
+
+def custom_provider_action(payload: dict) -> dict:
+    """Add or remove a user-defined provider — the Models page's ＋ card.
+
+    Adding registers the spec and then hands off to the SAME apply_provider the
+    edit modal uses, so a key typed into the add form is probed and written
+    exactly like a key typed anywhere else, force-retry included.
+
+    Removing runs in an order that matters: integrations.remove_custom_provider
+    needs the provider still in PROVIDERS (that is where its two .env variable
+    names come from) and has to redirect the active selection before the entry
+    disappears. Only then is the spec forgotten.
+    """
+    action = payload.get("action")
+    provider = str(payload.get("id") or payload.get("provider") or "").strip().lower()
+    if action == "add_custom":
+        spec = custom_providers.spec_from(payload)
+        try:
+            custom_providers.register(load_settings().home, spec)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        result = integrations.apply_provider(
+            spec["id"], key=payload.get("key") or None,
+            model=spec["model"], small_model=spec["small_model"],
+            base_url=spec["base_url"], force=bool(payload.get("force")),
+            activate=bool(payload.get("activate", True)),
+        )
+        if not result.ok:
+            # The spec stays registered on purpose: the card with a red dot is
+            # how the user sees what did not save, and re-sending this same
+            # action with force=true is the 仍然保存 retry.
+            return {"ok": False, "error": result.error, "can_force": result.can_force}
+        return {"ok": True, **settings_info()}
+    if action == "remove_custom":
+        if not custom_providers.is_custom(provider):
+            return {"ok": False, "error": "只有自定义服务商可以删除"}
+        integrations.remove_custom_provider(provider)
+        custom_providers.unregister(load_settings().home, provider)
+        # A pinned model of a provider that no longer exists would sit in the
+        # chat switcher forever. catalog.save_pinned stays the only writer.
+        catalog.save_pinned([spec for spec in catalog.pinned_specs()
+                             if spec.split(":", 1)[0] != provider])
+        return {"ok": True, **settings_info()}
+    return {"ok": False, "error": f"unknown action {action}"}
 
 
 def pin_action(payload: dict) -> dict:

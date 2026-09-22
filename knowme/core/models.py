@@ -58,6 +58,11 @@ class Provider:
     # override for backwards compatibility, but must not leak across providers.
     base_url_env: str = ""
     endpoints: tuple[ProviderEndpoint, ...] = ()
+    # Display name, for providers the user defined themselves (see
+    # knowme/core/custom_providers.py). Blank means "derive it from the key" —
+    # which is what every built-in provider does, because their keys are already
+    # the names people know them by.
+    label: str = ""
 
     def default_pair(self) -> list[str]:
         """[flagship, fast], deduped — the switcher's default picks."""

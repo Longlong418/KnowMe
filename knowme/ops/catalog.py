@@ -58,6 +58,7 @@ def list_models(provider: str | None = None, *, use_cache: bool = True) -> dict:
     import time
     import urllib.request
 
+    from knowme.core import custom_providers
     from knowme.core.models import PROVIDERS
 
     s = load_settings()
@@ -76,12 +77,17 @@ def list_models(provider: str | None = None, *, use_cache: bool = True) -> dict:
     # Where can this provider's models be listed? An explicit catalog_url wins
     # (kimi chats on the anthropic wire but lists on its OpenAI-compatible API;
     # anthropic itself has GET /v1/models); otherwise openai-wire endpoints get
-    # {base_url}/models; otherwise fall back to the two known defaults.
+    # {base_url}/models; a USER-DEFINED anthropic-wire endpoint gets
+    # {base_url}/v1/models — the same path the official one answers on, and the
+    # only listing convention its wire has; otherwise fall back to the two known
+    # defaults.
     catalog_url = prov.catalog_for(base) if prov is not None else None
     if catalog_url:
         url = catalog_url
-    elif prov is not None and prov.kind == "openai" and base:
+    elif prov is not None and base and prov.kind == "openai":
         url = base.rstrip("/") + "/models"
+    elif prov is not None and base and custom_providers.is_custom(name):
+        url = base.rstrip("/") + "/v1/models"
     else:
         # No catalog endpoint: fall back to the provider's own known defaults
         # (flagship + fast + loop/gate), not just the active model.

@@ -239,7 +239,7 @@ function modelsGrid(d){
   const providers = (d.providers || []).slice()
     .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   return `<div class="provgrid">` + providers.map(p => providerCard(p, st)).join("") +
-    `</div><div id="prov-modal-root"></div>`;
+    addProviderCard() + `</div><div id="prov-modal-root"></div>`;
 }
 
 function providerCard(p, st){
@@ -255,7 +255,95 @@ function providerCard(p, st){
       <button class="save ghost" onclick="openProviderModal('${esc(p.key)}')">编辑</button>
       ${status === "configured" ? `<button class="save ghost" onclick="toggleProvider('${esc(p.key)}',false)">启用</button>` : ""}
       ${status === "enabled" && !current ? `<button class="save ghost" onclick="toggleProvider('${esc(p.key)}',true)">禁用</button>` : ""}
+      ${p.custom ? `<button class="save ghost provdel" onclick="removeProvider('${esc(p.key)}')">删除</button>` : ""}
     </div></div>`;
+}
+
+// The last card in the grid: define a provider KnowMe has no entry for. One
+// form, one request; the backend registers it in the same table the built-in
+// providers live in, so afterwards it IS an ordinary provider — same edit
+// modal, same live catalog, same switcher, and the loop can run on it.
+function addProviderCard(){
+  return `<div class="provcard provadd" data-provider="" onclick="openAddProviderModal()">
+    <span class="provplus">＋</span>
+    <div class="provname">添加服务商</div>
+    <div class="provstatus"><span class="meta" style="margin:0">OpenAI 或 Anthropic 兼容接口</span></div>
+  </div>`;
+}
+
+function openAddProviderModal(){
+  markEditing();   // keep the 5s refresh loop from wiping this modal
+  const root = document.getElementById("prov-modal-root");
+  if (!root) return;
+  root.innerHTML = `<div class="provmodal-back" onclick="closeProviderModal()">
+    <div class="provmodal" onclick="event.stopPropagation()">
+      <div class="u" style="display:flex;justify-content:space-between;align-items:center">
+        <b>添加服务商</b><a class="reveal" onclick="closeProviderModal()">✕</a></div>
+      <label class="fld"><span>ID <span class="srcpill apple">必填</span>
+        <span class="meta">（小写字母、数字、下划线，字母开头——它也是环境变量名的一部分）</span></span>
+        <input type="text" id="ap-id" placeholder="例如 my_lab" autocomplete="off" onfocus="markEditing()"></label>
+      <label class="fld"><span>显示名 <span class="meta">（留空就用 ID）</span></span>
+        <input type="text" id="ap-label" placeholder="例如 我的实验室" autocomplete="off" onfocus="markEditing()"></label>
+      <label class="fld"><span>接口类型 <span class="meta">（这个端点说的是哪种协议）</span></span>
+        <select id="ap-kind" onfocus="markEditing()">
+          <option value="openai">OpenAI 兼容（/v1/chat/completions）</option>
+          <option value="anthropic">Anthropic 兼容（/v1/messages）</option>
+        </select></label>
+      <label class="fld"><span>Base URL <span class="srcpill apple">必填</span></span>
+        <input type="text" id="ap-base-url" placeholder="https://api.example.com/v1" autocomplete="off" onfocus="markEditing()"></label>
+      <label class="fld"><span>API 密钥 <span class="meta">（写进 .env，不写进 providers.json）</span></span>
+        <input type="password" id="ap-key" placeholder="粘贴密钥" autocomplete="off" onfocus="markEditing()"></label>
+      <label class="fld"><span>主模型 <span class="srcpill apple">必填</span>
+        <span class="meta">（运行循环，需要工具调用能力）</span></span>
+        <input type="text" id="ap-model" placeholder="例如 my-model-large" autocomplete="off" onfocus="markEditing()"></label>
+      <label class="fld"><span>小模型 <span class="meta">（门控 / 摘要；留空则用主模型）</span></span>
+        <input type="text" id="ap-small-model" placeholder="例如 my-model-small" autocomplete="off" onfocus="markEditing()"></label>
+      <label class="fld"><span><input type="checkbox" id="ap-activate" checked onfocus="markEditing()"> 保存后设为当前服务商</span></label>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="save" id="ap-save" onclick="submitAddProvider(false)">保存</button>
+      </div>
+      <span class="meta" id="ap-msg"></span>
+    </div></div>`;
+  document.getElementById("ap-id").focus();
+}
+
+async function submitAddProvider(force){
+  const value = id => document.getElementById(id)?.value ?? "";
+  const payload = {action: "add_custom", id: value("ap-id"), label: value("ap-label"),
+    kind: value("ap-kind"), base_url: value("ap-base-url"), key: value("ap-key"),
+    model: value("ap-model"), small_model: value("ap-small-model"),
+    activate: !!document.getElementById("ap-activate")?.checked, force: !!force};
+  const msg = document.getElementById("ap-msg");
+  const button = document.getElementById("ap-save");
+  const label = button?.textContent;
+  if (button){ button.disabled = true; button.textContent = "正在保存并验证…"; }
+  if (msg) msg.textContent = force ? "正在跳过成功测试并保存…" : "正在验证密钥与端点…";
+  let r;
+  try { r = await postJSON("/api/providers", payload); }
+  catch(e){ r = {ok: false, error: e.message || String(e)}; }
+  if (button){ button.disabled = false; button.textContent = label; }
+  if (!r.ok){
+    // Same escape hatch as the Connections page: an endpoint that refuses to
+    // list its models is still a legitimate thing to save deliberately.
+    if (msg) msg.innerHTML = r.can_force
+      ? `${esc(r.error)} <button class="save ghost conn-force" onclick="submitAddProvider(true)">仍然保存</button>`
+      : esc(r.error || "保存失败");
+    return;
+  }
+  editing = false;
+  closeProviderModal();
+  await refresh();
+}
+
+// Custom cards only. The server hands the active selection back to a built-in
+// first when the provider being removed is the current one, so this can never
+// leave the loop pointing at something that no longer exists.
+async function removeProvider(provider){
+  if (!confirm(`删除服务商 ${provider}？它的密钥、Base URL 和已固定的模型都会一并移除。`)) return;
+  const r = await postJSON("/api/providers", {action: "remove_custom", provider});
+  if (!r.ok){ alert(r.error || "删除失败"); return; }
+  editing = false;
+  await refresh();
 }
 
 // enable/disable a provider (the grid button). Server keeps the key; the
@@ -286,13 +374,16 @@ function openProviderModal(provider){
         ${f.configured ? `<span class="srcpill" style="background:var(--good-soft);color:var(--good)">已设置 ····${esc(f.last4 || "")}</span>`
                        : `<span class="srcpill apple">未设置</span>`}</span>
         <input type="password" id="pm-key" placeholder="${f.configured ? "已有密钥——留空即可保留" : "粘贴密钥"}"></label>
-      ${baseField ? `<label class="fld"><span>Base URL <span class="meta">（选择 API 密钥所属区域）</span></span>
+      ${baseField ? (baseField.kind === "choice"
+        ? `<label class="fld"><span>Base URL <span class="meta">（选择 API 密钥所属区域）</span></span>
         <select id="pm-base-url" onfocus="markEditing()">
           ${(baseField.options || []).map((url, index) => {
             const label = (baseField.option_labels || [])[index];
             return `<option value="${escAttr(url)}" ${url===selectedBaseUrl?"selected":""}>${label?esc(label)+" — ":""}${esc(url)}</option>`;
           }).join("")}
-        </select></label>` : ""}
+        </select></label>`
+        : `<label class="fld"><span>Base URL <span class="meta">（自定义服务商的端点，随时可改）</span></span>
+        <input type="text" id="pm-base-url" value="${escAttr(baseField.value || "")}" autocomplete="off" onfocus="markEditing()"></label>`) : ""}
       ${current ? `
       ${renderModelPicker("pm-model", "主模型（运行循环；需要工具调用能力）", st.model || "")}
       ${renderModelPicker("pm-small-model", "门控 / 摘要模型", st.small_model || "")}` : ""}
