@@ -63,6 +63,99 @@ Phase 12 只让"页面不主动刷新"这一条成立了：5 秒轮询不再重�
 
 `restoreReaderState()` 每一轮都会跑，但如果让它每次都强制重新拉一遍文档库列表，就等于每 5 秒发一次多余的请求，也违背了这块面板"轮询不重拉"的约定（测试里就有这一条）。恢复文档并不需要它：刷新页面后 JS 状态本来就是空的，第一次调用自然会去请求服务器。
 
+## Phase 14：三个 bug，其实只有一个原因（2026-09-22）
+
+你报的是三个问题：阅读器刷新后不显示文档、知识库点开笔记几秒后跳回新建页、PDF 解析不好使。查完之后发现前两个是**同一个 bug**，第三个是我自己之前写错的一行判断。
+
+### 元凶：`render()` 每次调用都抛异常
+
+`main.js` 的 `render()` 是 Dashboard 的渲染主循环，每 5 秒被轮询调用一次。它最后有一段给左侧导航写数字的代码：
+
+```js
+document.getElementById("n-mem").textContent = ...;
+```
+
+Phase 11 删掉了左侧重复的「记忆数据」入口（就是提交 `6ee4900`），那个 `<span id="n-mem">` 跟着一起没了。于是这一行变成了 `Cannot set properties of null`，**每次调用都抛**。
+
+要命的是异常发生的位置：它在 `render()` 的中段。它下面是这些代码——
+
+```js
+if (view === "reader"){ restoreReaderState(); wireChat(); }
+if (view === "knowledge"){ restoreKnowledgeState(); }
+```
+
+全部**永远执行不到**。所以：
+
+- 阅读器刷新后不显示文档 → 因为 `restoreReaderState()` 从来没跑过。你以为是你必须重新上传，其实是恢复逻辑整个没执行。
+- 知识库点开笔记几秒后跳回新建页 → 因为 `restoreKnowledgeState()` 也没跑过。5 秒后轮询重建视图，重建后没人把笔记重新打开，看到的就是「创建新笔记」页。
+- 「有时候又会显示」→ 因为轮询落点、当前在哪个视图都会影响你先看到哪一帧，表现就不稳定。
+
+### 怎么修
+
+加了一个 `setCount()`：
+
+```js
+// 计数位丢了，就只是这个数字不显示而已，绝不能让整轮渲染跟着挂掉
+function setCount(id, value){
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+```
+
+7 个计数位全部改成走这个函数，同时把 `index.html` 里那个 `<span id="n-mem">` 补回去。**关键是两层保护**：元素在就正常显示，元素不在也不影响别的。
+
+### PDF：我自己写错的一行判断
+
+阅读器里有一段"这台浏览器能不能渲染 PDF"的预检查，写的是：
+
+```js
+if (typeof Uint8Array.prototype.fromBase64 !== "function") return "浏览器不支持…";
+```
+
+`fromBase64` 是**静态方法**（`Uint8Array.fromBase64`），挂在构造函数上，原型上根本没有它。所以 `Uint8Array.prototype.fromBase64` 永远是 `undefined`，这句判断永远为真——**任何浏览器、任何 PDF 都会被拒**，全都退化成纯文本。这正是你看到的"PDF 解析还是不好使"。
+
+真实需要检查的只有 `Uint8Array.prototype.toHex`（pdf.js 的 worker 里真的用了它）。实测 Chrome 153 下 `toHex` 和 `fromBase64` 都是函数。
+
+**关于浏览器端 PDF 库**：pdf.js（mozilla/pdf.js）就是这件事的标准答案，Chrome、Firefox 内置的 PDF 阅读器都是它，React-PDF、pdfjs-dist 这些包都是它的封装。项目里**早就把它放在 `static/vendor/pdfjs/` 了**，所以不需要换库，也不需要引入新的开源项目——之前打不开只是因为上面那行判断写错了。
+
+### arXiv 论文：扩展名骗了我们
+
+你导入过一篇 arXiv 论文（`1706.03762`，就是《Attention Is All You Need》）。URL 是 `https://arxiv.org/pdf/1706.03762`，取扩展名得到 `.03762`，于是这篇 PDF 被**存成了纯文本**（`kind=text`），阅读器就按文本渲染，整篇论文挤成一大段。
+
+修法是让**文件内容说话**：PDF 前四个字节一定是 `%PDF`，这比文件名靠谱。新增 `kind_and_suffix(name, raw)`，先看字节再退回看文件名。另外加了 `_repair_binary_kinds()`，在列出文档库时顺手检查历史记录里存错的那些行，是 PDF 就把 `kind` 改成 `pdf`（文件本身没存错，不用搬动，`suffix` 和 `path` 本来就是两列）。
+
+> 中途踩了一个坑值得记下来：判断文件头时写的是 `read(5) != b"%PDF"`。`read(5)` 读出来是 5 个字节 `b"%PDF-"`，和 4 个字节的 `b"%PDF"` 比**永远不相等**，所以修复逻辑每次都提前 `continue`，一条也没修上。改成 `read(4)` 就对了。
+
+### 新增的测试
+
+- `evals/deterministic/test_dashboard_render_frontend.py`（新，21 条断言）：把 `render()` 抽出来在 node 里跑，故意让某个计数位的元素返回 `null`，断言 `render()` 不抛异常、`restoreReaderState()` 和 `restoreKnowledgeState()` 照样被调用、其他计数位照样显示；另外锁住 `index.html` 必须提供 `main.js` 用到的每一个计数位 id——**这是当初真正丢掉的那一半**。
+- `evals/deterministic/test_document_library.py` 新增 5 条：URL 命名的 PDF 存成 pdf、历史错误行能就地修正且不动文件、只认真正的 PDF（不能把普通文本也改成 pdf）、文件被手工删掉时列表不崩。
+- 阅读器和知识库的旧测试桩改成从 `function setCount(` 开始切片——`render()` 现在依赖它，切片起点不跟着动就会 `ReferenceError`。这本身也是个提醒：**测试里的"按形状切片"是会跟着代码一起坏的东西**。
+
+### 为什么没有换 Vue3
+
+你问要不要用 Vue3 重构前端。我的判断是**不需要**，理由是这次的三个问题没有一个是框架能防住的：
+
+1. 第一个是**删 HTML 时漏改了对应的 JS**。Vue 里写 `{{ count }}` 确实不会因此崩，但"删掉的组件里还在引用数据"是任何框架都会遇到的事。
+2. 第二个是**用错了 API**（静态方法当原型方法）。这跟用不用框架完全无关。
+3. 第三个是**文件名当扩展名**，是后端逻辑。
+
+真正让问题变严重的是**"一个装饰性的数字写不进去，把整个渲染循环炸了"**——这跟框架无关，是"要渲染的东西该不该有能力打断整条链路"的问题。现在加了 `setCount()` 之后，这类问题在这一层就不会再发生了。
+
+另外这个前端是**零构建**的：改完刷新浏览器就能看到效果，不需要 npm/webpack/vite，也不需要 `npm install`。换成 Vue3 就要引入构建步骤和一套工具链，对一个本地优先的个人项目来说，收益不明显、成本很实在。
+
+**所以结论：先不换。** 如果你之后觉得是"界面不够好看"而不是"有 bug"，那才是该聊样式的时候——那种改动也不依赖 Vue，直接改 CSS 就行。
+
+### 需要你决定的一件事
+
+**笔记是按 Agent 隔离的**（`notes.agent_id`，`test_dashboard_agent_scope.py` 就是专门测这个的）。你的笔记现在都属于 `reader` 和 `learning` 两个 Agent，所以在 `default`（默认助手）下面知识库是**空的**。这是设计如此，但很容易被当成"知识库有时候不显示"。
+
+要不要改成"知识库看到所有 Agent 的笔记、只是标注来源"？这属于产品决定，我没有擅自改。你说一声我就动。
+
+### 测试基线
+
+**613 passed / 3 failed / 62 skipped**。3 个失败是既有的、和这轮无关：`test_delegate_env.py` ×2 和 `test_packaging.py::test_the_bundled_skills_are_findable`（缺 `weekly-brief` 这个 skill）。
+
 ## 项目概览
 
 一个以自研 Agent Core 为底座的个人 Agent 工作平台。支持多Agent记忆隔离，提供Reader应用和Context Bridge。
