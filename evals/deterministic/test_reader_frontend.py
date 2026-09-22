@@ -137,7 +137,12 @@ pendingTests.push((function testReaderPane() {
   // markdown rendering is util.js's job and is tested by using the app; here it
   // only has to be a pure function of the text so the stamps can be compared.
   const renderMarkdown = t => `<md>${String(t)}</md>`;
-  const ACTIVE_AGENT = "default", SESSION = "s1", activeView = "reader";
+  const ACTIVE_AGENT = "default", SESSION = "s1";
+  // main.js owns the real render(); here it only has to report that it ran, so
+  // toggleAskPanel() can be checked for asking for one. NOT a const: clearing
+  // activeView is exactly how the reader makes render() rebuild the view.
+  let activeView = "reader", renderCalls = 0;
+  function render() { renderCalls++; }
   const alert = m => { throw new Error("unexpected alert: " + m); };
   const confirm = () => true;
   const D = { current_sessions: {} };
@@ -156,10 +161,26 @@ pendingTests.push((function testReaderPane() {
     }
     return { ok: true };
   };
+  // Which document row the library list is lighting up, read out of its markup
+  // ("class=rdoc on" is the only place the open document shows up in the list).
+  const lit = html => (String(html).match(
+    /class="rdoc on"\s+onclick="readerOpen\('([^']+)'\)/) || [])[1] || null;
   eval(readerSrc);
 
   reset();
   return (async () => {
+    // 收起提问 must actually close the panel. The panel is part of the VIEW
+    // markup, so it only follows by being rebuilt — and the poll guard
+    // (`view === "reader" && !subChanged`) skips exactly that rebuild, so the
+    // click used to do nothing at all. Clearing activeView is what asks for it.
+    assert(askPanelOpen(), "the ask panel is open by default");
+    toggleAskPanel();
+    assert(!askPanelOpen(), "收起提问 closes the panel and remembers the choice");
+    assert(activeView === null && renderCalls === 1,
+           "…by asking render() for a rebuild the poll guard would otherwise skip");
+    toggleAskPanel();
+    assert(askPanelOpen() && renderCalls === 2, "clicking it again reopens the panel");
+
     await readerOpen("d1");
     assert(opened === "d1", "opening a document asks the server for it by id");
     assert(els["rc-content"].innerHTML.includes("para one"),
@@ -187,11 +208,21 @@ pendingTests.push((function testReaderPane() {
     assert(paints > 0 && els["rc-content"].innerHTML.includes("para one"),
            "a rebuilt view (fresh element, no stamp) repaints the document");
 
+    // The library's row highlight has to follow the document you open. It did
+    // not: the list's stamp was (query | row ids), and opening a DIFFERENT
+    // document changes neither, so the early return kept the previous list with
+    // the old row still lit — you click a second document and the highlight
+    // stays on the first one.
+    assert(lit(els["rc-library"].innerHTML) === "d1",
+           "the library highlights the document that is open");
+
     // A different document, and the same document made longer, both repaint:
     // that second one is the 继续加载 button, and a stamp keyed on the id alone
     // would silently swallow it.
     await readerOpen("d2");
     assert(els["rc-content"].innerHTML.includes("para one"), "a different document repaints");
+    assert(lit(els["rc-library"].innerHTML) === "d2",
+           "and the highlight follows to the document you just opened");
     const before = paints;
     readerMore();
     assert(paints > before, "continuing a long document repaints it");
@@ -382,6 +413,11 @@ pendingTests.push((function testPdfZoom() {
   for (const id of ["rc-content", "rc-library", "rc-file-input"])
     assert(html.includes('id="' + id + '"') || readerSrc.includes('id="' + id + '"'),
            "the shell or the view markup provides #" + id);
+  // The Reader IS an agent, but not a chat you navigate to: it exists only in the
+  // reader's own ask panel (ASK_AGENT). Listed beside General/Coding it read as a
+  // fifth conversation, so the sidebar entry was removed on purpose.
+  assert(!/data-agent="reader"/.test(html),
+         "the sidebar lists no Reader agent (it belongs to the reader's ask panel)");
 })();
 
 // ---- the conversation panel (#agent/<id>) -----------------------------------

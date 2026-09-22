@@ -96,7 +96,15 @@ function askPanelOpen(){
 }
 function toggleAskPanel(){
   localStorage.setItem("knowme_ask_open", askPanelOpen() ? "0" : "1");
-  render();                                        // the panel is part of the view
+  // The panel is part of the view markup, so it only follows this by being
+  // REBUILT -- and a bare render() does not rebuild the Reader: the
+  // `view === "reader" && !subChanged` branch skips the rebuild on purpose, so
+  // the 5s poll cannot destroy the file input or a live text selection. That
+  // guard also swallowed this click, which is why 收起提问 did nothing.
+  // Clearing activeView makes render() see a view change, exactly as a
+  // navigation would, so it rebuilds this one time and the poll stays quiet.
+  activeView = null;
+  render();
 }
 function askPanelHTML(){
   return `<aside class="reader-ask">
@@ -179,7 +187,12 @@ function renderLibrary(){
   const el = document.getElementById("rc-library");
   if (!el) return;
   const rows = readerQuery ? librarySearchRows : libraryDocs;
-  const stamp = `${readerQuery}|${rows.map(d => d.id).join(",")}`;
+  // The stamp must cover EVERYTHING the markup below depends on, or the
+  // early return keeps a stale list. It was (query | row ids), and the row ids
+  // do not change when you open a DIFFERENT document -- so the `.on` highlight
+  // stayed on the document you first opened and never followed your clicks.
+  // The open document's id is part of the markup, so it is part of the stamp.
+  const stamp = `${readerQuery}|${currentDoc ? currentDoc.id : ""}|${rows.map(d => d.id).join(",")}`;
   if (el.dataset.stamp === stamp) return;
   el.dataset.stamp = stamp;
   if (!rows.length){
