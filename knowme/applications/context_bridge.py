@@ -70,6 +70,28 @@ class ApplicationContextBridge:
                 (agent_id or "default", session_id or "default"), None
             ) is not None
 
+    def rekey(self, agent_id: str, old_session: str, new_session: str) -> bool:
+        """Move one agent's snapshot to another thread id.
+
+        The dashboard rotates an agent's thread after an idle gap, and that
+        rotation lands at the START of the next turn — after the Application
+        already published (the reader publishes when you open a document).
+        Without this the snapshot stayed filed under the old thread and the new
+        one found nothing: the document you had open the whole time came off
+        exactly when you asked about it.
+
+        The snapshot describes what is on SCREEN, not what was said, so it
+        belongs to whichever thread the agent is about to answer in.
+        """
+        key = (agent_id or "default", old_session or "default")
+        new_key = (agent_id or "default", new_session or "default")
+        with self._lock:
+            state = self._states.pop(key, None)
+            if state is None:
+                return False
+            self._states[new_key] = state
+            return True
+
     def render(self, agent_id: str, session_id: str) -> str:
         """Render a snapshot as an unambiguous, model-facing context block."""
         state = self.get(agent_id, session_id)

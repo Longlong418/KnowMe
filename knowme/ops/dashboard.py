@@ -109,7 +109,17 @@ def chat_stream(message: str, emit, agent_id: str = "default") -> None:
 
     with agent_lock:
         agent = get_agent(agent_id)
+        thread_before = agent.session.session_id
         maybe_rotate_session(agent)
+        if agent.session.session_id != thread_before:
+            # The idle rotation gave this agent a new thread. The Application
+            # snapshot (the document you have open) is screen state, not thread
+            # state, so it comes along — otherwise an hour of reading would come
+            # off the moment you asked about it, because the publish happened
+            # back when the OLD thread was current.
+            application_contexts.rekey(
+                agent.agent_id, thread_before, agent.session.session_id
+            )
         extra_context = application_contexts.render(
             agent.agent_id, agent.session.session_id
         )

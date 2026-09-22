@@ -91,7 +91,7 @@ def resume_or_new_session(conn, agent_id: str = "default") -> str:
 
 
 def get_agent(agent_id: str = "default"):
-    global _agent, _dashboard_session
+    global _agent
     profile = get_profile(agent_id)
     if agent_id == "default" and _agent is not None:
         return _agent
@@ -104,14 +104,16 @@ def get_agent(agent_id: str = "default"):
     settings.ensure_home()
     conn = connect(settings.home, check_same_thread=False)
     fresh = KnowMe(settings=settings, conn=conn, spec=profile.spec)
-    session_id = resume_or_new_session(conn, agent_id)
-    fresh.session.session_id = session_id
+    # The SAME thread dash_session() hands the page, never a second opinion.
+    # Asking resume_or_new_session() again here is how the two answers drifted:
+    # /api/data decided the stale thread was over and minted one dated id, this
+    # call decided the same thing a second later and minted another. The page
+    # then published the open document under its id while the turn ran in mine.
+    fresh.session.session_id = dash_session(agent_id)
     if agent_id == "default":
         _agent = fresh
-        _dashboard_session = session_id
     else:
         _agents[agent_id] = fresh
-        _dashboard_sessions[agent_id] = session_id
     return fresh
 
 
