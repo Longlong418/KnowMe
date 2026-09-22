@@ -1,5 +1,21 @@
 # KnowMe 实现进度更新
 
+## Phase 16: 右侧提问报错 + 阅读器三处小毛病（2026-09-22）
+- ✅ **右侧提问报 `'LoopResult' object has no attribute 'meta'`**：根因在**后端**——`respond()` 改成 `as_loop_result()` 之后，这个翻译函数把 `meta` 静默丢掉了，前端就一个字都答不出来
+- ✅ `LoopResult` 补上 `meta` 字段，`as_loop_result()` 带上它；老测试只验"历史能画出来"，没验"刚答完推的和落库的是同一个"，所以补了 `test_turn_meta.py` 断言**实时 `done` 的 steps == 落库的 steps**
+- ✅ 反向验证：去掉 `meta=self.meta`，这条测试立刻 FAIL
+- ✅ **「收起提问」点不动**：面板状态变了、视图却没重建——`render()` 里"阅读器不重建"的守卫（防轮询清掉文件框和选中文字）顺手吞掉了这次点击；改成先清 `activeView` 再 `render()`，这一次重建、轮询照旧安静
+- ✅ **左侧切换文档高亮不跟着走**：`renderLibrary()` 的 stamp 里没带"当前打开的文档 id"，切文档时 stamp 没变就直接 return 了；stamp 必须覆盖所有影响这段 HTML 的东西
+- ✅ **侧边栏那个单独的 Reader agent 删掉了**：只删入口，`reader` profile、它的笔记和历史、`ASK_AGENT = "reader"` 全都不动——它现在只活在阅读器右边的提问面板里
+- ✅ **PDF 支持 `ctrl+滚轮` 单独缩放**：拦下浏览器的整页缩放（`devicePixelRatio` 不变），缩放乘在已有的"适配窗宽"比例上（`zoom===1` 时逐像素不变）
+- ✅ 缩放**锚在鼠标位置**（记下指针在哪一页的哪个高度比例，重画后把滚动位置调回去），重绘防抖 160ms，且**保留已「继续加载」的页数**
+- ✅ 滚轮监听器用 `dataset.zoomWired` 做一次性标记（`#rc-content` 在重绘中不被替换，不然会越挂越多）
+- ✅ `.zoomed` 把居中改成左对齐：可滚动容器里居中的 flex 元素一旦溢出就只能往右滚、滚不回左边
+- ✅ `test_reader_frontend.py` 加了 `testPdfZoom` 分组（8 页 → 继续加载 12 页 → 只挂一次监听 → `ctrl+滚轮` 阻止页面缩放且页宽变大 → 页数没丢 → 普通滚轮不受影响 → 到上限停住）
+- ✅ 真实 Chrome 实测 16 项全过：页宽 605px → 920px 而 `devicePixelRatio` 1 → 1（放大的是 PDF 不是网页）；右侧提问拿到真实回答和完整时间线，无「错误」
+- ✅ 基线 **614 passed / 3 failed / 62 skipped**（3 个失败仍是既有的），ruff 干净
+- ✅ 提交：`d823312`、`6926b48`、`66dc4b6`
+
 ## Phase 15: 知识库改成"一个知识库"（2026-09-22）
 - ✅ 知识库显示**所有 Agent** 的笔记，不再只显示当前 Agent 的（停在 default 曾经是空的）
 - ✅ 每张卡片标出来源 Agent（`kb-note-agent` 标签），文件夹筛选跨 Agent 取并集

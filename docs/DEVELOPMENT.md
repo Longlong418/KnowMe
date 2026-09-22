@@ -247,6 +247,98 @@ def _agent_conds(agent_id):
 
 改动的是断言而不是数量：`test_dashboard_api_keeps_crud_in_the_selected_agent_scope`（它锁的正是被推翻的旧行为）换成了 `test_dashboard_shows_every_agent_but_the_agents_tools_stay_scoped`——**名字里带上了"工具仍然隔离"**，因为那是不许回归的那一半。
 
+## Phase 16：右侧提问报错 + 阅读器三处小毛病（2026-09-22）
+
+你报了 5 件事，其中 4 件是 bug、1 件是要求。按"先说根因、再说改了哪一行"的顺序写。
+
+### 一、右侧提问每轮都报 `'LoopResult' object has no attribute 'meta'`
+
+**这是后端的问题，看起来却像前端的问题**——所以你才会觉得"提问不能使用"。而且旧的历史记录还能正常显示，因为那是从数据库里读出来的，不走这条路径。
+
+**根因是一次重构留下的缺口。** 早先 `e303b01` 给对话加了时间线，时间线读的是 `result.meta` 里的 `steps`。那时 `KnowMe.respond()` 返回的就是 `LoopResult`，`meta` 是有的。后来做 AgentSpec / ContextPolicy / AgentRuntime 那一轮重构，`respond()` 改成返回 `runtime.run_turn(...).as_loop_result()`——而 `as_loop_result()` 是把一轮"运行时结果"翻译成"普通循环结果"的函数，它当时只搬了 `reply / tool_calls / iterations` 三个字段，**`meta` 被当成翻译过程里多余的东西丢掉了**。
+
+于是每一轮提问走到最后、要发 `done` 事件的时候，`result.meta` 就炸了。前端的表现是：回答一个字都没出来，底下写着"— · ? 次迭代"。
+
+**改法（两处，一共四行）：**
+
+- `knowme/core/loop.py`：给 `LoopResult` 补上 `meta: dict[str, Any] = field(default_factory=dict)`，并且写了注释说明**为什么这个字段属于这里**——调用方拿到手的只有 `LoopResult`，运行时知道而普通循环不知道的东西（时间线、门控、耗时、模型名）只能挂在这个字段上，否则就会被翻译层静默吃掉。
+- `knowme/core/runtime.py`：`as_loop_result()` 把 `meta=self.meta` 一起带上。
+
+**为什么这里原来没被测试抓到**：老测试验的是"存进数据库的历史能画出来"，没验"刚答完这一轮推给前端的和存进数据库的是不是同一个东西"。所以补了一条 `evals/deterministic/test_turn_meta.py::test_the_live_stream_ends_with_what_a_reload_will_render`——它同时拿两条路径的结果，**断言实时 `done` 事件里的 `steps` 和落库的 `meta["steps"]` 相等**。一句话概括这条测试守的是什么：**一份数据，两条路径，必须长得一样**。
+
+反向验证过：把 `meta=self.meta` 去掉，这条测试立刻 FAIL（`assert []`），也就是说它真的能抓住这次这个回归。
+
+### 二、点「收起提问」没反应
+
+**根因和上一轮（Phase 14/13）是同一类**：面板开合状态存在 `localStorage` 里，而面板本身是**视图 HTML 的一部分**——它要变，只能靠重新渲染整个阅读器。
+
+但 `render()` 里有一句**故意**的守卫：
+
+```js
+else if (view === "reader" && !subChanged) { /* 不重建 */ }
+```
+
+这个守卫是需要的：每 5 秒一次的轮询如果每次重建阅读器，你正在输入的文件框会没、正选着的文字会被清掉。**问题是它也一起吞掉了这次点击。**
+
+**改法**：`toggleAskPanel()` 里先写 `localStorage`，然后把 `activeView` 清成 `null` 再调 `render()`。
+
+```js
+activeView = null;   // 让 render() 认为"换了个视图"，于是这一次会重建
+render();
+```
+
+`activeView = null` 是 `render()` 本来就认识的一种信号（正常的导航也是这么让它重建的），所以不需要给这个守卫开新口子——**这一次会重建，轮询依然安静**。
+
+### 三、左侧切换文档，高亮不跟着走
+
+也是同一类问题：**画出来的东西依赖一个状态，而那个状态不在"要不要重画"的判断里。**
+
+`renderLibrary()` 原来用 `el.dataset.stamp` 做"内容没变就别重画"的标记，stamp 是 `查询词 | 行 id 列表`。你从文档 A 点开文档 B，**查询词没变、行也没变**，所以 stamp 相同、直接 return，那一行的 `.on` 就还留在 A 上。
+
+**改法**：把当前打开的文档 id 加进 stamp：
+
+```js
+const stamp = `${readerQuery}|${currentDoc ? currentDoc.id : ""}|${rows.map(d => d.id).join(",")}`;
+```
+
+一句话原则：**stamp 必须覆盖所有会影响这段 HTML 的东西**，漏一个就会出现"数据变了但界面没动"。
+
+### 四、侧边栏里那个单独的 Reader agent：删掉
+
+你说阅读器里的 Agent 只在阅读器右边就够了。改法是从 `index.html` 里删掉那一行侧边栏入口：
+
+```html
+<button class="agent-link" data-agent="reader" ...>Reader</button>
+```
+
+**只删入口，别的一律不动**：`reader` 这个 profile（`agents/catalog.py` 里）还在、它的笔记和历史都还在、`ASK_AGENT = "reader"` 也还是它。右侧提问面板用的就是这个 Agent。现在界面上没有任何地方能跳到 `#agent/reader`——**"它属于阅读器"这件事是靠入口的位置表达的，不是靠删掉它的身份。**
+
+### 五、PDF 要能单独 `ctrl+滚轮` 缩放，而不是缩放整个网页
+
+浏览器的 `ctrl+滚轮` 默认是缩放整个页面。要让 PDF 自己响应，必须**拦下这个事件**并 `preventDefault()`，否则页面的 `devicePixelRatio` 会变——那也是你不想看到的。
+
+设计上有三个决定值得说：
+
+1. **乘在已有的"适配窗宽"比例上**，不另起一套坐标系。页面本来就是按 `fit = min(2, 窗宽/页宽)` 画出来的，现在画成 `fit * zoom`。`zoom === 1` 时是**逐像素和以前一样**的，所以这个功能不动任何没缩放的场景。
+2. **锚点是鼠标位置，不是页首**。缩放前记下鼠标指针落在哪一页的哪个高度比例（`{index, frac}`），重画完再把滚动位置调回去。否则你盯着看的那一行会在缩放时跑到屏幕外。
+3. **重绘是防抖的（160ms），而且保留已经加载的页数**。`ctrl+滚轮` 会连着触发十几次事件，逐个重画会卡；而且你点过「继续加载」的那些页不能因为缩放就退回 8 页。
+
+另外两个细节：
+
+- 监听器挂在 `#rc-content` 上，而这个元素**在重绘中是不被替换的**，所以用 `dataset.zoomWired` 做一次性标记，不然每次重绘都会多挂一个监听器。
+- CSS 里 `.reader-pdfwrap.zoomed` 把 `align-items` 从 `center` 改成 `flex-start` 并允许横向滚动。**不是审美问题**：在可滚动容器里，一个居中的 flex 元素一旦溢出，你只能往右滚、再也滚不回左边。页面在 `zoom === 1` 时是按窗宽画的，所以这条规则只在显式缩放过之后生效。
+
+### 测试和验证
+
+- **`evals/deterministic/test_reader_frontend.py`**（node 桩）新增了一个 `testPdfZoom` 分组：给 pdf.js 写了最小桩（`getDocument` / `TextLayer` / `GlobalWorkerOptions`），手工造了会记录监听器、`classList`、`children`、`getBoundingClientRect` 的 DOM 元素桩，然后断言：画出 8 页 → 点「继续加载」变 12 页 → 滚轮监听器只挂一次 → `ctrl+滚轮` 阻止了页面缩放且页宽变大 → 已加载的页数没丢 → 不带 `ctrl` 的滚轮不受影响 → 缩放到上限就停住。同一个文件里还加了「收起提问」和「文档高亮跟着走」两组断言，以及一条"侧边栏里没有 Reader 入口"（`!/data-agent="reader"/`）。
+- **真实 Chrome（Playwright 驱动本机 Chrome，端口 31236，`KNOWME_HOME` 指向 `.knowme` 的副本）16 项全过**。其中最有说服力的两条：`ctrl+滚轮` 之后页宽 605px → 920px 而 `devicePixelRatio` 保持 1 → 1（**说明放大的是 PDF，不是网页**）；右侧提问真的拿到了回答（"我是阅读助手：…"，时间线 `门控 · skip / 推理 · iter 1 · end_turn / 2.9 秒 · 1 次迭代 · deepseek-flash`），一个「错误」都没有。
+
+### 测试基线
+
+**614 passed / 3 failed / 62 skipped**。3 个失败仍是既有的、和这几轮无关：`test_delegate_env.py` ×2 和 `test_packaging.py::test_the_bundled_skills_are_findable`（缺 `weekly-brief` 这个 skill，干净工作区上也一样）。ruff 干净。
+
+三个提交：`d823312`（后端 meta）、`6926b48`（PDF 缩放）、`66dc4b6`（前面那三个前端 bug）。
+
 ## 项目概览
 
 一个以自研 Agent Core 为底座的个人 Agent 工作平台。支持多Agent记忆隔离，提供Reader应用和Context Bridge。
@@ -536,7 +628,7 @@ cd D:\LLM\Agent\knowme-agent
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 dashboard**。
 - **已知失败的 3 个测试**（动手前先看一眼，别把它们算到自己头上）：
   `test_delegate_env.py` ×2、`test_packaging.py::test_the_bundled_skills_are_findable`。
-  干净工作区就失败，与前端无关。当前基线：**606 passed / 3 failed / 62 skipped**。
+  干净工作区就失败，与前端无关。当前基线：**614 passed / 3 failed / 62 skipped**。
 - **改完 `.py` 一定要重启 dashboard**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
   硬刷新就能看到；但 `dashboard.py` 及其 import 的一切都在内存里。
   （2026-09-21 亲自踩到：改了 `library.py` 后接口还是旧行为，以为改错了。）
