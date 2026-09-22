@@ -633,7 +633,7 @@ const VIEWS = {
             <div class="kb-preview-label">预览</div><div id="kb-preview" class="kb-preview"></div>
             <div class="kb-links-box"><b>链接到这条笔记</b><div id="kb-links"></div></div>
           </div>
-          <div id="kb-create-editor" class="kb-create-editor">
+          <div id="kb-create-editor" class="kb-create-editor" style="display:none">
             <div class="reader-kicker">NEW NOTE</div><h2>创建新笔记</h2>
             <input id="kb-title" class="kb-title-input" placeholder="笔记标题" onfocus="markEditing()">
             <input id="kb-folder" class="kb-folder-input" placeholder="文件夹（默认 default）" onfocus="markEditing()">

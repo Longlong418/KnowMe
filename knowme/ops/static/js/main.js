@@ -60,8 +60,10 @@ function render(){
     // would wipe all three mid-sentence. Navigations still rebuild (subChanged),
     // and the thread itself is repainted from CHAT by wireChat() below — which
     // is the part that actually needs to track the poll.
-  } else if ((view === "memory" || view === "settings" || view === "database" || view === "models" || view === "connections" || view === "knowledge") && editing && !subChanged){
+  } else if ((view === "memory" || view === "settings" || view === "database" || view === "models" || view === "connections") && editing && !subChanged){
     // don't wipe an in-progress edit on the 5s refresh — but DO switch sub-tabs
+  } else if (view === "knowledge" && !subChanged && (editing || currentNoteId)){
+    // Keep the selected note open while the 5s data poll updates the sidebar.
   } else {
     editing = false;
     // Rebuilding #view innerHTML resets the scroll. On a same-view refresh (the
@@ -88,6 +90,9 @@ function render(){
   // machine, so the same rebuild needs its composer bound — wireChat() also
   // wires the reader panel (wireAsk) for exactly this reason.
   if (view === "reader"){ restoreReaderState(); wireChat(); }
+  if (view === "knowledge" && typeof restoreKnowledgeState === "function"){
+    restoreKnowledgeState();
+  }
   // The conversation markup is generated, so its input and log have to be
   // (re)bound and repainted after every rebuild.
   if (view === "agent") wireChat();

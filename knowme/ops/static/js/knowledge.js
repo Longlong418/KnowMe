@@ -10,9 +10,33 @@
 let currentNoteId = null;
 let currentNoteContent = "";
 
+function knowledgeStateKey(){
+  return `knowme_kb_note_${ACTIVE_AGENT || "default"}`;
+}
+
+async function restoreKnowledgeState(){
+  if (currentNoteId || !document.getElementById("kb-note-detail")) return;
+  const savedId = localStorage.getItem(knowledgeStateKey());
+  if (!savedId) return;
+  await viewKnowledgeNote(savedId, {remember: false});
+}
+
+async function refreshKnowledgeView(){
+  // After a write the sidebar has to be rebuilt: the note list and the folder
+  // filter are baked into the view markup, and render() only rebuilds when
+  // nothing is selected. Clearing the selection is what lets it -- then
+  // restoreKnowledgeState() re-opens the note we were just on, re-read from the
+  // server, so the detail pane is not left showing the old title either.
+  // (Assigning the same hash would not fire hashchange, which is why this calls
+  // the data refresh in main.js directly instead of navigating.)
+  currentNoteId = null;
+  await refresh();
+}
+
 function newKnowledgeNote(){
   currentNoteId = null;
   currentNoteContent = "";
+  localStorage.removeItem(knowledgeStateKey());
   const detail = document.getElementById("kb-note-detail");
   const welcome = document.getElementById("kb-empty-editor");
   const create = document.getElementById("kb-create-editor");
@@ -35,13 +59,17 @@ async function createKnowledgeNote(){
     const res = await postJSON("/api/knowledge", {
       action: "create", title, folder, content, agent_id: ACTIVE_AGENT
     });
-    if (res.ok) { editing = false; location.hash = "#knowledge"; }
+    if (res.ok) {
+      editing = false;
+      await refreshKnowledgeView();
+    }
     else alert(res.error || "创建笔记失败");
   } catch (error) { alert("创建笔记失败：" + (error.message || error)); }
 }
 
-async function viewKnowledgeNote(noteId){
+async function viewKnowledgeNote(noteId, options = {}){
   currentNoteId = noteId;
+  if (options.remember !== false) localStorage.setItem(knowledgeStateKey(), noteId);
   try {
     const res = await postJSON("/api/knowledge", {
       action: "get", note_id: noteId, agent_id: ACTIVE_AGENT
@@ -76,7 +104,10 @@ async function saveKnowledgeNote(){
     const res = await postJSON("/api/knowledge", {
       action: "update", note_id: id, content, title, folder, agent_id: ACTIVE_AGENT
     });
-    if (res.ok) { editing = false; location.hash = "#knowledge"; }
+    if (res.ok) {
+      editing = false;
+      await refreshKnowledgeView();
+    }
     else alert(res.error || "保存笔记失败");
   } catch (error) { alert("保存笔记失败：" + (error.message || error)); }
 }
@@ -91,13 +122,14 @@ async function deleteKnowledgeNote(){
     if (!res.ok) return alert(res.error || "删除笔记失败");
     editing = false;
     closeKnowledgeDetail();
-    location.hash = "#knowledge";
+    await refreshKnowledgeView();
   } catch (error) { alert("删除笔记失败：" + (error.message || error)); }
 }
 
 function closeKnowledgeDetail(){
   currentNoteId = null;
   currentNoteContent = "";
+  localStorage.removeItem(knowledgeStateKey());
   const detail = document.getElementById("kb-note-detail");
   const welcome = document.getElementById("kb-empty-editor");
   const create = document.getElementById("kb-create-editor");
