@@ -69,7 +69,10 @@ function render(){
     // the log is scrolled, which <details> you expanded. Rebuilding it every 5s
     // would wipe all three mid-sentence. Navigations still rebuild (subChanged),
     // and the thread itself is repainted from CHAT by wireChat() below — which
-    // is the part that actually needs to track the poll.
+    // is the part that actually needs to track the poll. That repaint used to
+    // close your expanded 详情 boxes anyway (the state lives in the node, and the
+    // repaint replaces it); syncLogClass now carries them across, and skips the
+    // repaint entirely when the log has not changed.
   } else if ((view === "memory" || view === "settings" || view === "database" || view === "models" || view === "connections") && editing && !subChanged){
     // don't wipe an in-progress edit on the 5s refresh — but DO switch sub-tabs
   } else if (view === "knowledge" && !subChanged && (editing || currentNoteId)){

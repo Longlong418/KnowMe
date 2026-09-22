@@ -28,10 +28,13 @@ const stepMs = ms => ms == null ? "" :
 
 // One turn -> <ol class="steps">. Every step is a dot on a shared vertical
 // line, a label, a right-aligned duration, and — when there is a detail — a
-// NATIVE <details> expander. Native matters: syncChatLogs() rewrites the whole
-// log on every stream event, and a native expander keeps its open/closed state
-// in the DOM, so a repaint never collapses something you opened (JS-held state
-// would). Tool/node output defaults to collapsed; that is <details>' default.
+// NATIVE <details> expander. Native so that opening one needs no state of ours
+// and survives anything that only PATCHES the log in place (the live card's
+// stream events). A wholesale repaint does replace the node — syncChatLogs()
+// does that on every poll — and what carries your open boxes across that is
+// syncLogClass' openDetails/restoreDetails, not <details> itself. (It used to
+// say the opposite here, and the poll quietly closed every 详情 几秒后自己合上.)
+// Tool/node output defaults to collapsed; that is <details>' default.
 //
 // The <ol> carries .tele so the conversation's 统计 toggle hides the whole
 // timeline together with the rest of the per-turn telemetry.

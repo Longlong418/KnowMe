@@ -168,6 +168,33 @@ function renderChatLogFor(chat, emptyText){
 }
 function renderChatLog(){ return renderChatLogFor(CHAT, CHAT_EMPTY); }
 
+// A <details> keeps its open/closed state in the NODE, so replacing the markup
+// closes every 详情 box you had opened — which is what the 5s poll did to the
+// trace panel you were reading (轨迹点开几秒后自己合上). These two carry the open
+// ones across a repaint, keyed by thread + position:
+//
+//   the THREAD, because the log element survives a switch to another
+//     conversation, and an old "open" must not follow you there;
+//   the POSITION, because that is the only thing a rebuilt log still shares
+//     with the one it replaced — steps only ever append within a turn, so the
+//     nth expander is the same expander. (No per-step id exists to key on:
+//     history rows carry text/steps only.) A step's own content would collide
+//     instead — two turns can both have 门控 · retrieve open.
+function detailsKey(i){ return SESSION + "|" + i; }
+function openDetails(el){
+  const open = new Set();
+  el.querySelectorAll("details.step-body").forEach((d, i) => {
+    if (d.open) open.add(detailsKey(i));
+  });
+  return open;
+}
+function restoreDetails(el, open){
+  if (!open.size) return;
+  el.querySelectorAll("details.step-body").forEach((d, i) => {
+    d.open = open.has(detailsKey(i));
+  });
+}
+
 // Repaint every element carrying `cls` with `chat`. Fanning out by CLASS (not
 // by id) is what lets the same chat machine drive more than one surface — the
 // conversation panel, and the Reader's ask panel, which has its own log element
@@ -185,7 +212,18 @@ function syncLogClass(cls, chat, emptyText, force){
     // Measured BEFORE the markup is replaced: "was the reader at the bottom" is
     // a fact about the content they were looking at, not about the new one.
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    el.innerHTML = renderChatLogFor(chat, emptyText);
+    const html = renderChatLogFor(chat, emptyText);
+    // Same chat, same markup: leave the DOM alone. This is the poll landing on a
+    // thread that is not moving, and replacing the log anyway is not free — it
+    // drops your text selection and, before the two helpers above, closed your
+    // 详情 boxes. (Comparing against what WE last painted rather than against
+    // el.innerHTML: the browser reserializes markup — `&#39;` comes back as `'` —
+    // so a read-back comparison would never match and this would never fire.)
+    if (el._shown === html) return;
+    el._shown = html;
+    const open = openDetails(el);
+    el.innerHTML = html;
+    restoreDetails(el, open);
     if (force || atBottom) el.scrollTop = el.scrollHeight;
   });
 }

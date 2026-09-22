@@ -153,10 +153,15 @@ const assert = (ok, msg) => {
   console.log((ok ? "PASS  " : "FAIL  ") + msg);
 };
 
-const fn = src.slice(src.indexOf("function syncLogClass("),
+const SESSION = "dashboard-test";
+const fn = src.slice(src.indexOf("function detailsKey("),
                      src.indexOf("\nconst CHAT_EMPTY"));
-const renderChatLogFor = () => "<rendered>";
-const log = { scrollTop: 0, scrollHeight: 1200, clientHeight: 400, innerHTML: "" };
+// A NEW string every time, so what these claims measure is the scroll rule and
+// not the "nothing changed, don't touch the DOM" shortcut in front of it.
+let painted = 0;
+const renderChatLogFor = () => "<rendered" + (++painted) + ">";
+const log = { scrollTop: 0, scrollHeight: 1200, clientHeight: 400, innerHTML: "",
+              querySelectorAll: () => [] };
 const document = { querySelectorAll: sel => (sel === ".asklog" ? [log] : []) };
 eval(fn);
 
@@ -167,7 +172,7 @@ assert(BOTTOM === 800, "the stub log is taller than its window (so it can scroll
 // ---- scrolled up: the poll must leave you where you are --------------------
 log.scrollTop = 0;
 syncLogClass("asklog", [], "");
-assert(log.innerHTML === "<rendered>", "the poll still repaints the log");
+assert(log.innerHTML.startsWith("<rendered"), "the poll still repaints the log");
 assert(log.scrollTop === 0,
        "a poll does NOT drag you back to the bottom when you have scrolled up");
 
@@ -190,6 +195,64 @@ log.scrollHeight = 1200; log.clientHeight = 400; log.scrollTop = 0;
 syncLogClass("asklog", [], "", true);
 assert(log.scrollTop === log.scrollHeight,
        "`force` jumps to the bottom even when you had scrolled up (you pressed send)");
+
+process.exit(failures ? 1 : 0);
+"""
+
+
+# ...and the other thing the poll does to the log: it replaces every node in it.
+# A <details> holds its open/closed state in the node, so the 详情 you just
+# expanded closed itself a few seconds later — the user's 轨迹点开之后又折叠回去,
+# which looked exactly like a page refresh. The stub model below is the DOM's
+# real shape: assigning innerHTML is what rebuilds the node list, and
+# reading it back never does.
+DETAILS_HARNESS = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[2], "utf8");
+let failures = 0;
+const assert = (ok, msg) => {
+  if (!ok) failures++;
+  console.log((ok ? "PASS  " : "FAIL  ") + msg);
+};
+
+let SESSION = "dashboard-one";
+const fn = src.slice(src.indexOf("function detailsKey("),
+                     src.indexOf("\nconst CHAT_EMPTY"));
+let nodes = [];    // the log's <details class="step-body"> nodes, in document order
+let chat = [];
+let paints = 0;
+const renderChatLogFor = (c) => { chat = c || []; return "<log:" + chat.length + ">"; };
+const log = {
+  scrollTop: 0, scrollHeight: 1200, clientHeight: 400, _html: "",
+  get innerHTML(){ return this._html; },
+  set innerHTML(v){ this._html = v; nodes = chat.map(() => ({ open: false })); paints++; },
+  querySelectorAll: sel => (sel === "details.step-body" ? nodes : []),
+};
+const document = { querySelectorAll: sel => (sel === ".chatlog" ? [log] : []) };
+eval(fn);
+
+// ---- the reported bug: 点开的详情在重画之后还是开着的 -----------------------
+syncLogClass("chatlog", ["turn 1", "turn 2"], "");
+assert(paints === 1 && nodes.length === 2, "the log repaints into one expander per turn");
+nodes[1].open = true;                                   // 你点开了第二条的「详情」
+syncLogClass("chatlog", ["turn 1", "turn 2", "turn 3"], "");   // 又来了一条消息
+assert(paints === 2, "a new message really does repaint the log");
+assert(nodes.length === 3, "…and the repaint rebuilds every node from scratch");
+assert(nodes[1].open, "the 详情 you opened is still open after the repaint");
+assert(!nodes[0].open && !nodes[2].open, "the ones you left closed stay closed");
+
+// ---- and an idle poll does not touch the log at all -------------------------
+const kept = nodes;
+syncLogClass("chatlog", ["turn 1", "turn 2", "turn 3"], "");
+assert(nodes === kept && paints === 2,
+       "a poll on a thread that is not moving leaves the DOM alone");
+
+// ---- an 'open' from another conversation must not follow you ----------------
+nodes[1].open = true;
+SESSION = "dashboard-two";                              // 你切到另一条对话
+syncLogClass("chatlog", ["别的对话"], "");
+assert(nodes.length === 1 && !nodes[0].open,
+       "switching conversations does not reopen a box you left open in the last one");
 
 process.exit(failures ? 1 : 0);
 """
@@ -240,9 +303,32 @@ def test_the_render_slice_is_still_findable():
     assert re.search(r"^function render\(\)\{", src, re.M), "render() is still a function"
 
 
+def test_the_details_survive_a_repaint(node, tmp_path):
+    """轨迹点开之后几秒自己合上：5 秒的轮询把整个日志 innerHTML 重写了一遍，
+    而 <details> 的开合状态在节点上 —— 节点换了，盒子就关了。
+
+    scroll_harness.js 盯着这个函数怎么放滚动条；这一个盯着它怎么处理节点。
+    """
+    assert RENDER_JS.exists(), f"missing frontend source: {RENDER_JS}"
+    harness = tmp_path / "details_harness.js"
+    harness.write_text(DETAILS_HARNESS, encoding="utf-8")
+
+    proc = subprocess.run([node, str(harness), str(RENDER_JS)],
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+    print(proc.stdout)
+    assert proc.returncode == 0, f"log details checks failed:\n{proc.stdout}\n{proc.stderr}"
+
+
 def test_the_log_slice_is_still_findable():
-    """Same guard for the scroll harness — same silent-vacuity failure mode."""
+    """Same guard for the log harnesses — same silent-vacuity failure mode.
+
+    Both slice from `function detailsKey(`, so renaming the helpers or moving
+    them below syncLogClass must fail loudly rather than eval nothing.
+    """
     src = RENDER_JS.read_text(encoding="utf-8")
+    assert "function detailsKey(" in src, "the log repaint's key helper is still there"
     assert "function syncLogClass(" in src, "the log repaint kept its name"
     assert "\nconst CHAT_EMPTY" in src, "the slice's end marker is still there"
     assert "scrollTop" in src, "the repaint still positions the log"
+    assert src.index("function detailsKey(") < src.index("function syncLogClass("), \
+        "the helpers must sit inside the slice, above the function that uses them"
