@@ -39,6 +39,8 @@ from knowme.ops.tracing import TraceEncodingError, iter_trace_lines
 # Windows commonly reserves 7777 (for example through Hyper-V/WSL port
 # exclusions), while 8888 is conventionally available for local web clients.
 # Keep the familiar 7777 default elsewhere, but make a clean Windows checkout
+PORT = 8888 if os.name == "nt" else 7777
+
 from knowme.ops.web_runtime import *
 from knowme.ops.web_data import *
 

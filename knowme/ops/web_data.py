@@ -43,9 +43,6 @@ from knowme.ops.web_runtime import (
     application_contexts,
 )
 
-# Windows commonly reserves 7777 (for example through Hyper-V/WSL port
-# exclusions), while 8888 is conventionally available for local webs.
-# Keep the familiar 7777 default elsewhere, but make a clean Windows checkout
 def invalidate_notion_cache() -> None:
     """Forget cached Notion clients/results after connection settings change."""
     global _notion_store, _notion_episodes
