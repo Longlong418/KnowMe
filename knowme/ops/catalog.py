@@ -221,3 +221,31 @@ def save_pinned(specs: list[str]) -> None:
     path = _models_json()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"pinned": specs}, indent=1))
+
+
+def pin_default(provider: str, model: str) -> None:
+    """Make `provider:model` the model that provider uses.
+
+    It takes over the row the provider already has in the shortlist (so the menu
+    keeps its provider order, and that provider keeps exactly one "this is the
+    model" row); a model that is already pinned somewhere in that provider's rows
+    is promoted to the top of them instead of replacing anything, and a provider
+    with no row at all gets one appended.
+
+    Two callers mean the same thing by this — the Models page's 设为默认 button and
+    saving a model for a provider — and both must land in the same row, because
+    `default_model_for()` (read when you switch TO that provider) reads exactly
+    it. Updating only KNOWME_MODEL on a save is how the header chip, the 默认 tag
+    and the model you get on the next switch drifted apart."""
+    spec = f"{provider}:{model}"
+    specs = pinned_specs()
+    others = [s for s in specs if s != spec]
+    head = next((i for i, s in enumerate(others) if s.partition(":")[0] == provider), None)
+    if head is None:                            # no row for this provider yet
+        pinned = [*others, spec]
+    elif spec in specs:                         # already one of its rows: promote, drop nothing
+        pinned = [*others[:head], spec, *others[head:]]
+    else:                                       # take over its row — the model it had is no longer it
+        pinned = [*others[:head], spec, *others[head + 1:]]
+    if pinned != specs:
+        save_pinned(pinned)

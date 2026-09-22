@@ -761,6 +761,15 @@ def apply_provider(provider: str, *, key: str | None = None, model: str | None =
         _restore(path, contents, before)
         result = _safe_error(exc, changed_updates, _find_integration(provider) or provider_integrations()[0])
         return ApplyResult(False, error=result, can_force=bool(key or os.environ.get(selected.key_env)))
+    # A model you name for a provider IS that provider's model, so the shortlist
+    # has to move with it. KNOWME_MODEL is what runs now, the pin is what a later
+    # switch BACK to this provider adopts (default_model_for) and what the chat
+    # switcher lists — updating only the first is why a new model reverted to the
+    # old pin on the next switch (and never appeared in the 你的模型 menu at all).
+    # Written after the save succeeded, next to the record_health above, so a
+    # failed save leaves the list it did not change.
+    if model:
+        catalog.pin_default(provider, model)
     return ApplyResult(True, _current_view(provider))
 
 

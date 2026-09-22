@@ -77,13 +77,13 @@ def pin_action(payload: dict) -> dict:
     if not provider or not model:
         return {"error": "provider and model required"}
     spec = f"{provider}:{model}"
+    if action == "default":
+        # move to the front of its provider's group -> becomes that provider's default
+        catalog.pin_default(provider, model)
+        return {"ok": True, **settings_info()}
     specs = [s for s in catalog.pinned_specs() if s != spec]
     if action == "pin":
         specs.append(spec)
-    elif action == "default":
-        # move to the front of its provider's group -> becomes that provider's default
-        idx = next((i for i, s in enumerate(specs) if s.split(":", 1)[0] == provider), len(specs))
-        specs.insert(idx, spec)
     elif action != "unpin":
         return {"error": f"unknown action {action}"}
     catalog.save_pinned(specs)
