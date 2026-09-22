@@ -156,7 +156,7 @@ Every box is one module (full version with every file path: [docs/architecture.m
 
 | Diagram box | Module |
 |---|---|
-| Interface (CLI / web) | [`knowme/gateway/`](knowme/gateway) + [`knowme/ops/web.py`](knowme/ops/web.py) |
+| Interface (CLI / web) | [`knowme/gateway/`](knowme/gateway) + [`knowme/ops/web/`](knowme/ops/web/) |
 | Ephemeral Agent Run → Working Memory | [`knowme/core/session.py`](knowme/core/session.py) |
 | The Loop (LLM ↔ tools, end-loop guardrails) | [`knowme/core/loop.py`](knowme/core/loop.py) |
 | Graph workflows (structure around the loop) | [`knowme/graph/`](knowme/graph) |

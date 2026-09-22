@@ -9,10 +9,10 @@
   集中映射到 `core`，所以历史代码仍然可以运行，但新代码只应使用
   `knowme.core.*`。
 - 本地浏览器入口统一叫 **Web**：启动命令是 `knowme web` 或 `make web`。
-  `knowme dashboard` 仍是一个兼容别名，方便已有脚本平滑迁移。
-- 原来的单体服务文件拆为四层：`ops/web.py`（兼容门面）、
-  `ops/web_runtime.py`（聊天和工作流）、`ops/web_data.py`（数据和写操作）、
-  `ops/web_server.py`（HTTP/SSE 传输）。
+- 本地浏览器入口只保留 **Web**：启动命令是 `knowme web` 或 `make web`，不再提供旧命令别名。
+- 原来的单体服务文件拆为四层：`ops/web/`（兼容门面）、
+  `ops/web/runtime.py`（聊天和工作流）、`ops/web/data.py`（数据和写操作）、
+  `ops/web/server.py`（HTTP/SSE 传输）。
 - 前端由 `static/js/bootstrap.js` 作为唯一的原生 ES Module 入口；
   `index.html` 不再维护一长串脚本加载顺序。现有功能脚本保留稳定的浏览器
   handler 名称，后续可以逐个迁移为显式 `export`，而不必再改服务端 API。
@@ -221,7 +221,7 @@ def _agent_conds(agent_id):
 
 **默认值仍是 `"default"`**，所以所有老调用行为不变。只有显式写 `agent_id=None` 才会放宽。
 
-**`web.py`**：
+**`ops/web/` 包：
 
 - `knowledge_info()` 去掉了 `agent_id` 参数（它已经不用了，留着会误导），列出全部笔记和全部文件夹。
 - `knowledge_action()`：`list` / `get` / `update` / `delete` / `search` / `links` 都传 `agent_id=None`；**只有 `create` 还用当前 Agent**——新笔记总得盖上某个 Agent 的章。
@@ -741,7 +741,7 @@ knowme/
 ├── core/loop.py         # observe → reason → act 循环
 ├── tools/reader.py      # Reader 工具
 ├── applications/context_bridge.py  # Context 桥接
-└── ops/web.py     # Web + API
+└── ops/web/     # Web + API
 ```
 
 ### 前端
@@ -803,7 +803,7 @@ cd D:\LLM\Agent\knowme-agent
   干净工作区就失败，与前端无关。另外 `evals/judge/` 有 26 个 ERROR，是没装 `deepeval`。
   当前基线：**619 passed / 3 failed / 62 skipped**。
 - **改完 `.py` 一定要重启 Web**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
-  硬刷新就能看到；但 `web.py` 及其 import 的一切都在内存里。
+  硬刷新就能看到；但 `ops/web/` 及其 import 的一切都在内存里。
   （2026-09-21 亲自踩到：改了 `library.py` 后接口还是旧行为，以为改错了。）
 - **改了接口/后端，建议起真实服务用 curl 验一遍**，比只跑测试多抓到问题——
   文档库那两个 bug（拒绝扫描件、`.mjs` 的 MIME）都是这样发现的。

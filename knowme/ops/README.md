@@ -13,7 +13,7 @@ frontend.
 
 | File | Owns |
 |---|---|
-| `web.py` | The Web facade; runtime, data, and HTTP transport live in `web_runtime.py`, `web_data.py`, and `web_server.py`. |
+| `web/` | The Web package; `__init__.py` is the public surface, with `runtime.py`, `data.py`, and `server.py` split by responsibility. |
 | `browser_agent.py` | The lazy browser Agent pool: one `KnowMe` + dated session per profile. |
 | `arena.py` | Racing N models through the same harness, in isolated temp homes. |
 | `catalog.py` | What models a provider can serve + your pinned `provider:model` shortlist. |
@@ -44,7 +44,7 @@ know settings_api exists; `pricing` doesn't know anything exists. If you find
 yourself needing an import that reverses one of these arrows, the function is
 probably in the wrong file.
 
-`web_server.py` is the only module that knows what an HTTP request is. Everything
+`web/server.py` is the only module that knows what an HTTP request is. Everything
 else takes plain Python arguments and returns plain dicts — which is why they're
 testable without starting a server, and why `evals/deterministic/` can call them
 directly.

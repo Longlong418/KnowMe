@@ -1,8 +1,8 @@
 # Web frontend — the map
 
-Plain static files served as-is by `knowme/ops/web.py` (a stdlib HTTP
+Plain static files served as-is by `knowme/ops/web/server.py` (a stdlib HTTP
 server). **No build step, no framework, no bundler, no dependencies.** Edit these
-files to change the UI; edit `web.py` to change the server/API.
+files to change the UI; edit `knowme/ops/web/` to change the server/API.
 
 - `index.html` — the shell (sidebar nav + one `<main>` pane) + one module entry.
 - `style.css` — one flat file, `:root` design tokens at the top, light + dark.
@@ -41,7 +41,7 @@ generated inline handlers are explicitly exported at the boundary.
 checked in because there is no package manager. Its README records the version,
 why that version, and how to upgrade it. It is loaded by a dynamic `import()`
 from `reader.js` (native ES modules — still no bundler), so the `.mjs` MIME type
-in `web.py::_serve_static` is load-bearing.
+in `web/server.py::_serve_static` is load-bearing.
 
 `chat.js` was `dock.js` until the chat stopped being a dock — `git log --follow`
 across the rename. `main.js` is the LOOP, not a home for app code: an app's
@@ -78,12 +78,12 @@ Data flows one way: `refresh()` (main.js) fetches `/api/data` into the global
 Frontend logic is not unit-tested; verify in the browser preview:
 `make web` (or the preview tool) → hard-reload `localhost:7777` → click the
 sidebar tabs and an agent in the sidebar → check the console shows **zero
-errors**. The Python side (`web.py` endpoints, `_thread_history`, pins,
+errors**. The Python side (`web/server.py` endpoints, `_thread_history`, pins,
 session resume) *is* covered by `evals/deterministic/`.
 
 **A running server does not pick up Python changes.** Static files here (`.js`,
 `.css`, `index.html`) are read from disk on every request, so a hard-reload shows
-them. But `web.py` and everything it imports are held in memory — after
+them. But `knowme/ops/web/` and everything it imports are held in memory — after
 pulling or editing backend code, **restart `make web`**, or the page renders
 new markup against stale data (e.g. a new Settings panel that shows nothing because
 the old route isn't sending its fields).

@@ -5,7 +5,7 @@ from knowme.db import connect
 
 
 def test_collect_scopes_memory_chat_and_database_samples(tmp_path, monkeypatch):
-    from knowme.ops import dashboard
+    from knowme.ops import web
 
     settings = Settings(home=tmp_path)
     settings.ensure_home()
@@ -25,15 +25,15 @@ def test_collect_scopes_memory_chat_and_database_samples(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
-    monkeypatch.setattr(dashboard, "settings_info", lambda: {"model": "test"})
-    monkeypatch.setattr(dashboard, "list_connections", list)
-    monkeypatch.setattr(dashboard, "list_providers", list)
-    monkeypatch.setattr(dashboard, "tools_info", lambda: {"catalog": []})
-    monkeypatch.setattr(dashboard, "usage_summary", lambda _: {"total_cost": 0})
-    monkeypatch.setattr(dashboard.browser_agent, "current_agents", dict)
+    monkeypatch.setattr(web, "load_settings", lambda: settings)
+    monkeypatch.setattr(web, "settings_info", lambda: {"model": "test"})
+    monkeypatch.setattr(web, "list_connections", list)
+    monkeypatch.setattr(web, "list_providers", list)
+    monkeypatch.setattr(web, "tools_info", lambda: {"catalog": []})
+    monkeypatch.setattr(web, "usage_summary", lambda _: {"total_cost": 0})
+    monkeypatch.setattr(web.browser_agent, "current_agents", dict)
 
-    payload = dashboard.collect("coding")
+    payload = web.collect("coding")
     assert [row["content"] for row in payload["facts"]] == ["private coding fact"]
     assert [row["summary"] for row in payload["episodes"]] == ["coding episode"]
     assert [row["content"] for row in payload["chat_log"]] == ["coding chat"]
@@ -43,12 +43,12 @@ def test_collect_scopes_memory_chat_and_database_samples(tmp_path, monkeypatch):
 
 
 def test_collect_rejects_unknown_agent(tmp_path, monkeypatch):
-    from knowme.ops import dashboard
+    from knowme.ops import web
 
     settings = Settings(home=tmp_path)
-    monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
+    monkeypatch.setattr(web, "load_settings", lambda: settings)
     try:
-        dashboard.collect("unknown")
+        web.collect("unknown")
     except ValueError as exc:
         assert "unknown agent" in str(exc)
     else:

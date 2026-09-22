@@ -335,7 +335,7 @@ create_event → 完整保留（本来就短）
 2. **写入账本** —— `ops/tracing.py:103 _record_usage`：加 `cache_read` / `cache_write` 字段，**并改用实际应答的模型**（修 P4）
 3. **补齐缺失的调用** —— 门控与归纳（修 P3）：让 `retrieval_gate` / `consolidation` 也上报 usage，或统一走一个 `_metered_call()` 包装
 4. **计价** —— `ops/pricing.py`：`price_for` 需要区分缓存读/写价。注意 `:53` 的注释明写「cache/batch discounts not modelled」，要改。保持「账本只存 token，价格读取时推算」的设计（`:5-8`）—— 这正是让历史行能被重新定价的优点，加字段后依然成立
-5. **展示** —— `ops/web.py`：Overview 加缓存命中率磁贴，Loop 页每轮显示命中情况
+5. **展示** —— `ops/web/`：Overview 加缓存命中率磁贴，Loop 页每轮显示命中情况
 
 #### D5 实现细节：命中率怎么算（两个陷阱）
 

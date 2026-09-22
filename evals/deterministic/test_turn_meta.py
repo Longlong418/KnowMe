@@ -115,7 +115,7 @@ def test_the_live_stream_ends_with_what_a_reload_will_render(tmp_path, monkeypat
     meta out of SQLite) kept rendering perfectly. So it looked like a frontend
     bug in the ask panel and was in fact every single turn.
     """
-    from knowme.ops import dashboard
+    from knowme.ops import web
 
     gate = response([text_block('{"retrieve": true, "query": "alex", "reason": "asks about alex"}')])
     turn = [
@@ -123,13 +123,13 @@ def test_the_live_stream_ends_with_what_a_reload_will_render(tmp_path, monkeypat
         response([text_block("Noted.")]),
     ]
     app = make_knowme(tmp_path / "home", client=ScriptedClient([gate] + turn))
-    monkeypatch.setattr(dashboard, "get_agent", lambda agent_id="default": app)
+    monkeypatch.setattr(web, "get_agent", lambda agent_id="default": app)
     # Nothing is published to the bridge in this test, and the bridge is a
     # process-wide singleton the other tests share.
-    monkeypatch.setattr(dashboard.application_contexts, "render", lambda *a: "")
+    monkeypatch.setattr(web.application_contexts, "render", lambda *a: "")
 
     events = []
-    dashboard.chat_stream("remember alex likes mornings", lambda kind, ev: events.append((kind, ev)))
+    web.chat_stream("remember alex likes mornings", lambda kind, ev: events.append((kind, ev)))
     done = next(ev for kind, ev in events if kind == "done")
 
     assert done["reply"] == "Noted."

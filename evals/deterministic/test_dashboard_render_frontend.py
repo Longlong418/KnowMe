@@ -1,6 +1,6 @@
 """render() must not be able to die on a sidebar counter.
 
-Regression lock for the bug that was breaking the whole dashboard. Commit
+Regression lock for the bug that was breaking the whole web. Commit
 6ee4900 removed the duplicate 记忆数据 nav entry — and took its
 <span id="n-mem"> with it, while render() still wrote that id unconditionally.
 The result was a TypeError on line 85 of main.js, on EVERY call, which killed

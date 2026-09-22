@@ -35,7 +35,7 @@ def test_fact_merge_cannot_cross_agent_boundaries(tmp_path):
 
 def test_dashboard_merge_action_uses_selected_agent(tmp_path, monkeypatch):
     from knowme.config import Settings
-    from knowme.ops import dashboard
+    from knowme.ops import web
 
     settings = Settings(home=tmp_path)
     settings.ensure_home()
@@ -48,13 +48,13 @@ def test_dashboard_merge_action_uses_selected_agent(tmp_path, monkeypatch):
     source_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.commit()
     conn.close()
-    monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
+    monkeypatch.setattr(web, "load_settings", lambda: settings)
 
-    assert dashboard.memory_action({
+    assert web.memory_action({
         "action": "merge_fact", "id": source_id,
         "target_id": target_id, "agent_id": "coding",
     })["ok"] is True
-    assert dashboard.memory_action({
+    assert web.memory_action({
         "action": "merge_fact", "id": source_id,
         "target_id": target_id, "agent_id": "learning",
     })["ok"] is False

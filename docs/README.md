@@ -138,7 +138,7 @@ flowchart LR
 
 | 图中方框 | 模块 |
 |---|---|
-| 交互入口（CLI / Web） | [`knowme/gateway/`](../../knowme/gateway/) + [`knowme/ops/web.py`](../../knowme/ops/web.py) |
+| 交互入口（CLI / Web） | [`knowme/gateway/`](../../knowme/gateway/) + [`knowme/ops/web/`](../../knowme/ops/web/) |
 | 临时智能体运行 → 工作记忆 | [`knowme/runtime/session.py`](../../knowme/runtime/session.py) |
 | 循环（LLM ↔ 工具、循环结束保护） | [`knowme/loop/agent.py`](../../knowme/loop/agent.py) |
 | 图工作流（在循环外围提供结构） | [`knowme/graph/`](../../knowme/graph/) |

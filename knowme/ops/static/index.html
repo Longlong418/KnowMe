@@ -3,15 +3,15 @@
 <title>KnowMe</title>
 <link rel="stylesheet" href="/static/style.css"></head><body>
 <nav id="nav">
-  <div class="brand">KnowMe<small id="model" style="cursor:pointer" title="点击切换模型" onclick="location.hash='#models'"></small>
+  <div class="brand">KnowMe<small id="model" style="cursor:pointer" title="点击切换模型" data-route="models"></small>
     <button id="nav-toggle" title="隐藏侧栏">&#10094;</button></div>
   <div class="grp">Agents</div>
   <!-- Clicking an agent NAVIGATES to #agent/<id> (openAgent), it no longer just
        swaps the contents of a side column. Back button works because of that. -->
-  <button class="agent-link" data-agent="default" onclick="openAgent('default')"><span class="agent-icon">✦</span><span>General</span><i></i></button>
-  <button class="agent-link" data-agent="coding" onclick="openAgent('coding')"><span class="agent-icon">⌘</span><span>Coding</span><i></i></button>
-  <button class="agent-link" data-agent="learning" onclick="openAgent('learning')"><span class="agent-icon">◈</span><span>Learning</span><i></i></button>
-  <button class="agent-link" data-agent="research" onclick="openAgent('research')"><span class="agent-icon">◎</span><span>Research</span><i></i></button>
+  <button class="agent-link" data-agent="default"><span class="agent-icon">✦</span><span>General</span><i></i></button>
+  <button class="agent-link" data-agent="coding"><span class="agent-icon">⌘</span><span>Coding</span><i></i></button>
+  <button class="agent-link" data-agent="learning"><span class="agent-icon">◈</span><span>Learning</span><i></i></button>
+  <button class="agent-link" data-agent="research"><span class="agent-icon">◎</span><span>Research</span><i></i></button>
   <!-- No Reader entry here: the reader agent only exists in the reader's own ask
        panel (ASK_AGENT = "reader" in reader.js). Listing it among the Agents
        suggested a fifth chat you can open, which is not what it is. Its profile,

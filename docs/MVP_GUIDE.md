@@ -66,7 +66,7 @@ cd D:\LLM\Agent\knowme-agent
 3. `knowme/core/loop.py`：最核心的 observe → reason → act 循环。
 4. `knowme/applications/context_bridge.py`：Reader 页面状态如何安全进入当前 Agent。
 5. `knowme/ops/browser_agent.py`：浏览器如何按需创建 Agent，并保持各自会话。
-6. `knowme/ops/web.py`：本地 HTTP API 和 SSE 流式事件；实现拆在 `web_runtime.py`、`web_data.py`、`web_server.py`。
+6. `knowme/ops/web/`：本地 HTTP API 和 SSE 流式事件；实现拆在 `web/runtime.py`、`web/data.py`、`web/server.py`。
 7. `knowme/ops/static/`：无构建步骤的 HTML/CSS/JavaScript 前端。
 
 ## 为什么 MVP 继续使用原生前端

@@ -1,7 +1,7 @@
 """Entrypoints — installed as the `knowme` command (and `python -m knowme`):
 
   knowme                       chat in the terminal (default)
-  knowme web                   the local web client → localhost:8888 on Windows
+  knowme web                   the local Web client → localhost:8888 on Windows
   knowme connections           list configured integrations and their health
   knowme brief                 morning briefing (calendar + mail + memory) — as a LOOP
   knowme gather                same job as a GRAPH: github, web, calendar and
@@ -20,7 +20,7 @@ def main() -> None:
         from knowme.gateway.cli import main as cli_main
 
         cli_main()
-    elif args[0] in {"web", "dashboard"}:  # dashboard kept as a CLI compatibility alias
+    elif args[0] == "web":
         from knowme.ops.web import main as web_main
 
         web_main()

@@ -67,7 +67,7 @@ def test_a_rotated_thread_keeps_the_document_you_have_open(tmp_path, monkeypatch
     time came off exactly when you asked about it. Same symptom as the wrong-key
     bug, longer fuse.
     """
-    from knowme.ops import dashboard
+    from knowme.ops import web
 
     monkeypatch.setenv("KNOWME_SESSION_IDLE_MINUTES", "60")
     gate = response([text_block('{"retrieve": false, "reason": "about the open document"}')])
@@ -75,15 +75,15 @@ def test_a_rotated_thread_keeps_the_document_you_have_open(tmp_path, monkeypatch
                       client=ScriptedClient([gate, response([text_block("ok")])]))
     old = app.session.session_id
     _seed(app, old, age_minutes=120)                    # an hour+ since the last word
-    dashboard.application_contexts.publish(
+    web.application_contexts.publish(
         agent_id=app.agent_id, session_id=old, application="reader",
         resource="REACT", content="the paper you were reading", selection="")
-    monkeypatch.setattr(dashboard, "get_agent", lambda agent_id="default": app)
+    monkeypatch.setattr(web, "get_agent", lambda agent_id="default": app)
 
-    dashboard.chat_stream("这一段是什么意思？", lambda kind, ev: None)
+    web.chat_stream("这一段是什么意思？", lambda kind, ev: None)
 
     assert app.session.session_id != old, "the idle thread really did rotate"
-    assert "REACT" in dashboard.application_contexts.render(
+    assert "REACT" in web.application_contexts.render(
         app.agent_id, app.session.session_id), \
         "…and the document you had open followed you to the new thread"
 

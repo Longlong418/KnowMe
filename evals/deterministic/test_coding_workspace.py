@@ -53,12 +53,12 @@ def test_workspace_action_returns_json_friendly_errors(tmp_path, monkeypatch):
 
 
 def test_dashboard_workspace_action_validates_the_selected_agent(tmp_path, monkeypatch):
-    from knowme.ops import dashboard
+    from knowme.ops import web
 
     monkeypatch.setenv("KNOWME_PROJECT_ROOT", str(tmp_path))
-    assert dashboard.workspace_action({"action": "list", "agent_id": "coding"})["ok"] is True
+    assert web.workspace_action({"action": "list", "agent_id": "coding"})["ok"] is True
     try:
-        dashboard.workspace_action({"action": "list", "agent_id": "not-an-agent"})
+        web.workspace_action({"action": "list", "agent_id": "not-an-agent"})
     except ValueError as exc:
         assert "unknown agent" in str(exc)
     else:

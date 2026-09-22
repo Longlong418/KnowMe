@@ -41,8 +41,8 @@ from knowme.ops.tracing import TraceEncodingError, iter_trace_lines
 # Keep the familiar 7777 default elsewhere, but make a clean Windows checkout
 PORT = 8888 if os.name == "nt" else 7777
 
-from knowme.ops.web_runtime import *
-from knowme.ops.web_data import *
+from .runtime import *
+from .data import *
 
 class Handler(BaseHTTPRequestHandler):
     def _send(self, body: bytes, ctype: str, *, no_cache: bool = False,

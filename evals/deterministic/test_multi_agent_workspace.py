@@ -4,7 +4,7 @@ from knowme.agents import get_profile, list_profiles
 from knowme.db import connect
 from knowme.memory.semantic.store import SqliteFactStore
 from knowme.ops.browser_agent import resume_or_new_session
-from knowme.ops.dashboard import _thread_history, session_list
+from knowme.ops.web import _thread_history, session_list
 
 
 def test_builtin_profiles_are_small_explicit_agent_specs():

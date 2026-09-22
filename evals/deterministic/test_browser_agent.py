@@ -2,7 +2,7 @@
 
 The dashboard is the one gateway that is both multi-threaded and long-lived, so
 it keeps a single KnowMe behind `knowme.ops.browser_agent`. Two callers mutate it:
-dashboard.py builds it on the first chat, settings_api rebuilds it when you
+web.py builds it on the first chat, settings_api rebuilds it when you
 change provider or model. This pins the part that is easy to get wrong.
 
 The bug this was written for: changing ANY setting rebuilt the agent, and a

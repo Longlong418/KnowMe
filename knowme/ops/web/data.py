@@ -35,7 +35,7 @@ from knowme.ops.catalog import list_models
 from knowme.ops.pricing import price_for, usage_summary
 from knowme.ops.settings_api import apply_settings, pin_action, settings_info
 from knowme.ops.tracing import TraceEncodingError, iter_trace_lines
-from knowme.ops.web_runtime import (
+from .runtime import (
     _NOTION_EPISODES_TTL,
     _notion_lock,
     _parse_ts,

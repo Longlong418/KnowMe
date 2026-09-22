@@ -1,9 +1,8 @@
 // Native ES module entrypoint for the Web client.
 //
 // Feature files are evaluated together inside one Function scope. They can
-// share their application state (the old frontend contract), but that state is
-// no longer installed as dozens of browser globals. Only functions referenced
-// by generated inline handlers are exported explicitly at the end.
+// share their application state, while the browser receives only the names
+// referenced by generated event handlers.
 const FEATURES = [
   "util.js",
   "memory.js",
@@ -27,13 +26,26 @@ async function loadFeatureSource(name) {
 
 const sources = await Promise.all(FEATURES.map(loadFeatureSource));
 const source = sources.join("\n\n");
-const names = [...new Set([
+const declaredNames = [...new Set([
   ...source.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm),
   ...source.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/gm),
 ].map(match => match[1]))];
+const eventExpressions = [...source.matchAll(/on(?:click|input|change|focus|keydown)=["']([^"']*)["']/g)]
+  .map(match => match[1]);
+const eventNames = new Set(eventExpressions.flatMap(expression =>
+  [...expression.matchAll(/[A-Za-z_$][\w$]*/g)].map(match => match[0])));
+const names = declaredNames.filter(name => eventNames.has(name));
 const exports = names.length
   ? `\nreturn { ${names.map(name => `${name}: ${name}`).join(", ")} };`
   : "\nreturn {};";
 const featureApp = new Function(`${source}${exports}`);
 const publicHandlers = featureApp();
 Object.assign(window, publicHandlers);
+
+// The static shell uses data attributes instead of inline handlers. Dynamic
+// views still use the existing handler boundary until they are migrated.
+document.addEventListener("click", event => {
+  const agent = event.target.closest("[data-agent]");
+  if (agent) publicHandlers.openAgent(agent.dataset.agent);
+  if (event.target.closest("[data-route='models']")) location.hash = "#models";
+});

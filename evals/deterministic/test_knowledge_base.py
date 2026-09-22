@@ -73,32 +73,32 @@ def test_dashboard_shows_every_agent_but_the_agents_tools_stay_scoped(tmp_path, 
     while fixing the first is the failure this test exists to catch.
     """
     from knowme.config import Settings
-    from knowme.ops import dashboard
+    from knowme.ops import web
 
     settings = Settings(home=tmp_path)
     settings.ensure_home()
-    monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
+    monkeypatch.setattr(web, "load_settings", lambda: settings)
 
-    coding = dashboard.knowledge_action({
+    coding = web.knowledge_action({
         "action": "create", "title": "Coding note", "content": "coding only",
         "agent_id": "coding",
     })["note"]
-    learning = dashboard.knowledge_action({
+    learning = web.knowledge_action({
         "action": "create", "title": "Learning note", "content": "learning only",
         "agent_id": "learning",
     })["note"]
 
     # The list spans Agents, and still says who wrote what — that label is what
     # the view shows on each card.
-    listed = dashboard.knowledge_action({"action": "list", "agent_id": "default"})
+    listed = web.knowledge_action({"action": "list", "agent_id": "default"})
     assert {n["title"]: n["agent_id"] for n in listed["notes"]} == {
         "Coding note": "coding", "Learning note": "learning"}
 
     # A note you can see, you can open, save and delete — from any Agent. The
     # note does not change owner when you do.
-    assert dashboard.knowledge_action({"action": "get", "note_id": coding["id"],
+    assert web.knowledge_action({"action": "get", "note_id": coding["id"],
                                        "agent_id": "default"})["ok"] is True
-    saved = dashboard.knowledge_action({
+    saved = web.knowledge_action({
         "action": "update", "note_id": coding["id"], "content": "edited",
         "title": "Coding note", "agent_id": "default"})
     assert saved["ok"] is True and saved["note"]["agent_id"] == "coding"
@@ -109,5 +109,5 @@ def test_dashboard_shows_every_agent_but_the_agents_tools_stay_scoped(tmp_path, 
     assert [n["content"] for n in list_notes(conn, agent_id="learning")] == ["learning only"]
     assert get_note(conn, learning["id"], "coding") is None
 
-    assert dashboard.knowledge_action({"action": "delete", "note_id": coding["id"],
+    assert web.knowledge_action({"action": "delete", "note_id": coding["id"],
                                        "agent_id": "default"})["ok"] is True

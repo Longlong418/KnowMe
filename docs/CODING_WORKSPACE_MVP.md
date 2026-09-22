@@ -24,7 +24,7 @@ $env:KNOWME_PROJECT_ROOT = "D:\LLM\Agent\knowme-agent"
 ## 主要代码
 
 - `knowme/applications/coding_workspace.py`：路径边界、文件树和只读读取逻辑。
-- `knowme/ops/web.py`：`/api/workspace` 和 `/api/data.workspace`。
+- `knowme/ops/web/`：`/api/workspace` 和 `/api/data.workspace`。
 - `knowme/ops/static/js/views.js`：文件树与预览界面。
 - `knowme/ops/static/js/main.js`：读取文件并发布 Context Bridge。
 - `evals/deterministic/test_coding_workspace.py`：路径隔离、隐藏文件、读取和 API 行为测试。
