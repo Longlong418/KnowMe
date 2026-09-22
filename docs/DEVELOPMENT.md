@@ -1,5 +1,110 @@
 # KnowMe 开发文档
 
+## Phase 19：对话那一块的几个坑（2026-09-22）
+
+这一轮是从一个现象出发的：对话页面上出现一张卡片，写着
+`错误：TypeError: Failed to fetch`，页头停在「实时 · 122 秒前更新」，怎么刷都不动。
+顺着查下去，发现是四个各自独立的问题，其中两个都会表现成"页面不动了"，
+所以看起来很像是同一件事——也就是"对话管理乱七八糟"。
+
+下面每一条都是：先说现象，再说真正的原因，最后说改了什么。
+
+### 1. 工具返回了一个列表，整个 `/api/data` 就没了（这是主因）
+
+**现象**：对话卡片报 `TypeError: Failed to fetch`，5 秒一次的轮询一直失败，
+页头只是停住、不报错。
+
+**原因**：`search_notes`、`list_notes`、`list_folders` 这几个笔记工具返回的是
+Python 列表。循环把工具结果原样记进 trace（`output` 直接是数组），而 Web 拼
+`/api/data` 的时候要用 `str.lower()` 判断这次调用算成功还是失败——列表没有
+`.lower()`，于是 `collect()` 在拼 payload 的中间抛了异常。HTTP 处理器没有兜住，
+连接直接被关掉，一个字节都没回；浏览器只能把它翻译成 `TypeError: Failed to fetch`，
+而前端又把轮询的异常吞了，所以页头只是停住不动，看不出到底哪里坏了。
+
+**改法**：
+
+- 工具结果的**记录**永远是文本。循环里新增 `tools.as_text()`，把非字符串结果转成
+  JSON 文本再写进事件；模型拿到的仍然是工具原本的返回值，只有记录变了。
+- Web 读取时也做一次容错，因为磁盘上已经存着旧格式的 trace 行。
+- `/api/data` 加了兜底：出错也回一个 JSON `{"error": "..."}`，再也不会用"死连接"回答。
+- 页头在后端不健康时直接说人话：「后端没在正常回应 · 具体原因」，不再只是停住不动。
+
+### 2. 切 Agent 的时候，一个迟到的响应把"历史记录"清空了
+
+**现象**：从 General 切到 Learning，历史记录菜单有时会显示「还没有历史对话」，
+过 5 秒又自己好了。
+
+**原因**：payload 里的 `sessions_by_agent` **只给被请求的那个 Agent 填列表**，
+其他 Agent 一律是空数组；而页面是用自己的 `ACTIVE_AGENT` 去取这个字段的。
+切换 Agent 要经过两次 await，所以一次"切换前发出、切换后到达"的轮询响应，
+会拿旧 Agent 的数据去画新 Agent 的界面——菜单读到空数组，就报告"没有历史"。
+
+**改法**：payload 里加上 `agent_id`，说清楚"这是谁的数据"；前端在 `refresh()`
+里收到不是当前 Agent 的数据就直接丢掉。一个决定点，两个文件里各写一半是不行的，
+所以这里是"后端声明 + 前端校验"。
+
+### 3. localStorage 里存着一个已经不存在的 Agent，页面变白板
+
+**现象**：整个页面没有数据，页头空白，点什么都没反应。
+
+**原因**：`ACTIVE_AGENT` 存在 localStorage。如果这个 Agent 后来没了（改过
+catalog、改过名字），`/api/data` 每次都会回 `unknown agent: X`；`D` 永远是 null，
+而 `render()` 第一行就是 `if (!D) return;`——所以侧栏根本不画，连点别的 Agent 也
+救不回来（`selectAgent()` 需要 `D.agents` 才认这个点击）。这是最难受的一种坏法：
+没有数据，也没有出路。
+
+**改法**：后端说"unknown agent"时，前端把这个 id 忘掉、退回 `default`，
+并把地址栏一起改回 `#agent/default`，然后再拉一次数据。
+
+### 4. 「记忆 ▸ 语义记忆」里点「取消」没反应
+
+**现象**：点「编辑」出现编辑框，点「取消」编辑框不消失，等多久都不消失。
+
+**原因**：那行按钮写的是 `onclick="editing=false;refresh()"`。内联事件是在
+window 上求值的，写的是 bootstrap 复制出去的那份 `editing`；而 `render()` 读的是
+util.js 里那个闭包变量。所以点完之后 `window.editing` 确实变成了 `false`，
+真正决定"要不要重建页面"的那个 `editing` 却还是 `true`。
+
+**改法**：改成调用 `cancelFactEdit()`，在同一个作用域里改那个变量。
+（同样是内联事件，`models.js` 里的 `catFilter.q=this.value` 没问题——因为它改的是
+对象的属性，复制出去的是同一个对象的引用；会出问题的只有被复制的原始值。）
+
+### 5. 知识库的文件夹筛选，点了要等 5 秒
+
+**现象**：选了文件夹，列表没反应；过 5 秒（下一次轮询）才生效。
+
+**原因**：筛选是烘进视图标记里的，改文件夹必须让侧栏重建一次。原来那段代码结尾写
+的是 `location.hash = "#knowledge"`——可当前 hash 已经是 `#knowledge`，
+给同一个 hash 赋值是个空操作，不会触发 hashchange（这个坑 Phase 13 就记录过），
+所以只能等下一次轮询顺带重建。
+
+**改法**：调用同一个文件里已经为这件事写好的 `refreshKnowledgeView()`。
+
+### 6. 「新建对话」会丢掉你正在看的文档，以及 Notion 后端的那个 NameError
+
+这两条是查上面几个问题时顺手查出来的，都不难解释：
+
+- 阅读器打开文档时会往"上下文桥"里存一份快照，键是 (agent, session)；
+  空闲轮换的时候代码**特意**把它带到新线程（有注释、有测试）。但「新建对话」
+  这个按钮忘了做同样的事，于是新对话里的 Agent 看不到你还开着的文档。
+  现在 `session_action` 的 `new` 分支也调用 `rekey()`。
+- `KNOWME_EPISODIC_STORE=notion` 时，两个 Notion 缓存（客户端 + 结果）只定义在
+  `runtime.py`，靠包级别的 `_sync_state()` 复制进 `data.py`；而 HTTP 路由是直接
+  import `data` 的，从不走那个包装函数——所以真实请求里这两个名字根本不存在，
+  `collect()` 抛 NameError。现在缓存放进 `data.py`，就放在读它的代码旁边。
+
+### 怎么验证的
+
+服务端和前端都改过，所以两边都验：
+
+- **真浏览器**（Playwright + 本机 Chrome，跑在 `.knowme` 的副本上，不碰真实数据）：
+  对话正常收发；让 `/api/data` 返回错误时页头会说人话并恢复；切 Agent 时历史记录
+  不再清空；清空 localStorage 换成不存在的 Agent 后页面能自己退回 default。
+- **测试**：`evals/deterministic/test_dashboard_payload_contract.py` 是这一轮新增的
+  回归锁。先把改动 `git stash` 掉确认这 5 个测试**全都会失败**，再放回来确认全过——
+  不会失败的测试不算锁。
+- 全量：`628 passed, 62 skipped`，Ruff 通过。
+
 ## Phase 18：核心目录收敛与 Web 入口整理（2026-09-22）
 
 这一轮没有改变 Agent 的行为，专门处理代码组织问题：
