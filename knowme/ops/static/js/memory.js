@@ -8,8 +8,16 @@ function editFact(id){
   const cell = row.querySelector(".fc"); const cur = cell.textContent;
   cell.innerHTML = `<textarea class="editor" id="ef-${id}">${cur.replace(/</g,"&lt;")}</textarea>`;
   const act = row.lastElementChild;
-  act.innerHTML = `<a class="reveal" onclick="saveFact(${id})">保存</a> · <a class="reveal" onclick="editing=false;refresh()">取消</a>`;
+  act.innerHTML = `<a class="reveal" onclick="saveFact(${id})">保存</a> · <a class="reveal" onclick="cancelFactEdit()">取消</a>`;
   document.getElementById("ef-"+id).focus();
+}
+// 「取消」必须走这里，不能写成 onclick="editing=false;refresh()"：那行代码在
+// window 上求值，写的是 bootstrap 复制出去的那份 `editing`，而 render() 读的是
+// util.js 里的闭包变量（见 static/README.md 的作用域说明）。结果就是点击后
+// window.editing 确实变成了 false，页面上的编辑框却一直不消失。
+function cancelFactEdit(){
+  editing = false;
+  refresh();
 }
 async function saveFact(id){
   const v = document.getElementById("ef-"+id).value.trim();

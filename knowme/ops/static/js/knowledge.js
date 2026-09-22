@@ -184,9 +184,14 @@ function searchKnowledgeNotes(){
   if (empty) empty.style.display = visible ? "none" : "block";
 }
 
-function filterKnowledgeNotes(){
+async function filterKnowledgeNotes(){
   const folder = document.getElementById("kb-folder-filter")?.value || "";
   if (folder) localStorage.setItem("knowme_kb_folder", folder);
   else localStorage.removeItem("knowme_kb_folder");
-  location.hash = "#knowledge"; // Will refresh and filter
+  // 文件夹筛选是烘进视图标记里的（views.js 从 localStorage 读到它才过滤），所以
+  // 换文件夹必须让侧栏重建一次。原来这里写的是 location.hash = "#knowledge"，
+  // 而当前 hash 已经是 #knowledge —— 给同一个 hash 赋值是空操作，不触发
+  // hashchange，于是点击后要等下一次 5 秒轮询才生效，看起来就是「点了没反应」。
+  // refreshKnowledgeView() 就是为这个场景写的（见它的注释）。
+  await refreshKnowledgeView();
 }
