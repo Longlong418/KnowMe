@@ -34,7 +34,10 @@ const eventExpressions = [...source.matchAll(/on(?:click|input|change|focus|keyd
   .map(match => match[1]);
 const eventNames = new Set(eventExpressions.flatMap(expression =>
   [...expression.matchAll(/[A-Za-z_$][\w$]*/g)].map(match => match[0])));
-const names = declaredNames.filter(name => eventNames.has(name));
+// These handlers belong to the static HTML shell, so they are not visible in
+// the feature source's generated inline attributes.
+const shellHandlers = new Set(["openAgent"]);
+const names = declaredNames.filter(name => eventNames.has(name) || shellHandlers.has(name));
 const exports = names.length
   ? `\nreturn { ${names.map(name => `${name}: ${name}`).join(", ")} };`
   : "\nreturn {};";
