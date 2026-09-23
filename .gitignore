@@ -38,5 +38,7 @@ scripts
 read.md
 examples/*
 evals/*
-
+.claude
 Claude.md
+AGENTS.md
+images
