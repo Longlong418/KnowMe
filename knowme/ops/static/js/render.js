@@ -370,11 +370,20 @@ function paintAttach(target){
   if (!box) return;
   const items = target.attach;
   box.hidden = !items.length;
-  box.innerHTML = items.map((img, i) =>
+  const chips = items.map((img, i) =>
     `<span class="attchip"><img src="${esc(img.dataUrl)}" alt="${esc(img.name)}">
       <button onclick="dropAttach('${target.key}',${i})" title="移除">&times;</button></span>`
   ).join("") + (items.length > 1
     ? `<span class="meta" style="align-self:center">${items.length} 张</span>` : "");
+  // The hint appears only while a picture is attached — it is about the message
+  // you are sending, not a standing notice. A gateway that silently drops
+  // images answers 200 with "I don't see any image", so the app cannot detect it
+  // for you (measured: the same request bills 19 prompt tokens on
+  // mimo-v2.6-flash and 4231 on glm-5.2). One sentence, next to the picture.
+  box.innerHTML = chips + (items.length
+    ? `<div class="attnote">图只在这一轮给模型看（下一轮它不记得）。有些模型看不懂图——`
+      + `它如果说「没收到图片」，换一个支持视觉的模型再发一次。</div>`
+    : "");
 }
 
 function dropAttach(key, i){

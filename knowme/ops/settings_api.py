@@ -18,7 +18,7 @@ from knowme.ops import catalog
 
 
 def custom_provider_action(payload: dict) -> dict:
-    """Add or remove a user-defined provider — the Models page's ＋ card.
+    """Add, remove or pre-flight a user-defined provider — the Models page's ＋ card.
 
     Adding registers the spec and then hands off to the SAME apply_provider the
     edit modal uses, so a key typed into the add form is probed and written
@@ -28,9 +28,21 @@ def custom_provider_action(payload: dict) -> dict:
     needs the provider still in PROVIDERS (that is where its two .env variable
     names come from) and has to redirect the active selection before the entry
     disappears. Only then is the spec forgotten.
+
+    probe_models is the odd one out: it answers a question ("what does this
+    endpoint serve?") about a provider that does not exist yet, so it touches
+    neither providers.json nor .env. It lives here because this is the dialog
+    that asks it.
     """
     action = payload.get("action")
     provider = str(payload.get("id") or payload.get("provider") or "").strip().lower()
+    if action == "probe_models":
+        # 「获取模型列表」 in the add form, before anything is saved: the endpoint
+        # is still just a base URL + key + wire kind. Nothing is registered and
+        # nothing is written — this only answers "what can this thing serve?".
+        return catalog.models_at(str(payload.get("base_url") or ""),
+                                 str(payload.get("kind") or "openai"),
+                                 str(payload.get("key") or ""))
     if action == "add_custom":
         spec = custom_providers.spec_from(payload)
         try:

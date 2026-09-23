@@ -275,6 +275,9 @@ function openAddProviderModal(){
   markEditing();   // keep the 5s refresh loop from wiping this modal
   const root = document.getElementById("prov-modal-root");
   if (!root) return;
+  // A stale list from the last modal would be read as "this endpoint's catalog"
+  // by the save-time check below — the one thing it must never do.
+  _modalModels = [];
   root.innerHTML = `<div class="provmodal-back" onclick="closeProviderModal()">
     <div class="provmodal" onclick="event.stopPropagation()">
       <div class="u" style="display:flex;justify-content:space-between;align-items:center">
@@ -293,11 +296,12 @@ function openAddProviderModal(){
         <input type="text" id="ap-base-url" placeholder="https://api.example.com/v1" autocomplete="off" onfocus="markEditing()"></label>
       <label class="fld"><span>API 密钥 <span class="meta">（写进 .env，不写进 providers.json）</span></span>
         <input type="password" id="ap-key" placeholder="粘贴密钥" autocomplete="off" onfocus="markEditing()"></label>
-      <label class="fld"><span>主模型 <span class="srcpill apple">必填</span>
-        <span class="meta">（运行循环，需要工具调用能力）</span></span>
-        <input type="text" id="ap-model" placeholder="例如 my-model-large" autocomplete="off" onfocus="markEditing()"></label>
-      <label class="fld"><span>小模型 <span class="meta">（门控 / 摘要；留空则用主模型）</span></span>
-        <input type="text" id="ap-small-model" placeholder="例如 my-model-small" autocomplete="off" onfocus="markEditing()"></label>
+      <div style="display:flex;gap:8px;align-items:center;margin:2px 0 10px">
+        <button type="button" class="save ghost" id="ap-models" onclick="fetchAddProviderModels()">获取模型列表</button>
+        <span class="meta" id="ap-models-msg">填好上面两项后点这里，模型就能直接选</span>
+      </div>
+      ${renderModelPicker("ap-model", "主模型（运行循环，需要工具调用能力）", "")}
+      ${renderModelPicker("ap-small-model", "小模型（门控 / 摘要；留空则用主模型）", "")}
       <label class="fld"><span><input type="checkbox" id="ap-activate" checked onfocus="markEditing()"> 保存后设为当前服务商</span></label>
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="save" id="ap-save" onclick="submitAddProvider(false)">保存</button>
@@ -307,13 +311,46 @@ function openAddProviderModal(){
   document.getElementById("ap-id").focus();
 }
 
-async function submitAddProvider(force){
+// Ask the endpoint what it serves, BEFORE anything is saved. A model id typed
+// from memory is the one thing the save cannot check for you: the endpoint
+// accepts the request and only some later turn 400s (see unlistedModel).
+async function fetchAddProviderModels(){
   const value = id => document.getElementById(id)?.value ?? "";
+  const msg = document.getElementById("ap-models-msg");
+  const button = document.getElementById("ap-models");
+  const label = button?.textContent;
+  if (button){ button.disabled = true; button.textContent = "正在获取…"; }
+  if (msg) msg.textContent = "";
+  let r;
+  try {
+    r = await postJSON("/api/providers", {action: "probe_models", kind: value("ap-kind"),
+      base_url: value("ap-base-url"), key: value("ap-key")});
+  } catch(e){ r = {ok: false, error: e.message || String(e)}; }
+  if (button){ button.disabled = false; button.textContent = label; }
+  if (!r.ok){
+    if (msg) msg.textContent = `没拿到模型列表：${r.error || "未知错误"}（仍可手动输入模型 ID）`;
+    return;
+  }
+  const models = r.models || [];
+  setupModelPickers(models, ADD_PROVIDER_PICKERS);
+  setModelPickerMeta("点右边的 ▾ 选一个；也可以直接输入。", ADD_PROVIDER_PICKERS);
+  if (msg) msg.textContent = `这个端点有 ${models.length} 个模型。`;
+  toggleModelPicker("ap-model");   // choosing one is the obvious next step
+}
+
+async function submitAddProvider(force, confirmed){
+  const value = id => document.getElementById(id)?.value ?? "";
+  const msg = document.getElementById("ap-msg");
+  // Checked before the button goes busy, so a blocked save does not flash
+  // "正在验证密钥与端点…" and leave a red dot behind.
+  if (!force && !confirmed){
+    const bad = unlistedModel(["ap-model", "ap-small-model"]);
+    if (bad && msg){ msg.innerHTML = unlistedModelNotice(bad, "submitAddProvider(false, true)"); return; }
+  }
   const payload = {action: "add_custom", id: value("ap-id"), label: value("ap-label"),
     kind: value("ap-kind"), base_url: value("ap-base-url"), key: value("ap-key"),
     model: value("ap-model"), small_model: value("ap-small-model"),
     activate: !!document.getElementById("ap-activate")?.checked, force: !!force};
-  const msg = document.getElementById("ap-msg");
   const button = document.getElementById("ap-save");
   const label = button?.textContent;
   if (button){ button.disabled = true; button.textContent = "正在保存并验证…"; }
@@ -405,7 +442,7 @@ function closeProviderModal(){
 // Populate both modal pickers from one request: this provider's live catalog,
 // or its defaults when there is no catalog. Manual typing always still works.
 async function loadModalModels(provider){
-  setupModelPickers([], provider);
+  setupModelPickers([]);
   setModelPickerMeta("正在加载模型…");
   let data;
   try {
@@ -415,7 +452,11 @@ async function loadModalModels(provider){
   } catch(e){
     data = {models: [], listed: false, error: e.message || String(e)};
   }
-  setupModelPickers(data.models || [], provider);
+  // A 10-second fetch can outlive the modal it was started for — by then another
+  // modal may be open, and _modalModels belongs to whatever is on screen. Its
+  // pickers are how we know which modal that is.
+  if (!document.getElementById("pm-model")) return;
+  setupModelPickers(data.models || []);
   if (!data.listed){
     setModelPickerMeta(data.error && !(data.models || []).length
       ? "无法加载模型目录——你仍可手动输入任意模型 ID。"
@@ -425,10 +466,42 @@ async function loadModalModels(provider){
   }
 }
 
-// Shared model list for the currently open modal.
+// Shared model list for the currently open modal. Only setupModelPickers writes
+// it, and every modal open resets it, so it always describes the modal on screen.
 let _modalModels = [];
 let _activeModelPicker = null;
 let _outsidePickerListener = false;
+
+// The model fields of whichever modal is open.
+const PROVIDER_PICKERS = ["pm-model", "pm-small-model"];
+const ADD_PROVIDER_PICKERS = ["ap-model", "ap-small-model"];
+
+// A model id that is NOT in this endpoint's own catalog is how `zhiyao` ended up
+// with `glm` while its gateway only serves `glm-5.2`. Nothing rejects it at save
+// time — the endpoint takes the request and answers on the turns that matter,
+// which is the gate (it runs on the SMALL model, so a bad small model 400s on
+// every single turn and quietly fails open). The only symptom was "memory search
+// never seems to do anything". So compare before saving — and only when there is
+// a catalog to compare against: an endpoint that lists nothing is not evidence.
+function unlistedModel(ids){
+  const known = _modalModels.map(m => m.id);
+  if (!known.length) return null;
+  for (const id of ids){
+    const value = (document.getElementById(id)?.value || "").trim();
+    if (value && !known.includes(value)) return {id, value};
+  }
+  return null;
+}
+
+// One sentence, both dialogs, with the way past it spelled out: an id the
+// endpoint really serves but doesn't list is a legitimate thing to save.
+function unlistedModelNotice(bad, retryCall){
+  const names = _modalModels.map(m => m.id);
+  const shown = names.slice(0, 8).join("、") + (names.length > 8 ? " 等" : "");
+  return `这个端点的模型列表里没有 <b>${esc(bad.value)}</b>，它有的是：${esc(shown)}。`
+    + `填错了的话，门控（走小模型）每一轮都会报错。`
+    + ` <button class="save ghost conn-force" onclick="${retryCall}">确实存在，仍然保存</button>`;
+}
 
 function escAttr(s){
   return esc(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -450,9 +523,9 @@ function renderModelPicker(id, label, value){
   </label>`;
 }
 
-function setupModelPickers(models, provider){
+function setupModelPickers(models, ids = PROVIDER_PICKERS){
   _modalModels = Array.isArray(models) ? models : [];
-  ["pm-model", "pm-small-model"].forEach(id => {
+  ids.forEach(id => {
     const input = document.getElementById(id);
     if (!input) return;
     const itemsBox = document.getElementById(id + "-items");
@@ -485,8 +558,8 @@ function setupModelPickers(models, provider){
   }
 }
 
-function setModelPickerMeta(message){
-  ["pm-model", "pm-small-model"].forEach(id => {
+function setModelPickerMeta(message, ids = PROVIDER_PICKERS){
+  ids.forEach(id => {
     const meta = document.getElementById(id + "-meta");
     if (meta) meta.textContent = message;
   });
@@ -592,11 +665,21 @@ async function submitProviderModal(provider, payload, activeId){
   await refresh();
 }
 
-async function saveProviderModal(provider){
+async function saveProviderModal(provider, confirmed){
   const st = (D && D.settings) || {};
   const payload = modalKeyPayload(provider);
   payload.activate = false;
   if (provider === st.provider){
+    // This is the dialog where a wrong model id gets FIXED, so it is also where
+    // a new wrong one would be typed. Same check as the ＋ card.
+    if (!confirmed){
+      const bad = unlistedModel(PROVIDER_PICKERS);
+      const msg = document.getElementById("pm-msg");
+      if (bad && msg){
+        msg.innerHTML = unlistedModelNotice(bad, `saveProviderModal('${esc(provider)}', true)`);
+        return;
+      }
+    }
     payload.model = document.getElementById("pm-model")?.value ?? "";
     payload.small_model = document.getElementById("pm-small-model")?.value ?? "";
   }

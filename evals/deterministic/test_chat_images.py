@@ -14,6 +14,8 @@ Three separate promises, each with its own failure mode:
 
 import base64
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -137,6 +139,85 @@ def test_a_timeout_is_not_blamed_on_the_model():
     for exc in (TimeoutError("read timed out"),
                 RuntimeError("401 invalid api key")):
         assert image_hint("glm-5.2", exc) == str(exc)
+
+
+# --- the hint that the reader of the message needs --------------------------
+# image_hint above covers the model that REFUSES a picture. The measured case is
+# worse: a gateway that accepts the request, drops the image and answers 200 —
+# the same turn billed 19 prompt tokens on mimo-v2.6-flash and 4231 on glm-5.2.
+# Nothing the server can see, so the one defence is a sentence next to the
+# picture. Same node harness as test_reader_frontend (no build step, no runner).
+
+RENDER_JS = (Path(__file__).resolve().parents[2]
+             / "knowme" / "ops" / "static" / "js" / "render.js")
+
+HARNESS = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[2], "utf8");
+let failures = 0;
+const assert = (ok, msg) => {
+  if (!ok) failures++;
+  console.log((ok ? "PASS  " : "FAIL  ") + msg);
+};
+
+// ---- paintAttach(): the strip, and the one sentence that goes with it -------
+(function testPaintAttach() {
+  const slice = src.slice(src.indexOf("function attThumbs("),
+                          src.indexOf("function wireComposer("));
+  if (!slice) { assert(false, "render.js no longer has the attachment section"); return; }
+  const box = { hidden: null, innerHTML: "" };
+  const document = { getElementById: id => (id === "datt" ? box : null) };
+  const esc = s => String(s === undefined || s === null ? "" : s);
+  const alert = () => {};
+  // dropAttach() looks the target up by key, so these are the real targets here.
+  const MAIN_CHAT = { key: "d", attach: [] };
+  const ASK_CHAT = { key: "a", attach: [] };
+  eval(slice);
+
+  paintAttach(MAIN_CHAT);
+  assert(box.hidden === true, "with nothing attached the strip is collapsed");
+  assert(!/支持视觉/.test(box.innerHTML), "with nothing attached nothing is said about pictures");
+
+  MAIN_CHAT.attach.push({ name: "shot.png", dataUrl: "data:image/png;base64,AAAA", bytes: 3 });
+  paintAttach(MAIN_CHAT);
+  assert(box.hidden === false, "the strip appears with a picture");
+  assert(/<img src="data:image\/png;base64,AAAA"/.test(box.innerHTML),
+         "the thumbnail is the local data URL");
+  assert(/没收到图片/.test(box.innerHTML),
+         "the hint names the symptom the user will actually see");
+  assert(/支持视觉/.test(box.innerHTML), "the hint says what to do about it");
+  assert(/这一轮/.test(box.innerHTML), "the hint says the picture is only for this turn");
+
+  dropAttach("d", 0);
+  assert(MAIN_CHAT.attach.length === 0 && box.hidden === true,
+         "removing the last picture collapses the strip again");
+  assert(!/支持视觉/.test(box.innerHTML), "and takes the hint with it");
+
+  MAIN_CHAT.attach = [{ name: "a.png", dataUrl: "d1" }, { name: "b.png", dataUrl: "d2" }];
+  paintAttach(MAIN_CHAT);
+  assert(/2 张/.test(box.innerHTML), "two pictures are counted");
+})();
+
+// Without this the FAIL lines above print and node still exits 0 — the first
+// version of this harness did exactly that, and a reverted render.js "passed".
+process.exit(failures ? 1 : 0);
+"""
+
+
+def test_the_composer_says_what_a_picture_will_and_will_not_do(tmp_path):
+    """Runs the real paintAttach() in node against a DOM stub: the hint is shown
+    exactly while something is attached, and nowhere else."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed — the frontend has no other test runner")
+    harness = tmp_path / "attach_harness.js"
+    harness.write_text(HARNESS, encoding="utf-8")
+
+    proc = subprocess.run([node, str(harness), str(RENDER_JS)],
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+
+    print(proc.stdout)
+    assert proc.returncode == 0, f"frontend checks failed:\n{proc.stdout}\n{proc.stderr}"
 
 
 # --- the turn itself --------------------------------------------------------

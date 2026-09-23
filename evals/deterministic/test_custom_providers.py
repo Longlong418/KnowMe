@@ -225,6 +225,73 @@ def test_the_catalog_asks_the_custom_endpoint(home, monkeypatch, kind, expected)
     assert captured["url"] == "https://api.mylab.dev" + expected
 
 
+@pytest.mark.parametrize(("kind", "expected"), [("openai", "/models"), ("anthropic", "/v1/models")])
+def test_the_add_form_can_list_an_endpoint_that_is_not_saved_yet(home, monkeypatch, kind, expected):
+    """The ＋ card's whole problem is that it asks you to TYPE a model id. The
+    route behind 「获取模型列表」 answers before anything is registered: nothing in
+    providers.json, nothing in .env — it only asks the base URL what it serves."""
+    captured = {}
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    def fake_urlopen(req, timeout=10):
+        captured["url"] = req.full_url
+        captured["auth"] = req.get_header("Authorization")
+        return Response(json.dumps({"data": [{"id": "my-model-large"}]}).encode())
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    catalog._models_cache.clear()
+
+    result = custom_provider_action({"action": "probe_models", "kind": kind,
+                                     "base_url": "https://api.mylab.dev/",
+                                     "key": "sk-typed"})
+
+    assert result["ok"] is True
+    assert [m["id"] for m in result["models"]] == ["my-model-large"]
+    # The same listing convention list_models resolves to, minus catalog_url.
+    assert captured["url"] == "https://api.mylab.dev" + expected
+    # The key in the FORM is what gets used — there is no saved key to fall back on.
+    assert captured["auth"] == "Bearer sk-typed"
+    assert not (home / "providers.json").exists(), "probe_models must not register anything"
+    assert "my_lab" not in PROVIDERS
+
+
+def test_listing_an_unsaved_endpoint_reports_the_reason_instead_of_guessing(home, monkeypatch):
+    """Nothing is known about this endpoint, so there are no default models to fall
+    back on — the reason IS the answer to "why is the list empty"."""
+
+    def fake_urlopen(req, timeout=10):
+        raise OSError("HTTP Error 401: Unauthorized")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    catalog._models_cache.clear()
+
+    result = custom_provider_action({"action": "probe_models", "kind": "openai",
+                                     "base_url": "https://api.mylab.dev", "key": "sk-bad"})
+
+    assert result["ok"] is False
+    assert result["models"] == []
+    assert "401" in result["error"]
+
+
+def test_listing_without_a_base_url_says_so_without_calling_anyone(home, monkeypatch):
+    def exploding_urlopen(req, timeout=10):
+        raise AssertionError("没有 Base URL 时不该发请求")
+
+    monkeypatch.setattr("urllib.request.urlopen", exploding_urlopen)
+
+    result = custom_provider_action({"action": "probe_models", "kind": "openai",
+                                     "base_url": "  ", "key": "sk-x"})
+
+    assert result["ok"] is False
+    assert result["error"] == "先填 Base URL"
+
+
 def test_removing_hands_the_selection_back_to_a_builtin_before_it_disappears(home):
     """get_client reads PROVIDERS[settings.provider] directly, so a selection
     left pointing at a removed provider raises KeyError on the next message
@@ -354,7 +421,12 @@ def test_the_add_card_is_wired_to_the_backend():
 
     assert 'action: "add_custom"' in source
     assert 'action: "remove_custom"' in source
-    for field in ("ap-id", "ap-label", "ap-kind", "ap-base-url", "ap-key",
-                  "ap-model", "ap-small-model", "ap-activate"):
+    assert 'action: "probe_models"' in source, "「获取模型列表」 lost its route"
+    for field in ("ap-id", "ap-label", "ap-kind", "ap-base-url", "ap-key", "ap-activate"):
         assert f'id="{field}"' in source, f"the add form lost {field}"
-    assert "${p.custom ?" in source, "删除 would show on built-in cards too"
+    # The two model fields are pickers now — their <input> is generated from the
+    # id, so the id is what has to be here (same ids, different markup).
+    for field in ("ap-model", "ap-small-model"):
+        assert f'renderModelPicker("{field}"' in source, f"the add form lost {field}"
+    assert 'id="ap-models"' in source, "「获取模型列表」 button is gone"
+    assert "unlistedModel(" in source, "保存时不再比对这个端点的模型目录"

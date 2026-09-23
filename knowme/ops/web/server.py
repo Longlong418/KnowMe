@@ -263,7 +263,7 @@ class Handler(BaseHTTPRequestHandler):
                 # A payload that only toggles availability goes to the enable/
                 # disable path; the ＋ card's add/remove goes to its own action;
                 # everything else is the existing provider apply.
-                if payload.get("action") in ("add_custom", "remove_custom"):
+                if payload.get("action") in ("add_custom", "remove_custom", "probe_models"):
                     out = custom_provider_action(payload)
                 elif "disabled" in payload and set(payload) <= {"provider", "disabled"}:
                     out = asdict(apply_provider_disabled(payload.get("provider", ""),

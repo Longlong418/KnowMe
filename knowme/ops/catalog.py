@@ -55,9 +55,6 @@ def list_models(provider: str | None = None, *, use_cache: bool = True) -> dict:
     two known defaults when no catalog exists. OpenRouter entries carry free /
     tool-support / context metadata so the picker can surface the $0
     tool-capable models. Cached 5 minutes."""
-    import time
-    import urllib.request
-
     from knowme.core import custom_providers
     from knowme.core.models import PROVIDERS
 
@@ -94,26 +91,45 @@ def list_models(provider: str | None = None, *, use_cache: bool = True) -> dict:
         return {**out, "listed": False,
                 "models": _known_default_ids(prov, out, name == s.provider)}
 
+    # Use this provider's own key; s.api_key only holds the ACTIVE provider's.
+    key = ((s.api_key if name == s.provider else "") or os.getenv(prov.key_env, "")).strip()
+    models, error = _fetch_models(url, key, prov.key_env, use_cache=use_cache)
+    if error:
+        # still offer the provider's known defaults so the picker isn't empty
+        return {**out, "listed": False,
+                "models": models or _known_default_ids(prov, out, name == s.provider),
+                "error": error}
+    return {**out, "listed": True, "models": models}
+
+
+def _fetch_models(url: str, key: str, key_label: str = "API key",
+                  *, use_cache: bool = True) -> tuple[list[dict], str]:
+    """Ask ONE url for its model list: (models, error). `error` is "" when the
+    endpoint answered, and on failure `models` is empty with the reason second —
+    the caller decides what to show instead of an empty list.
+
+    Cached 5 minutes; a failure is cached ~1 minute WITH the reason, so an
+    unreachable catalog can't stall the dashboard's 5-second poll for 10s and a
+    cache hit still tells you why it is empty. `key_label` only names the
+    variable in the bad-key message.
+    """
+    import time
+    import urllib.request
+
     cached = _models_cache.get(url) if use_cache else None
     if cached and time.time() - cached[0] < 300:
         _ts, cmodels, cerr = cached          # cerr None on a real listing
-        r = {**out, "listed": cerr is None, "models": cmodels}
-        if cerr:
-            r["error"] = cerr
-        return r
-    # Use this provider's own key; s.api_key only holds the ACTIVE provider's.
-    key = ((s.api_key if name == s.provider else "") or os.getenv(prov.key_env, "")).strip()
+        return cmodels, cerr or ""
     # HTTP headers must be latin-1; a key with a stray non-ASCII char (a smart
     # arrow/quote or a line-break from a bad paste) would otherwise crash the
     # whole listing with an opaque codec error and silently drop back to two
     # defaults. Catch it here with a message that actually says how to fix it.
+    # Not cached: it is a fact about the input, not about the endpoint.
     try:
         key.encode("latin-1")
     except UnicodeEncodeError:
-        msg = (f"{prov.key_env} contains a non-ASCII character — re-paste the key "
-               f"(no spaces, line breaks, or arrows).")
-        return {**out, "listed": False,
-                "models": _known_default_ids(prov, out, name == s.provider), "error": msg}
+        return [], (f"{key_label} contains a non-ASCII character — re-paste the key "
+                    f"(no spaces, line breaks, or arrows).")
     # send both auth styles — Bearer for OpenAI-compatible catalogs, x-api-key +
     # version for Anthropic's; each server reads the header it knows.
     # Set a browser-like User-Agent: some OpenAI-compatible proxies (e.g.
@@ -134,13 +150,8 @@ def list_models(provider: str | None = None, *, use_cache: bool = True) -> dict:
             msg = f"{msg} — {exc.read().decode()[:160]}"
         except Exception:
             pass
-        # still offer the provider's known defaults so the picker isn't empty
-        known = _known_default_ids(prov, out, name == s.provider)
-        # cache the failure (defaults + reason) for ~1 minute so an unreachable
-        # catalog doesn't stall every 5-second dashboard poll for 10s — and so a
-        # cache hit still shows the defaults and the reason, not a blank list.
-        _models_cache[url] = (time.time() - 240, known, msg)
-        return {**out, "listed": False, "models": known, "error": msg}
+        _models_cache[url] = (time.time() - 240, [], msg)
+        return [], msg
     models = []
     for m in data.get("data", []):
         mid = m.get("id", "")
@@ -172,7 +183,29 @@ def list_models(provider: str | None = None, *, use_cache: bool = True) -> dict:
         models.append(entry)
     models.sort(key=lambda x: (not x["free"], x["tools"] is False, x["id"]))
     _models_cache[url] = (time.time(), models, None)   # None error = a real listing
-    return {**out, "listed": True, "models": models}
+    return models, ""
+
+
+def models_at(base_url: str, kind: str = "openai", key: str = "") -> dict:
+    """The model list at an endpoint that is NOT saved yet — the add-provider
+    dialog's 「获取模型列表」 button, so the model field offers what the endpoint
+    actually serves instead of asking you to type an id from memory.
+
+    Same fetch and same parsing as `list_models` (`_fetch_models`), with one
+    deliberate difference: there is no provider to fall back to. Nothing is known
+    about an unsaved endpoint, so a listing that fails reports its reason rather
+    than a made-up default list — the reason IS the answer to "why is this empty".
+    """
+    base = (base_url or "").strip().rstrip("/")
+    if not base:
+        return {"ok": False, "error": "先填 Base URL", "models": []}
+    # The same listing convention list_models resolves to, minus the providers
+    # that carry an explicit catalog_url (an unsaved endpoint has none).
+    url = base + ("/v1/models" if kind == "anthropic" else "/models")
+    models, error = _fetch_models(url, (key or "").strip(), "API 密钥")
+    if error:
+        return {"ok": False, "error": error, "models": [], "url": url}
+    return {"ok": True, "models": models, "url": url}
 
 
 def _models_json() -> Path:
