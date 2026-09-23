@@ -104,7 +104,16 @@ START → plan(拆子问题) → research(研究一轮) ⟲ → synthesize(写�
   `git show HEAD` 那份代码的输出冻在 `data/graph_charts_frozen.json` 里，改完逐字节比。
   反向也验过：把回边识别掐掉，自环节点会被推到第 8 列、11 列的画布上，断言必须红；
   把按轮次存的 key 掐掉，三张一样的卡片立刻回来。
-* 全量 `pytest evals/deterministic -q` → **774 passed / 62 skipped / 0 failed**；
+* **工作流自己的 19 条**（`evals/deterministic/test_deep_research_workflow.py`，全离线、
+  不用模型）：两个方向都钉住了——"模型说缺口没有了"停不下来（用一个满口答应收工、工具却一直
+  吐新链接的假 round 驱动），"这一轮一个新链接都没有"一定停得下来；跑满三轮之后 `errors`
+  必须是空的（这是从外面唯一能看出**刹车是 router 踩的、`max_visits` 没被碰到**的办法）；
+  一个炸掉的 round 也得留下话让汇总有东西可写；工具白名单恰好是两个（读源码断言，能力这种事
+  没有运行时信号）；hostile 主题表断言报告永远落在 `outbox/` 里。
+  **反向验证**：把 `stop_reason` 的轮次判断掐掉，三条立刻红，而且红出来的正是上面第三条说的
+  那种失败——path 停在 `['plan','research','research','research','research']`，**汇总和存档
+  根本没跑，一份报告都没有**。这就是"为什么轮次预算不能交给 `max_visits`"的实证。
+* 全量 `pytest evals/deterministic -q` → **793 passed / 62 skipped / 0 failed**；
   `ruff check knowme` 干净。
 
 ## Phase 36：删掉 Learning Agent（2026-09-23）
@@ -2652,7 +2661,7 @@ cd D:\LLM\Agent\knowme-agent
   `.js` 拼进同一个 `new Function`，重复的 `const`/`function` 是**整个应用**的 parse error
   （白屏），所以每个名字都带 `research`/`deepResearch` 前缀，并且有一条测试盯着这件事。
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 Web**。
-- **当前基线**（2026-09-23 Phase 37 之后）：`pytest evals/deterministic -q` → **774 passed /
+- **当前基线**（2026-09-23 Phase 37 之后）：`pytest evals/deterministic -q` → **793 passed /
   62 skipped / 0 failed**；`ruff check knowme` 干净。`evals/judge/` 那 26 个用例缺 `deepeval`，
   单独跑那个目录会报 ERROR，跟着全量跑表现为 skipped——与改动无关，别看错。
   （Phase 26 时的 694/89/0 里面那 89 个 skipped 包含 judge 那批。）
