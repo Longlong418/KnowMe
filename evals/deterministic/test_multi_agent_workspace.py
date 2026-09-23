@@ -15,11 +15,12 @@ from knowme.ops.web import _thread_history, session_list
 def test_builtin_profiles_are_small_explicit_agent_specs():
     profiles = list_profiles()
     assert [profile.id for profile in profiles] == [
-        "default", "coding", "learning", "research", "reader"
+        "default", "coding", "research", "reader"
     ]
     assert all(profile.spec.name == profile.id for profile in profiles)
     assert get_profile("default").spec.tools is None
-    assert "get_document" in get_profile("learning").spec.tools
+    # Research carries the reading/note toolset, so it can work from a document
+    assert "get_document" in get_profile("research").spec.tools
     # the reader agent lives in the reading pane and works from the document
     # library; it deliberately has no search_web (Research is next door for that)
     reader_tools = get_profile("reader").spec.tools

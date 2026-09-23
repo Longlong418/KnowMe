@@ -89,21 +89,6 @@ PROFILES: tuple[AgentProfile, ...] = (
         ),
     ),
     AgentProfile(
-        id="learning",
-        name="Learning",
-        icon="◈",
-        description="围绕正在阅读的材料解释、提问、做笔记并形成知识。",
-        spec=AgentSpec(
-            name="learning",
-            system_prompt=(
-                "You are the Learning Agent. Work from the open reading material and "
-                "the user's selection. Explain difficult ideas step by step, ask useful "
-                "questions, and turn important insights into concise notes when asked."
-            ),
-            tools=_READER_TOOLS,
-        ),
-    ),
-    AgentProfile(
         id="research",
         name="Research",
         icon="◎",

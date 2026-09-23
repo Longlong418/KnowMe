@@ -67,7 +67,7 @@ def test_dashboard_merge_action_does_not_care_which_agent_is_selected(tmp_path, 
 
     assert web.memory_action({
         "action": "merge_fact", "id": source_id,
-        "target_id": target_id, "agent_id": "learning",
+        "target_id": target_id, "agent_id": "research",
     })["ok"] is True
     # Merging the same pair twice is still a no-op — the source row is gone.
     assert web.memory_action({

@@ -59,7 +59,7 @@ preserving their current sessions. **Import the module, not a mutable slot**:
 ```python
 from knowme.ops import browser_agent
 browser_agent.current()          # sees a later swap
-browser_agent.current("learning")
+browser_agent.current("research")
 browser_agent.current_agents()   # snapshot of the live pool
 ```
 

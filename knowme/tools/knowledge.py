@@ -224,7 +224,7 @@ def get_linked_notes(conn: sqlite3.Connection, note_id: str,
                      agent_id: str | None = None) -> list[Note]:
     """Get notes that link TO this note.
 
-    A [[link]] in a note the Learning agent wrote can point at a note the Reader
+    A [[link]] in a note the Research agent wrote can point at a note the Reader
     agent wrote — the human's knowledge base is one graph, so the backlinks
     shown next to a note have to cross Agents too, or a link you can click
     would have no backlink on the other end.

@@ -1,5 +1,96 @@
 # KnowMe 开发文档
 
+## Phase 36：删掉 Learning Agent（2026-09-23）
+
+用户的原话：「现在这个learning agent有点多余了 把这个learning agent 删掉吧」。
+
+### 一、Learning Agent 是什么，为什么它多余
+
+它是 `knowme/agents/catalog.py` 里的一个 **profile**（花名册上的一行）：id 是 `learning`，
+名字 Learning，图标 `◈`，系统提示词写的是"围绕你正在阅读的材料解释、提问、做笔记"。
+
+**它和 Reader 是重叠的。** Reader 就贴在阅读器里，专对着你打开的那份文档说话；Learning 是
+一个独立的聊天窗口，却说自己是"围绕正在阅读的材料"。同一个活儿说了两遍，而且真正能拿到
+"你正在读什么"的是 Reader —— 文档是随那一轮上下文自动进去的。所以它确实是多余的。
+
+### 二、改了什么（三处代码）
+
+1. `knowme/agents/catalog.py`：**整块 profile 删掉**。剩下的四个是
+   `default` / `coding` / `research` / `reader`。
+2. `knowme/ops/static/index.html`：侧栏那个按钮删掉 —— 现在侧栏只有 General / Coding /
+   Research 三个入口。（Reader 一直就不在侧栏，见 Phase 20。）
+3. 两个测试里拿 `learning` 当样本 Agent 的地方，换成 `research`。**为什么非改不可**见下一节。
+
+`_READER_TOOLS` 这个工具集合留着没动：它本来就是 learning 和 research 共用的，现在归
+research 用。`research` 的 `get_document` 断言也因此从 learning 挪了过去。
+
+### 三、为什么有两个测试非改不可（这是个坑）
+
+大部分测试里写的 `agent_id="learning"` **只是一个标签**，传给 `create_note(conn, 标题,
+agent_id=...)` 这类纯数据库函数，它们**不查花名册**，所以那些测试删了 Agent 照样绿。
+
+但**走网页那一条路会查花名册**：`/api/knowledge`、`/api/memory` 进门前都先
+`get_profile(agent_id)`。于是 `test_knowledge_base.py` 和 `test_memory_merge.py` 里那两条
+通过 `web.knowledge_action` / `web.memory_action` 发出去的请求，删掉 profile 之后直接
+`ValueError: unknown agent: learning` —— 这是全量跑出来的，不是猜的。
+
+修法就是把样本 Agent 换成还在的 `research`。换谁都不影响那两条测试想验的事：
+"笔记跨 Agent 看得到、编辑不改变归属"、"记忆是一个池子，合并跟当前选的是谁无关"。
+
+`test_multi_agent_workspace.py` 本来就把名单**钉死**成
+`["default","coding","learning","research","reader"]` —— 这正是它该起的作用：**名单变了它就
+得红**。改成四个，并把它那条"某个 profile 带着自己的工具白名单"的断言从 learning 挪到
+research。
+
+### 四、删一个 Agent 最容易漏的，不是侧栏那个按钮
+
+是**浏览器里记着的那个 id**。`chat.js` 把当前 Agent 存在 localStorage
+（`knowme_active_agent`），而且 `selectAgent()` 不管有没有聊天都会写 —— **你点过 Learning
+一次，这个键就留下了。**
+
+删掉 profile 之后，下次开页面就是拿一个不存在的 id 去问 `/api/data`，服务端回一句
+`{"error": "ValueError: unknown agent: learning"}`。这时候页面 **`D` 是空的，而 `render()`
+第一行看 `D` 就返回** —— 白屏，而且**没有出路**：侧栏要靠 `D.agents` 才画得出来，点别的
+Agent 也没用，因为 `selectAgent()` 同样要 `D.agents` 才肯接受。
+
+`chat.js` 里本来就有一个 `recoverUnknownAgent()` 专治这个（注释里写着"改过目录、改过名字"），
+但**它此前一次都没有被测过** —— 这轮改动是它第一次真的会被走到。所以这轮的重点验证就是它。
+
+### 五、验证
+
+* **真实 Chrome，14/14**（`.claude/verify_learning_gone.py`，临时 home + 随机端口）：
+  * 服务端 `/api/agents` 回 `['default','coding','research','reader']`；拿 learning 去问
+    `/api/data` 得到明确的 `unknown agent`，**不是空页、也不是 500**；
+  * 干净浏览器：侧栏正好三个入口，整页文本里再也搜不到 `Learning`；
+  * **老浏览器**（先把 localStorage 写成 `learning`，再真正重新开机）：页面自己忘掉那个 id，
+    `localStorage` 变回 `default`，地址栏改回 `#agent/default`，页面是画出来的，侧栏高亮落在
+    General，零报错；
+  * 恢复之后照常能点 Research 进去。
+* **反向验证（关键的一条）**：把 `main.js` 里那句
+  `if (!D && !forgotUnknownAgent && /unknown agent/i.test(fetchError)) recoverUnknownAgent();`
+  掐成 `if (false)`，同一个脚本站到 `.chatlog` **15 秒都等不到** —— 就是上面说的白屏。
+  把这一行恢复，14/14 立刻回来。**这是"救回来的是这一行"的证据，而不是碰巧页面自己好了。**
+* 全量：`pytest evals/deterministic -q` → **760 passed / 62 skipped / 0 failed**（和删之前
+  一样，一条测试都没少）；`ruff check knowme` 干净。
+
+> **这轮踩的一个测量坑**：第一版脚本是 `goto(首页)` → 写 localStorage →
+> `goto(首页 + "#agent/learning")`。**只改 hash 是同文档跳转，脚本根本不重跑** —— 于是
+> `ACTIVE_AGENT` 还是上一次开机读到的 `default`，页面一切正常，可 localStorage 里却明明白白
+> 写着 `learning`，两条断言红得莫名其妙。真正要的是 `reload()`（脚本重跑、开机时重新读
+> localStorage）。教训：**要验证"重新开机会怎样"，就得真的重新开机。**
+
+### 六、你的数据一点没动
+
+删 profile 只删"花名册上的一行"，**数据库里那些行还是你的**。查过真实的
+`.knowme/state.db`：
+
+* `chat_log` 里属于 learning 的会话：**0 条**（你没真的跟它聊过，所以没有任何对话会变成孤儿）；
+* `notes` 里 4 条盖着 `learning` 标签的：**照样看得见** —— 知识库从 Phase 15 起就是"一个
+  知识库"，列表、搜索、反链都跨 Agent，`agent_id` 只是"谁写的"这个标签；
+* 事实和情景记忆同理，它们本来就是一个池子，标签不影响看得见看不见。
+
+**唯一按 Agent 分开的是对话**，而对话里没有 Learning 的。
+
 ## Phase 35：轮询只留在真需要它的页面上（2026-09-23）
 
 ### 一、原来在轮询什么

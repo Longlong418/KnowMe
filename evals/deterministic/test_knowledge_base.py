@@ -84,16 +84,16 @@ def test_dashboard_and_the_agents_tools_both_see_every_note(tmp_path, monkeypatc
         "action": "create", "title": "Coding note", "content": "coding only",
         "agent_id": "coding",
     })["note"]
-    learning = web.knowledge_action({
-        "action": "create", "title": "Learning note", "content": "learning only",
-        "agent_id": "learning",
+    research = web.knowledge_action({
+        "action": "create", "title": "Research note", "content": "research only",
+        "agent_id": "research",
     })["note"]
 
     # The list spans Agents, and still says who wrote what — that label is what
     # the view shows on each card.
     listed = web.knowledge_action({"action": "list", "agent_id": "default"})
     assert {n["title"]: n["agent_id"] for n in listed["notes"]} == {
-        "Coding note": "coding", "Learning note": "learning"}
+        "Coding note": "coding", "Research note": "research"}
 
     # A note you can see, you can open, save and delete — from any Agent. The
     # note does not change owner when you do.
@@ -106,16 +106,16 @@ def test_dashboard_and_the_agents_tools_both_see_every_note(tmp_path, monkeypatc
 
     # The Agents' own tools reach the same notes. This is the half that changed:
     # the Coding agent's tool registry, not just the browser, now finds the note
-    # the Learning agent wrote.
+    # the Research agent wrote.
     conn = connect(tmp_path)
     coding_tools = make_knowledge_tools(conn, "coding")
-    found = coding_tools["search_notes"].fn("learning only")
-    assert [n["title"] for n in found] == ["Learning note"]
-    assert coding_tools["get_note"].fn(learning["id"])["title"] == "Learning note"
+    found = coding_tools["search_notes"].fn("research only")
+    assert [n["title"] for n in found] == ["Research note"]
+    assert coding_tools["get_note"].fn(research["id"])["title"] == "Research note"
     # Asking for one Agent explicitly still narrows — that path is kept for the
     # backends that partition remotely, so it must not rot.
     assert [n["content"] for n in list_notes(conn, agent_id="coding")] == ["edited"]
-    assert get_note(conn, learning["id"], "coding") is None
+    assert get_note(conn, research["id"], "coding") is None
     # create_note still stamps its own Agent, so the label stays truthful.
     assert coding_tools["create_note"].fn("From coding")["agent_id"] == "coding"
 
