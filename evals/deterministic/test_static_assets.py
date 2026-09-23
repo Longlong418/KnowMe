@@ -113,31 +113,34 @@ def test_inline_handlers_are_defined():
     assert not missing, f"inline handlers call undefined functions: {sorted(missing)}"
 
 
-def test_the_chat_thread_strips_every_shape_of_tool_block():
-    """A message bubble hides the stored tool block; it has to hide TWO shapes.
+def test_the_chat_thread_splits_off_every_shape_of_tool_block():
+    """The reply drawn in a bubble must not CONTAIN the stored tool block; it
+    has to match TWO shapes.
 
     chat_log is never rewritten, so rows written before the per-entry format are
     still there next to rows written after it. When the format moved, the regex
-    in render.js kept matching only the old one and silently stopped stripping
+    in render.js kept matching only the old one and silently stopped matching
     anything — the dashboard started rendering whole tool outputs inside the
     chat bubble, with no error anywhere. A cross-language coupling with no test
     runner to notice, which is why the pattern is pulled out of the JS and
     applied here to strings the BACKEND actually produces.
 
+    (The block is folded into a collapsed box, not thrown away — that half is
+    the node harness in test_dashboard_render_frontend.py. This one is only
+    about the pattern covering what the backend writes.)
+
     The extraction is loose about the function's SHAPE and strict about its
-    SUBSTANCE. stripTools was reformatted into a block-bodied arrow function
-    that normalises `t || ""` into a named local, and pinning the extraction to
-    the old one-line syntax broke this test while nothing was actually wrong —
-    the same "check broke, code fine" false alarm this lock exists to avoid.
-    Anchoring on the marker it strips, and carrying its flags across, means a
-    reformat is free while a changed pattern still fails.
+    SUBSTANCE. It used to match `.replace(/…tools used…/, "")` and broke when
+    that was reformatted into a named local — a "check broke, code fine" false
+    alarm. Anchoring on the one regex the splitter is built from, and carrying
+    its flags across, means a reformat is free while a changed pattern fails.
     """
     from knowme.runtime import tool_entries as te
 
     source = (STATIC / "js" / "render.js").read_text(encoding="utf-8")
-    match = re.search(r'\.replace\((/[^/\n]*tools used[^/\n]*/[a-z]*),\s*""\)', source)
-    assert match, ('render.js no longer strips the tool block with '
-                   '.replace(/…tools used…/, "") — update this extraction')
+    match = re.search(r'const TOOLS_BLOCK = (/\S.*?/[a-z]*);', source)
+    assert match, ('render.js no longer defines the TOOLS_BLOCK pattern that '
+                   'splitTools() cuts the stored tool block off with')
 
     literal = match.group(1)
     slash = literal.rfind("/")
@@ -152,6 +155,8 @@ def test_the_chat_thread_strips_every_shape_of_tool_block():
     assert pattern.sub("", current).strip() == "Booked them.", "the current block leaks"
     assert pattern.sub("", many).strip() == "Booked them.", "a multi-entry block leaks"
     assert pattern.sub("", legacy).strip() == "Booked them.", "a legacy row leaks"
+    # …and it must cut the block OFF, not swallow the reply with it.
+    assert pattern.search("No tools this turn.") is None, "a plain reply is left alone"
 
 
 def test_app_js_is_gone():

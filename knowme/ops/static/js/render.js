@@ -105,12 +105,18 @@ const legacyTrace = t => `${(t.context||t.gate||t.graph)?`${stagesRow(t, false)}
   ${nodesRow(t)}
   ${(t.tools||[]).length?`<div class="tele">${(t.tools||[]).map(toolRow).join("")}</div>`:""}`;
 
-const chatTurnCard = t => `<div class="card">
-  <button class="msg-copy" onclick="copyMsg(this)" data-text="${esc(t.reply)}" title="复制回复">复制</button>
+const chatTurnCard = t => {
+  // t.reply is the STORED row, tool block and all (histItem) — split it here,
+  // same as the card without meta, so a reopened thread reads like the live one.
+  const {reply} = splitTools(t.reply);
+  return `<div class="card">
+  <button class="msg-copy" onclick="copyMsg(this)" data-text="${esc(reply)}" title="复制回复">复制</button>
   ${turnTimeline(t) || legacyTrace(t)}
-  <div class="r" style="margin-top:8px">${renderMarkdown(t.reply)}</div>
+  <div class="r" style="margin-top:8px">${renderMarkdown(reply)}</div>
+  ${toolsBlock(t.reply)}
   ${teleFooter(t)}
 </div>`;
+};
 
 // While a turn runs we stream it live: stages light up as the harness reaches
 // them, and the reply text appears token by token (with a blinking caret).
@@ -138,27 +144,78 @@ const streamingCard = m => `<div class="card">
          : ""}</div>`}
 </div>`;
 
-// Messages loaded from history (a switched/opened conversation) have no live
-// latency/iteration data, and their stored form carries an internal tool block —
-// strip both so the thread reads cleanly.
+// A stored assistant row is TWO things in one string: the reply, and the
+// `[tools used]` block (core/context/tool_entries.py — the same text the model
+// reads back as working memory). Storing it whole is on purpose. Rendering it
+// whole is not: a `list_files` result is a whole directory listing, and as text
+// inside the bubble it pushes the actual answer off the screen.
+//
+// So the two are split apart and drawn as two things — the reply as text, the
+// block as ONE collapsed box (a native <details>, so it keeps its state through
+// a repaint without any JS of ours) whose body is PREVIEWED, the rest one click
+// away. Deleting it outright would be the other failure: it is the user's own
+// record (see the note in test_static_assets.py).
 //
 // The block has TWO shapes in the database and rows are never rewritten, so the
 // pattern has to match both: older rows end `[tools used: a -> b]` (colon, one
 // closing bracket, all on one line), newer ones are `[tools used]` followed by
-// one entry per line and NO closing bracket at all. Matching only the first
-// shape silently stopped stripping anything the day the format changed, and the
-// dashboard started showing whole tool outputs inside the chat bubble.
-const stripTools = t => {
-  const text = t || "";
-  // Older turns stored `[tools used: ...]`; newer turns put a marker on its
-  // own line and then streamed one bullet per tool.  Both are telemetry, not
-  // the assistant's answer, so keep them out of the readable reply card.
-  return text.replace(/\s*\[tools used(?:\s*:[^\]]*)?\][\s\S]*$/i, "").trim();
-};
-const historicalCard = m => `<div class="card">
-  <button class="msg-copy" onclick="copyMsg(this)" data-text="${esc(stripTools(m.reply))}" title="复制回复">复制</button>
-  <div class="r">${renderMarkdown(stripTools(m.reply))}</div>
+// one `- entry` line per tool and NO closing bracket at all. Matching only the
+// first shape silently stopped matching anything the day the format changed, and
+// the dashboard started showing whole tool outputs inside the chat bubble.
+// One alternative per shape, so neither can be forgotten: `[tools used]` then
+// the entries to the end (what the backend writes now), or the whole thing in
+// one bracket, entries INSIDE it (what it wrote before).
+const TOOLS_BLOCK = /\n*\[tools used\]([\s\S]*)$|\n*\[tools used:\s*([\s\S]*?)\]\s*$/i;
+// What the folded box shows before you ask for the rest. Same budget as one
+// timeline step's 详情 (core/runtime.py's _STEP_DETAIL_MAX), because it is the
+// same kind of text.
+const TOOL_PREVIEW = 400;
+
+function splitTools(record){
+  const text = record || "";
+  const hit = TOOLS_BLOCK.exec(text);
+  if (!hit) return {reply: text.trim(), tools: ""};
+  return {reply: text.slice(0, hit.index).trim(),
+          // whichever alternative matched is the one holding the entries
+          tools: (hit[1] !== undefined ? hit[1] : hit[2] || "").trim()};
+}
+
+// The fold. Collapsed by default (<details>' own default), previewed once
+// opened. `.tele` puts it behind the same 统计 toggle as the timeline, because
+// it is the same kind of thing — per-turn telemetry, not the answer.
+function toolsBlock(record){
+  const tools = splitTools(record).tools;
+  if (!tools) return "";
+  const calls = (tools.match(/(^|\n)- /g) || []).length;
+  const short = tools.length > TOOL_PREVIEW;
+  return `<details class="turn-tools tele">
+  <summary>${calls ? `工具调用 · ${calls} 次` : "工具调用"}</summary>
+  <pre class="tt-short">${esc(short ? tools.slice(0, TOOL_PREVIEW) + "…" : tools)}</pre>
+  ${short ? `<pre class="tt-full" hidden>${esc(tools)}</pre>
+  <button class="tt-toggle" onclick="toggleTools(this)">显示全部</button>` : ""}
+</details>`;
+}
+
+// Preview and full text are BOTH in the DOM (the full one hidden), so switching
+// between them is a visibility flip — the text never has to survive a round
+// trip through an attribute.
+function toggleTools(btn){
+  const box = btn.closest(".turn-tools");
+  const short = box.querySelector(".tt-short"), full = box.querySelector(".tt-full");
+  const reveal = full.hidden;
+  short.hidden = reveal;
+  full.hidden = !reveal;
+  btn.textContent = reveal ? "收起" : "显示全部";
+}
+
+const historicalCard = m => {
+  const {reply} = splitTools(m.reply);
+  return `<div class="card">
+  <button class="msg-copy" onclick="copyMsg(this)" data-text="${esc(reply)}" title="复制回复">复制</button>
+  <div class="r">${renderMarkdown(reply)}</div>
+  ${toolsBlock(m.reply)}
 </div>`;
+};
 
 function renderChatLogFor(chat, emptyText){
   if (!chat.length)
@@ -183,17 +240,22 @@ function renderChatLog(){ return renderChatLogFor(CHAT, CHAT_EMPTY); }
 //     nth expander is the same expander. (No per-step id exists to key on:
 //     history rows carry text/steps only.) A step's own content would collide
 //     instead — two turns can both have 门控 · retrieve open.
+//
+// EVERY <details> in the log, not just a step's 详情: a folded tool block under
+// a reply is the same kind of thing to the person who clicked it, and it closes
+// itself the same way if it is left out. Whatever else the log grows later, it
+// goes through here too.
 function detailsKey(i){ return SESSION + "|" + i; }
-function openDetails(el){
+function openDetails(el, session){
   const open = new Set();
-  el.querySelectorAll("details.step-body").forEach((d, i) => {
-    if (d.open) open.add(detailsKey(i));
+  el.querySelectorAll("details").forEach((d, i) => {
+    if (d.open) open.add(session + "|" + i);
   });
   return open;
 }
 function restoreDetails(el, open){
   if (!open.size) return;
-  el.querySelectorAll("details.step-body").forEach((d, i) => {
+  el.querySelectorAll("details").forEach((d, i) => {
     d.open = open.has(detailsKey(i));
   });
 }
@@ -224,7 +286,13 @@ function syncLogClass(cls, chat, emptyText, force){
     // so a read-back comparison would never match and this would never fire.)
     if (el._shown === html) return;
     el._shown = html;
-    const open = openDetails(el);
+    // The thread the boxes below were opened in — which is NOT SESSION if you
+    // just switched: the switch sets SESSION first, and the DOM being read here
+    // is still the conversation you came from. Keying the open boxes by that
+    // one is what stops them from landing on whichever boxes in the NEW thread
+    // happen to sit at the same position.
+    const open = openDetails(el, el._session);
+    el._session = SESSION;
     el.innerHTML = html;
     restoreDetails(el, open);
     if (force || atBottom) el.scrollTop = el.scrollHeight;

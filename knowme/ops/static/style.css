@@ -664,6 +664,18 @@
   .step-body summary:hover{color:var(--ink)}
   .step-body pre{margin-top:4px;max-height:280px;overflow:auto;white-space:pre-wrap;
                  word-break:break-word;font-size:11px;line-height:1.5}
+  /* The stored tool block, folded into the reply card (render.js: toolsBlock).
+     Same disclosure as one .step-body, but the body is PREVIEWED: .tt-full is
+     the rest of it and stays hidden until 显示全部 — a whole directory listing
+     is not what you opened the conversation to read. */
+  .turn-tools{margin:8px 0 2px}
+  .turn-tools summary{cursor:pointer;font-size:11px;color:var(--ink3)}
+  .turn-tools summary:hover{color:var(--ink)}
+  .turn-tools pre{margin-top:4px;max-height:280px;overflow:auto;white-space:pre-wrap;
+                  word-break:break-word;font-size:11px;line-height:1.5}
+  .tt-toggle{margin-top:2px;background:none;border:1px solid var(--line2);border-radius:6px;
+             color:var(--ink3);font-size:11px;padding:2px 8px;cursor:pointer}
+  .tt-toggle:hover{color:var(--accent);border-color:var(--accent)}
   table{width:100%;border-collapse:collapse;font-size:13px}
   td,th{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
   tr:last-child td{border-bottom:none}
