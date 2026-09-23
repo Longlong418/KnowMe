@@ -1,5 +1,114 @@
 # KnowMe 开发文档
 
+## Phase 26：一套记忆给所有 Agent + 对话框能发图片（2026-09-23）
+
+**你提的**：① 所有 agent 共享记忆；② agent 对话框加一个上传图片的选项，也能直接粘贴截图，
+模型不支持图片时提醒你「这个模型不支持图片」。
+
+你之前说过「你把我的记忆都删了吗，前端看不到记忆了」——**一条都没删**（21 条事实 / 7 条情景 /
+10 条笔记都在库里）。看不到是因为**同一个过滤条件被写了两遍**：后端 SQL 里一遍
+（`data.py` 的 `WHERE agent_id=?`），前端 JS 里又滤了一遍（`views.js` 的
+`filter(f => f.agent_id === ACTIVE_AGENT)`）。切到 `coding` 这种没记过东西的 Agent，
+页面自然是空的。这是这个仓库的老毛病（Phase 15 的知识库、Context Bridge 的键位、模型短名单
+都是同一个病），**改法就是让决定点只剩一个**。
+
+你已定的三件事：**读写都共享**（不是只给看）、**笔记也一起共享**、**图片只在这一轮有效**。
+
+### 一、共享记忆：`agent_id` 从「围墙」降级成「签名」
+
+一条规则：**记忆（facts / episodes）和笔记（notes）的读写，都不再按 `agent_id` 过滤；
+新写的行照样盖 `agent_id` 的章，但那只是「谁记的」这个出处。**
+
+| 文件 | 拿掉了什么 |
+|---|---|
+| `memory/semantic/store.py` | 检索、`list`、`update`、`delete`、`merge` 里的 `agent_id` 谓词 |
+| `memory/episodic/store.py` | 同上 |
+| `memory/__init__.py` | `export_markdown()` 两处 —— **顺带修好一个潜伏 bug**：所有 Agent 共用一个 home、只有一个 MEMORY.md，以前是谁调用谁把别人写的事实覆盖掉 |
+| `ops/web/data.py` | facts/episodes 的查询不再加 `WHERE`；`table_info()` 对记忆表也不加 |
+| `tools/knowledge.py` | 七个读/写工具的 `agent_id` 默认值从 `"default"` 翻成 `None`（= 不加作用域）；`create_note` 仍然是**盖章** |
+| `ops/static/js/views.js` | 删掉 5 处前端过滤，facts/episodes 每行加一个「谁记的」标签 |
+
+**仍然隔离的是对话**：`chat_log`、会话、Context Bridge 全都没动，每个 Agent 还是自己的对话。
+`data.py` 里新加了一个常量 `PER_AGENT_TABLES = ("chat_log",)` —— **哪张表还按 Agent 分，
+只在这一个地方说**，否则「数据库」标签页的行数会和「记忆管理」页对不上。
+
+**（要说清的边界）** 外部记忆后端（mem0 / zep / langmem / supabase / notion）拿
+`agent_id` 当远程分区，本地改不了；共享的是默认的 sqlite 后端。`episodes_payload()` 的
+notion 分支特意没动，那儿留了注释。
+
+### 二、发图片：像素只活一轮，会话里看得见
+
+**为什么只活一轮**（这是你选的，也是唯一合理的解法）：`session.history` 有一条硬不变量
+——**永远只放纯字符串**。`snip_compact.py` 开头写着它，`test_history_holds_no_content_blocks`
+逐条断言它，而 micro_compact / tool_budget / state_summary 三个模块都对每个 entry 做
+`str(content)`。往历史里塞 content blocks 会同时踩坏四个模块。所以：
+
+- 图片挂在**本轮请求的最后一条 user 消息**上（`core/runtime.py` 的 `_image_block`），
+  这一轮里连工具调用的后续迭代也看得到；**下一轮模型手上就没有像素了**。
+- 但**会话里照样看得见、能往回翻**：`chat_log` 里 user 那一行的 `meta` 只存**引用**
+  （`{name, url, bytes}`），**像素绝不进数据库**。
+
+**一路是这么走的**：浏览器把图当 data URL 发上去（`{name, mime, data}`）→
+`ops/web/uploads.py` 校验（必须是图片、base64 要能解、单张 ≤ 4 MB、最多 4 张）→
+按**内容的 sha256 前 16 位**存成 `<home>/uploads/<hash><后缀>`，后缀由**魔数**嗅探
+（不信文件名，JPEG 叫 logo.png 也存成 .jpg，否则浏览器画不出来还以为是我们的 bug）→
+重发同一张图**不会堆文件**（内容寻址）→ 取回图片走 `/api/uploads/<名字>`，
+`resolve()` 里 `Path(name).name != name` 一律 404（防目录穿越）。
+
+**两个门都改了**，而且「空消息」的判断从 `if not message` 变成 `if not message and not images`
+——**只贴图不打字也是一次完整的提问**。只贴图时 `chat_log.content` 存 `[图片]`，
+否则会话列表的标题会是空的。
+
+**带图时禁用 triage 图前门**（`app.py`）：理由和打开着文档时一样——图工作流只收到一条消息，
+悄悄把你的图丢掉比不回答糟糕得多。
+
+**OpenAI 那侧要桥接**：这个仓库的 loop 一律说 Anthropic 形状，`_to_openai` 里按 block 类型
+分流——`tool_result` 照旧变成一条 `role:"tool"` 消息，`text`/`image` 攒成一条带
+`image_url`（data URL）的 user 消息。**只有真的出现 text/image 才 append**，
+所以工具结果那一路的输出**逐字节和以前一样**（这条有专门的测试锁着）。
+
+**「这个模型不看图」的提示**（`uploads.image_hint`）：只在错误**看起来是「请求被拒」**时才改写
+（错误里同时出现 `400`/`invalid_request`/`bad request` 之一，和 `image`/`vision`/
+`multimodal`/`unsupported` 之一），文案是「图片没能发出去 —— 当前模型 X 可能不支持看图…」，
+**并把原始错误原封不动附在后面**。其它错误（超时、网络、401）**原样透出**——不该把网络故障
+冤枉成「模型不看图」，那会把你指去换模型。
+
+**前端**：主对话框和阅读区右侧面板**共用一套接线**（`wireComposer` / `addImages` /
+`paintAttach` / `attThumbs`），只是 DOM id 由各自的 `key` 派生（`d` / `a`）。
+🖼 按钮点开文件选择框；输入框的 `onpaste` **只在剪贴板里真有图片时才拦截**
+（`preventDefault` 之前先看 `items` 里有没有 `image/*`），所以粘文字照旧。
+气泡里的缩略图**一个渲染函数、两个来源**：刚发出去那条用本地 `dataUrl`（还没上传），
+重新加载后的历史行用服务端给的 `/api/uploads/…`。
+
+### 验证
+
+- **反向验证（锁要会咬人）**：把 `AND f.agent_id = ?` 加回一处记忆读路径 →
+  共享记忆的测试 FAIL；把 `agent_id` 加回 `search_notes` 闭包 → 知识库那条 FAIL；
+  把图片塞进 `session.history` → 图片测试 FAIL；删掉 `_to_openai` 的 image 分支 → 桥接测试 FAIL。
+  四次都验完又把改动撤回了。
+- **真 Chrome 端到端**（`.claude/repro_chat_images.py`，临时 home + 临时端口 + 一个本地假
+  provider）：四个场景全过 —— ① 选文件发出去 → 气泡里的图**按像素算真的画出来了**
+  （64×64，`naturalWidth>0`）、`uploads/` 多一个文件、假 provider 确实收到了 `image_url`；
+  ② 粘贴：粘纯文字**不被拦**，粘一张图能进预览并发出；③ 刷新后两张图都还在，
+  而且 `src` 换成了 `/api/uploads/…`（证明引用进了 `chat_log.meta`）；④ 假 provider 回
+  OpenAI 形状的 400「model does not support image input」→ 气泡里出现「可能不支持图片」
+  和原始错误。
+- **真模型实发一次**（`.claude/probe_real_image.py`）：用项目自己的 `OpenAICompatClient`，
+  把你 `.env` 里的 `zhiyao` + `glm-5.2` 接上，发一块 64×64 的纯红图问颜色 ——
+  它答「**红色**」。也就是 KnowMe 拼出来的那份请求，真模型是真看得懂的。
+- **全量**：`pytest evals -q` → **694 passed / 89 skipped / 0 failed**；`ruff check knowme evals` 干净。
+
+**一处要诚实说明的**：动手前我预计「把图片塞进 `session.history`」会被
+`test_snip_compact.py::test_history_holds_no_content_blocks` 抓到。**实际没有**——
+那个用例的那一轮不带图片，它观察不到。真正咬住这个改动的是新写的
+`test_chat_images.py`（它当场断言 history 里只有字符串）。原来那条测试守的是
+「压缩不会把 blocks 写进历史」，守的不是「图片不许进历史」，两件事别混。
+
+### 记得
+
+- **改了 `.py` 必须重启 Web 服务**；改了 `.js` / `.css` 只要刷新浏览器。
+- `evals/*` 被 gitignore，新加的回归测试要 `git add -f` 进库。
+
 ## Phase 25：阅读区一份文档一条对话 + 对话可以删了（2026-09-22）
 
 **你提的**（大意）：① 对话管理要有删除；② 阅读区的 agent 会话要**跟着文档分**——一份文档
@@ -1554,7 +1663,7 @@ cd D:\LLM\Agent\knowme-agent
   都不能每 5 秒重建一次，否则用户正在输入或正在选的内容会被清掉。
   加视图时照着 `render()` 里已有的分支写。
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 Web**。
-- **当前基线**（2026-09-22 Phase 25 之后）：`pytest evals -q` → **682 passed / 89 skipped /
+- **当前基线**（2026-09-23 Phase 26 之后）：`pytest evals -q` → **694 passed / 89 skipped /
   0 failed**；`ruff check knowme evals` 干净。`evals/judge/` 那 26 个用例缺 `deepeval`，
   单独跑那个目录会报 ERROR，跟着全量跑表现为 skipped——与改动无关，别看错。
   （更早的 619/3/62 那条基线里的 3 个失败已经没有了。）

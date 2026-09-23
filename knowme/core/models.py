@@ -372,14 +372,31 @@ class OpenAICompatClient:
                     entry["tool_calls"] = calls
                 oai_messages.append(entry)
             else:
-                # anthropic tool_result blocks → one 'tool' message each
+                # A user message's blocks come in two kinds, and they become two
+                # different things: tool_result → one 'tool' message each (as
+                # before), text/image → ONE user message holding an array. The
+                # text/image message is appended only when such a part exists,
+                # so an ordinary tool-result turn produces byte-for-byte what it
+                # produced before pictures existed.
+                parts = []
                 for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_result":
                         oai_messages.append({
                             "role": "tool",
                             "tool_call_id": block["tool_use_id"],
                             "content": block["content"],
                         })
+                    elif block.get("type") == "text":
+                        parts.append({"type": "text", "text": block.get("text", "")})
+                    elif block.get("type") == "image":
+                        source = block.get("source") or {}
+                        parts.append({"type": "image_url", "image_url": {
+                            "url": f"data:{source.get('media_type', 'image/png')}"
+                                   f";base64,{source.get('data', '')}"}})
+                if parts:
+                    oai_messages.append({"role": message["role"], "content": parts})
 
         kwargs: dict = {"model": model, "messages": oai_messages,
                         "max_completion_tokens": max_tokens}

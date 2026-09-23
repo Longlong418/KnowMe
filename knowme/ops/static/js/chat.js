@@ -62,7 +62,10 @@ VIEWS.agent = function(){
       <button class="modelchip" id="modelchip" onclick="toggleModelMenu(event)" title="切换当前对话使用的模型">&hellip;</button>
     </div>
     <div class="chatlog"></div>
+    <div class="attpreview" id="datt" hidden></div>
     <div class="chatbar">
+      <input type="file" id="dfile" accept="image/*" multiple hidden>
+      <button id="dpick" class="attachbtn" title="发图片（也可以直接把截图粘贴进来）">🖼</button>
       <input id="dmsg" placeholder="给 ${name} Agent 发消息…" autocomplete="off">
       <button id="dsend">发送</button>
     </div>

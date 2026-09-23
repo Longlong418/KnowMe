@@ -35,6 +35,7 @@ from knowme.ops.catalog import list_models
 from knowme.ops.pricing import price_for, usage_summary
 from knowme.ops.settings_api import apply_settings, custom_provider_action, pin_action, settings_info
 from knowme.ops.tracing import TraceEncodingError, iter_trace_lines
+from knowme.ops.web.uploads import resolve as upload_resolve
 
 # Windows commonly reserves 7777 (for example through Hyper-V/WSL port
 # exclusions), while 8888 is conventionally available for local web clients.
@@ -127,6 +128,22 @@ class Handler(BaseHTTPRequestHandler):
                      ".htm": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8"
                      }.get(suffix, "text/plain; charset=utf-8")
             self._send(body, ctype, no_cache=True)
+        elif self.path.startswith("/api/uploads/"):
+            # A picture attached to a past turn. The conversation stores the
+            # reference, the file lives under <home>/uploads/ — see uploads.py.
+            from urllib.parse import unquote
+
+            settings = load_settings()
+            settings.ensure_home()
+            name = unquote(self.path.split("/api/uploads/", 1)[1].split("?")[0])
+            path = upload_resolve(settings.home, name)
+            if path is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            ctype = {".png": "image/png", ".jpg": "image/jpeg", ".gif": "image/gif",
+                     ".webp": "image/webp"}.get(path.suffix, "application/octet-stream")
+            self._send(path.read_bytes(), ctype)
         elif self.path.startswith("/static/"):
             self._serve_static(self.path)
         else:
@@ -168,6 +185,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/chat/stream":
             message = (payload.get("message") or "").strip()
             agent_id = payload.get("agent_id") or "default"
+            images = payload.get("images") or []
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -180,11 +198,13 @@ class Handler(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     pass  # the browser navigated away mid-stream — fine
 
-            if not message:
+            # A picture with no words is a complete question ("what is this?"),
+            # so the empty check is on the turn, not on the text.
+            if not message and not images:
                 emit("done", {"error": "empty message"})
                 return
             try:
-                chat_stream(message, emit, agent_id=agent_id)
+                chat_stream(message, emit, agent_id=agent_id, images=images)
             except Exception as exc:  # surface as a terminal event, don't 500
                 emit("done", {"error": f"{type(exc).__name__}: {exc}"})
             return
@@ -219,9 +239,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/chat":
                 message = (payload.get("message") or "").strip()
-                out = chat(message, payload.get("agent_id") or "default") if message else {
-                    "error": "empty message"
-                }
+                images = payload.get("images") or []
+                out = chat(message, payload.get("agent_id") or "default", images=images) \
+                    if (message or images) else {"error": "empty message"}
             elif self.path == "/api/extras":
                 out = extras_action(payload)
             elif self.path == "/api/reader":

@@ -45,6 +45,19 @@ from knowme.core.tools import ToolRegistry
 FrontDoor = Callable[[str, Observer, bool], "LoopResult | None"]
 ContextFor = Callable[[str, str], int]   # (provider, model) → window in tokens
 
+
+def _image_block(image: dict) -> dict:
+    """One attached picture as a content block, in ANTHROPIC's shape.
+
+    Every message this runtime builds is Anthropic-shaped — the OpenAI-speaking
+    providers are bridged in core/models.py:_to_openai — so this is the only
+    place that has to spell out an image. Getting that wrong here would show up
+    as a provider 400 that names a field nobody wrote.
+    """
+    return {"type": "image",
+            "source": {"type": "base64", "media_type": image["mime"],
+                       "data": image["data"]}}
+
 # meta.steps is a bounded transcript of WHAT happened during a turn, in order —
 # the timeline the conversation view draws from. It cannot grow with the turn:
 # a 40-step cap and truncated strings keep a chat_log row small no matter how
@@ -116,12 +129,18 @@ class AgentRuntime:
     def run_turn(self, spec: AgentSpec, session: Session, user_message: str, *,
                  observer: Observer | None = None, source: str = "cli",
                  stream: bool = False, extra_context: str = "",
-                 front_door: FrontDoor | None = None) -> TurnResult:
+                 front_door: FrontDoor | None = None,
+                 images: list[dict] | None = None) -> TurnResult:
         """One full turn: assemble working memory → run the loop → persist.
         `source` tags whether the message arrived through the CLI or web client,
         so the unified chat can show its origin. `stream=True` streams the reply
         text token by token to the observer. Everything that happens is both
-        shown (observer) and recorded (tracer)."""
+        shown (observer) and recorded (tracer).
+
+        `images` are pictures attached to THIS turn (already saved to disk — see
+        ops/web/uploads.py). They reach the model on the request's user message
+        and are recorded in the chat log by reference; they do not enter
+        session.history."""
         resolved = resolve(spec, self.settings)
         t0 = time.perf_counter()
         # capture the gate + graph decisions as they flow by, so we can persist
@@ -205,7 +224,7 @@ class AgentRuntime:
                     result = None
             if result is None:
                 result = self.run_loop_turn(spec, session, user_message, notify, stream,
-                                            extra_context=extra_context)
+                                            extra_context=extra_context, images=images)
 
             quick = captured.get("graph_route", {}).get("target") == "quick_reply"
             meta = {
@@ -238,7 +257,7 @@ class AgentRuntime:
             ):
                 meta["context"] = context_meta
             session.add_exchange(user_message, result.reply, tool_calls=result.tool_calls,
-                                 source=source, meta=meta)
+                                 source=source, meta=meta, images=images)
             if self.memory is not None:
                 self.memory.maybe_consolidate(notify=notify)
                 self.memory.export_markdown()   # keep MEMORY.md in sync
@@ -257,7 +276,8 @@ class AgentRuntime:
                           iterations=result.iterations, meta=meta)
 
     def run_loop_turn(self, spec: AgentSpec, session: Session, user_message: str,
-                      notify: Observer, stream: bool, extra_context: str = "") -> LoopResult:
+                      notify: Observer, stream: bool, extra_context: str = "",
+                      images: list[dict] | None = None) -> LoopResult:
         """The classic turn: assemble working memory, run THE loop. The graph's
         full_agent node calls this SAME method, so loop-as-a-node can never
         drift from loop-as-default."""
@@ -290,7 +310,19 @@ class AgentRuntime:
             # Working memory becomes the summary; chat_log keeps every
             # message, so the user's own record is untouched.
             session.history = fit.persisted
-        messages = fit.sent + [{"role": "user", "content": prompt}]
+        # Attached pictures ride on THIS message and nowhere else. session.history
+        # holds plain strings — snip_compact, micro_compact, the tool budget and
+        # the state summary all treat an entry as text — so putting blocks in
+        # there would break four modules at once. The consequence, chosen on
+        # purpose: the model sees the picture this turn (including every tool
+        # iteration of it) and not on later turns. It stays in the conversation,
+        # so you can still scroll back to it.
+        content: str | list = prompt
+        if images:
+            content = ([{"type": "text", "text": prompt}] if prompt else []) + [
+                _image_block(img) for img in images
+            ]
+        messages = fit.sent + [{"role": "user", "content": content}]
 
         # Context construction used to be invisible even though it is one of
         # the most important decisions an agent runtime makes.  This event does

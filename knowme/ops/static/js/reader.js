@@ -126,7 +126,10 @@ function askPanelHTML(){
       <span class="meta" id="ra-title">${esc(currentDoc ? currentDoc.title : "还没有打开文档")}</span>
     </div>
     <div class="asklog"></div>
+    <div class="attpreview" id="aatt" hidden></div>
     <div class="chatbar">
+      <input type="file" id="afile" accept="image/*" multiple hidden>
+      <button id="apick" class="attachbtn" title="发图片（也可以直接把截图粘贴进来）">🖼</button>
       <input id="amsg" placeholder="就这份材料提问…" autocomplete="off">
       <button id="asend">发送</button>
     </div>
@@ -143,7 +146,8 @@ function paintAskTitle(){
 }
 
 const ASK_CHAT = {chat: ASK, agentId: () => ASK_AGENT,
-                  repaint: force => syncLogClass("asklog", ASK, ASK_EMPTY, force)};
+                  repaint: force => syncLogClass("asklog", ASK, ASK_EMPTY, force),
+                  key: "a", attach: []};
 const ASK_EMPTY = "问点什么吧——这个 Agent 看得到你正在读的文档，也能自己查文档库。";
 
 // Called by wireChat() alongside the main composer. Re-binding on every rebuild
@@ -153,6 +157,7 @@ function wireAsk(){
   if (!b && !i) return;
   if (b) b.onclick = () => sendChatTo(ASK_CHAT, i);
   if (i) i.onkeydown = e => { if (e.key === "Enter") sendChatTo(ASK_CHAT, i); };
+  wireComposer(ASK_CHAT);   // 📎 + paste, same code as the main composer
   if (askLoadedFor !== askSessionId()) loadAskThread();
   syncLogClass("asklog", ASK, ASK_EMPTY);
 }

@@ -17,6 +17,19 @@ from knowme.config import Settings
 from knowme.core.context import snip_compact, state_summary
 from knowme.core.context import tool_entries as te
 
+
+def _image_refs(images) -> list[dict]:
+    """What the chat log keeps about an attached picture: where the file is,
+    not the picture.
+
+    A 4 MB screenshot is about 5.4 MB of base64, and this row is read by every
+    dashboard poll — so storing the pixels here would both bloat state.db and
+    make each poll carry megabytes the browser already has on disk at ``url``.
+    The name rides along because it is what the user called the file.
+    """
+    return [{"name": img["name"], "url": img["url"], "bytes": img["bytes"]}
+            for img in images or []]
+
 DEFAULT_SOUL = """\
 You are KnowMe, a personal assistant running locally on your user's laptop.
 You are concise, warm, and proactive. You remember what your user tells you.
@@ -141,7 +154,8 @@ class Session:
         return "[context]\n" + "\n".join(parts)
 
     def add_exchange(self, user_message: str, reply: str, tool_calls: list | None = None,
-                     source: str = "cli", meta: dict | None = None) -> None:
+                     source: str = "cli", meta: dict | None = None,
+                     images: list[dict] | None = None) -> None:
         """Record the turn in history (working memory) and, if memory is wired,
         in the chat log (so consolidation can distill it later).
 
@@ -162,6 +176,13 @@ class Session:
             record = te.render(reply, [
                 te.entry(c["tool"], c["args"], c["output"])
                 for c in tool_calls])
+        user_meta = {"images": _image_refs(images)} if images else None
+        if not user_message and images:
+            # Nothing but a picture. Everything downstream — this history list,
+            # the chat_log row the session list takes its title from — expects
+            # text, so say what the turn was instead of leaving it blank. The
+            # pixels themselves are referenced in the user row's meta (below).
+            user_message = "[图片]"
         self.history.append({"role": "user", "content": user_message})
         self.history.append({"role": "assistant", "content": record})
         # The conversation-level bound. Runs here because this is the only place
@@ -172,8 +193,11 @@ class Session:
             self.history, self.settings.home, self.conn, self.session_id,
             self.settings.snip_head, self.settings.snip_tail)
         if self.memory is not None:
+            # The user row carries the image REFERENCES (name/url/bytes — never
+            # the base64), which is what lets a reopened conversation draw the
+            # picture again without state.db holding megabytes of pixels.
             self.memory.log_chat(user_message, record, session_id=self.session_id,
-                                 source=source, meta=meta)
+                                 source=source, meta=meta, user_meta=user_meta)
 
     # ---- session lifecycle (the "New chat" / history feature)
     # A session is just a tag on chat_log rows. Starting a new one clears working

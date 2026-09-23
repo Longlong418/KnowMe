@@ -113,11 +113,16 @@ class Memory:
 
     # ---- write paths
     def log_chat(self, user_message: str, reply: str, session_id: str = "default",
-                 source: str = "cli", meta: dict | None = None) -> None:
+                 source: str = "cli", meta: dict | None = None,
+                 user_meta: dict | None = None) -> None:
         import json as _json
+        # user_meta carries the attached images' REFERENCES (name/url/bytes), so
+        # a reopened conversation can draw the picture again. The pixels stay on
+        # disk in <home>/uploads/ — the row points at them.
         self.conn.execute(
-            "INSERT INTO chat_log (role, content, session_id, source, agent_id) VALUES ('user', ?, ?, ?, ?)",
-            (user_message, session_id, source, self.agent_id),
+            "INSERT INTO chat_log (role, content, session_id, source, agent_id, meta) VALUES ('user', ?, ?, ?, ?, ?)",
+            (user_message, session_id, source, self.agent_id,
+             _json.dumps(user_meta) if user_meta else None),
         )
         # meta (gate/latency/iterations/tools) rides on the assistant row so a
         # reopened thread can render the full turn card, not just the text.

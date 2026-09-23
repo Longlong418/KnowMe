@@ -23,7 +23,10 @@ const toolRow = x => `<div class="tool ${x.status||"ok"}">
 // a reopened thread looks just like when it was live. Rows without meta (from
 // before this was saved, or another gateway) fall back to a plain card.
 function histItem(m){
-  if (m.role === "user") return {role:"user", text:m.content};
+  if (m.role === "user")
+    // m.meta.images is the reference the server stored: name + url + bytes.
+    // The picture itself is a file under <home>/uploads/, served by that url.
+    return {role:"user", text:m.content, images:(m.meta && m.meta.images) || []};
   if (m.meta) return {role:"knowme", reply:m.content, gate:m.meta.gate,
                       graph:m.meta.graph,
                       context:m.meta.context,
@@ -161,7 +164,7 @@ function renderChatLogFor(chat, emptyText){
   if (!chat.length)
     return `<div class="empty" style="padding:6px 2px">${emptyText}</div>`;
   return chat.map(m => m.role==="user"
-      ? `<div class="bubble">${esc(m.text)}</div>`
+      ? `<div class="bubble">${esc(m.text)}${attThumbs(m.images)}</div>`
       : m.pending ? streamingCard(m)
       : m.historical ? historicalCard(m)
       : chatTurnCard(m)).join("");
@@ -313,16 +316,105 @@ function applyStreamEvent(pending, ev){
 // main conversation and the Reader's ask panel are the SAME machine pointed at
 // different state — that is the whole reason this is a parameter and not
 // globals (which is what it used to be, and why the Reader needed its own copy).
-const MAIN_CHAT = {chat: CHAT, agentId: () => ACTIVE_AGENT, repaint: syncChatLogs};
+//
+// key/attach are what an ATTACHMENT needs from that machine: every element the
+// composer is made of is named after the key (#dmsg/#dpick/#datt), so the same
+// code drives both surfaces instead of being copied into each one.
+const MAIN_CHAT = {chat: CHAT, agentId: () => ACTIVE_AGENT, repaint: syncChatLogs,
+                   key: "d", attach: []};
 
 async function sendChat(fromInput){ return sendChatTo(MAIN_CHAT, fromInput); }
 
+// --- pictures in a message -------------------------------------------------
+// The model only sees the picture on THIS turn (see ops/web/uploads.py for
+// why), but it stays in the conversation, so the bubble keeps a thumbnail:
+// `img.url` for a message reloaded from the server, `img.dataUrl` for the one
+// you just sent and are still holding in memory. One renderer, two sources.
+const MAX_ATTACH = 4;
+const MAX_ATTACH_BYTES = 4 * 1024 * 1024;
+
+function attThumbs(images){
+  if (!images || !images.length) return "";
+  return `<div class="bubble-att">${images.map(img =>
+    `<a href="${esc(img.url || img.dataUrl || "#")}" target="_blank" rel="noopener">
+      <img src="${esc(img.url || img.dataUrl || "")}" alt="${esc(img.name || "图片")}">
+    </a>`).join("")}</div>`;
+}
+
+// Read one picked/pasted file and keep it in the target's attach list. Nothing
+// is uploaded yet: the data URL travels with the message that carries it.
+function addImages(target, files){
+  const list = [...files].filter(f => (f.type || "").startsWith("image/"));
+  if (!list.length) return;
+  for (const file of list){
+    if (target.attach.length >= MAX_ATTACH){
+      alert(`一次最多发 ${MAX_ATTACH} 张图片。`);
+      break;
+    }
+    if (file.size > MAX_ATTACH_BYTES){
+      alert(`「${file.name}」太大了（最多 ${MAX_ATTACH_BYTES/1024/1024} MB）。`);
+      continue;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      target.attach.push({name: file.name, mime: file.type,
+                          dataUrl: reader.result, bytes: file.size});
+      paintAttach(target);
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function paintAttach(target){
+  const box = document.getElementById(target.key + "att");
+  if (!box) return;
+  const items = target.attach;
+  box.hidden = !items.length;
+  box.innerHTML = items.map((img, i) =>
+    `<span class="attchip"><img src="${esc(img.dataUrl)}" alt="${esc(img.name)}">
+      <button onclick="dropAttach('${target.key}',${i})" title="移除">&times;</button></span>`
+  ).join("") + (items.length > 1
+    ? `<span class="meta" style="align-self:center">${items.length} 张</span>` : "");
+}
+
+function dropAttach(key, i){
+  const target = key === "a" ? ASK_CHAT : MAIN_CHAT;
+  target.attach.splice(i, 1);
+  paintAttach(target);
+}
+
+// The 📎 button, and pasting straight into the input. Both surfaces call this.
+function wireComposer(target){
+  const key = target.key;
+  const file = document.getElementById(key + "file");
+  const pick = document.getElementById(key + "pick");
+  const input = document.getElementById(key + "msg");
+  if (pick && file) pick.onclick = () => file.click();
+  if (file) file.onchange = () => { addImages(target, file.files); file.value = ""; };
+  if (input) input.onpaste = e => {
+    // A screenshot on the clipboard arrives as an ITEM, not as text. Only
+    // intercept when there really is an image, so pasting words still works.
+    const files = [...(e.clipboardData?.items || [])]
+      .filter(it => it.kind === "file" && (it.type || "").startsWith("image/"))
+      .map(it => it.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    e.preventDefault();
+    addImages(target, files);
+  };
+  paintAttach(target);
+}
+
 async function sendChatTo(target, fromInput){
-  const input = fromInput || document.getElementById("dmsg");
+  const input = fromInput || document.getElementById(target.key + "msg");
   const text = (input && input.value || "").trim();
-  if (!text) return;
+  const images = target.attach;
+  // Only a picture, no words, is a complete question — so the guard is on the
+  // turn, not on the text. (The server applies the same rule.)
+  if (!text && !images.length) return;
   input.value = "";
-  target.chat.push({role:"user", text});
+  target.attach = [];
+  paintAttach(target);
+  target.chat.push({role:"user", text, images});
   const pending = {role:"knowme", pending:true, stream:"", started: Date.now()};
   target.chat.push(pending);
   target.repaint(true);   // you hit send: the newest turn is what you want to see
@@ -331,7 +423,8 @@ async function sendChatTo(target, fromInput){
   try {
     const res = await fetch("/api/chat/stream", {method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({message:text, agent_id:target.agentId()})});
+      body:JSON.stringify({message:text, agent_id:target.agentId(),
+                           images:images.map(i => ({name:i.name, mime:i.mime, data:i.dataUrl}))})});
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
     for (;;){
@@ -360,6 +453,7 @@ function wireChat(){
   const b = document.getElementById("dsend"), i = document.getElementById("dmsg");
   if (b) b.onclick = () => sendChat(i);
   if (i) i.onkeydown = e => { if (e.key==="Enter") sendChat(i); };
+  wireComposer(MAIN_CHAT);
   syncChatLogs();
   // The Reader's ask panel is a second surface on the same machine, so it is
   // wired wherever the first one is. It is defined in reader.js; the guard keeps

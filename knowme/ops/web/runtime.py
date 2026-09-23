@@ -38,6 +38,7 @@ from knowme.ops.catalog import list_models
 from knowme.ops.pricing import price_for, usage_summary
 from knowme.ops.settings_api import apply_settings, pin_action, settings_info
 from knowme.ops.tracing import TraceEncodingError, iter_trace_lines
+from knowme.ops.web.uploads import image_hint, save_images
 
 # Windows commonly reserves 7777 (for example through Hyper-V/WSL port
 # exclusions), while 8888 is conventionally available for local webs.
@@ -53,7 +54,7 @@ STATIC = Path(__file__).resolve().parents[1] / "static"
 application_contexts = ApplicationContextBridge()
 
 
-def chat(message: str, agent_id: str = "default") -> dict:
+def chat(message: str, agent_id: str = "default", images=None) -> dict:
     """One turn, one JSON result — the non-streaming door to the same room.
 
     The web itself uses /api/chat/stream; this exists for scripts and for
@@ -69,15 +70,20 @@ def chat(message: str, agent_id: str = "default") -> dict:
         if kind == "done":
             final.update(ev)
 
-    chat_stream(message, collect_done, agent_id=agent_id)
+    chat_stream(message, collect_done, agent_id=agent_id, images=images)
     return final
 
 
-def chat_stream(message: str, emit, agent_id: str = "default") -> None:
+def chat_stream(message: str, emit, agent_id: str = "default", images=None) -> None:
     """Run one turn, calling emit(kind, event) for every harness event AS it
     happens — gate decision, tool calls, and the reply text token by token —
     so the browser can show thinking streams like the CLI does. Ends
     with a 'done' event carrying the final structured result.
+
+    `images` are attachments for THIS turn only (see ops/web/uploads.py). They
+    are saved to disk here — before the agent is fetched, so a bad attachment
+    fails without building one — and handed to respond() to ride along on the
+    request's user message.
 
     A leading slash calls a graph workflow BY NAME instead of running a turn.
     Both doors end in the same 'done' event, so the chat renders the answer the
@@ -86,6 +92,10 @@ def chat_stream(message: str, emit, agent_id: str = "default") -> None:
     if command is not None:
         _run_command(command, emit)
         return
+
+    settings = load_settings()
+    settings.ensure_home()
+    saved = save_images(settings.home, images)
 
     events: list[dict] = []
 
@@ -111,13 +121,22 @@ def chat_stream(message: str, emit, agent_id: str = "default") -> None:
             agent.agent_id, agent.session.session_id
         )
         start = datetime.now(UTC)
-        result = agent.respond(
-            message,
-            observer=observer,
-            source="web",
-            stream=True,
-            extra_context=extra_context,
-        )
+        try:
+            result = agent.respond(
+                message,
+                observer=observer,
+                source="web",
+                stream=True,
+                extra_context=extra_context,
+                images=saved,
+            )
+        except Exception as exc:
+            # The one place that knows this turn carried pictures, and therefore
+            # the one place that can tell the user the likely reason a provider
+            # refused it. Errors from image-free turns pass through untouched.
+            if saved:
+                raise RuntimeError(image_hint(agent.settings.model, exc)) from exc
+            raise
         latency_ms = int((datetime.now(UTC) - start).total_seconds() * 1000)
 
     context = next((e for e in events if e["kind"] == "context"), None)
