@@ -89,7 +89,17 @@ class Memory:
         if settings.episodic_store == "notion":
             from knowme.memory.episodic.notion_store import NotionEpisodeStore
 
-            return NotionEpisodeStore(agent_id)
+            # By keyword, never positionally: the first positional parameter of
+            # that constructor is `token`, so NotionEpisodeStore(agent_id) hands
+            # the agent name over as the credential — every request then
+            # authenticates as "default" and the NOTION_TOKEN in the
+            # environment is ignored. Worse, the name is truthy, so the
+            # constructor's own "Notion token required" check passes and the
+            # only symptom is an auth error from the API much later.
+            # The store takes agent_id and does not use it yet (Notion has no
+            # column for it); passing it anyway keeps the "who wrote this" intent
+            # at the call site for when that column lands.
+            return NotionEpisodeStore(agent_id=agent_id)
         return SqliteEpisodeStore(conn, agent_id)
 
     # ---- retrieval (gated — see retrieval_gate.py for why)

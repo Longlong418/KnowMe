@@ -110,6 +110,23 @@ def test_factory_returns_notion_store_when_configured(monkeypatch, fake_notion):
     assert isinstance(store, NotionEpisodeStore)
 
 
+def test_the_agent_id_never_becomes_the_notion_token(monkeypatch, fake_notion):
+    """The factory used to call NotionEpisodeStore(agent_id) — positionally, and
+    that constructor's FIRST positional parameter is `token`. So the agent name
+    was handed over as the credential: the NOTION_TOKEN in the environment was
+    discarded and every request authenticated as e.g. "default".
+
+    Nothing caught it because the name is a non-empty string, so the
+    constructor's own "Notion token required" check passed, and the only symptom
+    is an auth error from the API much later. The existing type check above
+    passes either way — hence this one asserts the identity, not the type."""
+    monkeypatch.setenv("KNOWME_EPISODIC_STORE", "notion")
+    store = Memory._make_episode_store(conn=None, settings=Settings(), agent_id="writer")
+
+    assert store.token == "test-token"
+    assert store.client.auth == "test-token"
+
+
 def test_apply_settings_rejects_unknown_episodic_store(monkeypatch, tmp_path):
     # chdir so a regression of the guard can't write into the real project .env
     monkeypatch.chdir(tmp_path)

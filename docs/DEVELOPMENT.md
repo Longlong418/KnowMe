@@ -1,5 +1,61 @@
 # KnowMe 开发文档
 
+## Phase 33：Notion 那把钥匙拿错了（2026-09-23）
+
+### 一、错在哪：Agent 的名字被当成了 API 令牌
+
+`knowme/memory/__init__.py` 里选记忆后端的那处：
+
+```python
+return NotionEpisodeStore(agent_id)      # 改之前
+```
+
+而那个类的构造函数是：
+
+```python
+def __init__(self, token=None, database_id=None, agent_id="default"):
+```
+
+**第一个位置参数是 `token`，不是 `agent_id`。** 所以 `NotionEpisodeStore("writer")`
+实际上说的是"令牌就是 writer"——环境变量里真正的 `NOTION_TOKEN` 被丢在一边，
+之后每一个 Notion 请求都拿着一个叫 `"writer"` 的假令牌去认证。
+
+### 二、为什么一直没报错：两道本该拦住它的关卡都放行了
+
+1. 构造函数里有一句 `if not self.token: raise ValueError("Notion token required")`。
+   `"writer"` 是个**非空字符串**，真值，这句检查**顺利通过**。
+2. 出错的时机非常靠后——不是构造的时候，是**真的去问 Notion 要数据的时候**，
+   收到一个认证失败。那时候已经隔了好几层，看不出跟"参数写错了"有关。
+
+这也解释了为什么原来那条测试没抓到：`test_factory_returns_notion_store_when_configured`
+只断言了 `isinstance(store, NotionEpisodeStore)`——**类型是对的**，错的是里面装的东西。
+
+### 三、改了什么
+
+```python
+return NotionEpisodeStore(agent_id=agent_id)    # 关键字传参
+```
+
+**用关键字而不是把顺序挪对**，是因为这样这类 bug 就不可能再犯：名字写在那儿，参数就对不上号。
+（`agent_id` 目前这个 store 只收下不用——Notion 那边还没有这一列；仍然显式传，是为了让
+"谁写的"这个意图留在调用处。这点在注释里写明白了。）
+
+### 四、验证
+
+新锁 `test_the_agent_id_never_becomes_the_notion_token`：断言的是**身份**，不是类型 ——
+
+```python
+assert store.token == "test-token"        # 环境变量里的
+assert store.client.auth == "test-token"  # 真正拿去认证的那个
+```
+
+反向验证过，把修复收起来它红的正是 `assert 'writer' == 'test-token'`。
+
+顺手全仓库查了一遍同类写法：`integrations.py:443` 也是位置传参，但顺序本来就对
+（token, database_id），没动它。
+
+全量：**753 passed / 62 skipped / 0 failed**；ruff 干净。
+
 ## Phase 32：验收会把绿读成红（2026-09-23）
 
 ### 一、怎么发现的：跑全量测试，它红了
@@ -2219,7 +2275,7 @@ cd D:\LLM\Agent\knowme-agent
   都不能每 5 秒重建一次，否则用户正在输入或正在选的内容会被清掉。
   加视图时照着 `render()` 里已有的分支写。
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 Web**。
-- **当前基线**（2026-09-23 Phase 32 之后）：`pytest evals/deterministic -q` → **752 passed /
+- **当前基线**（2026-09-23 Phase 33 之后）：`pytest evals/deterministic -q` → **753 passed /
   62 skipped / 0 failed**；`ruff check knowme` 干净。`evals/judge/` 那 26 个用例缺 `deepeval`，
   单独跑那个目录会报 ERROR，跟着全量跑表现为 skipped——与改动无关，别看错。
   （Phase 26 时的 694/89/0 里面那 89 个 skipped 包含 judge 那批。）
