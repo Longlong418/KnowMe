@@ -521,11 +521,15 @@ def coding_runs_info(conn) -> list[dict]:
 
 def coding_info() -> dict:
     """Return non-secret Coding Workspace backend status."""
-    from knowme.applications.coding_workspace import coding_backends
+    from knowme.applications.coding_verify import detect_command
+    from knowme.applications.coding_workspace import coding_backends, project_root
 
     settings = load_settings()
     settings.ensure_home()
-    return {**coding_backends(settings.home), "execution_enabled": settings.experimental}
+    return {**coding_backends(settings.home), "execution_enabled": settings.experimental,
+            # 「验收命令留空就自动认」认出来的是哪一条，页面上要看得见 ——
+            # 不然「自动」等于让你猜。同一条命令也是运行时真会跑的那条。
+            "verify_detected": detect_command(project_root())}
 
 
 def coding_action(payload: dict) -> dict:

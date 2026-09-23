@@ -525,7 +525,9 @@
   .ctc-actions{display:flex;align-items:center;gap:14px;margin-top:10px;flex-wrap:wrap}
   .ctc-actions .meta{margin:0;flex:1;min-width:140px}
   .fld-inline{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)}
-  .fld-inline select{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;color:var(--ink);font-size:13px}
+  .fld-inline select,.fld-inline input[type=text]{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;color:var(--ink);font-size:13px}
+  .coding-verify-row{margin-top:10px}
+  .coding-verify-row input{flex:1;min-width:200px;font-family:var(--mono);font-size:12.5px}
   .coding-config{margin-bottom:16px;padding:0 14px}
   .coding-config>summary{cursor:pointer;padding:12px 0;font-size:13px;color:var(--ink2)}
   .coding-config[open]>summary{color:var(--ink);border-bottom:1px solid var(--line);margin-bottom:12px}

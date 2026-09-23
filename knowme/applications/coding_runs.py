@@ -43,7 +43,7 @@ MAX_DETAIL_CHARS = 200_000
 RECENT_LIMIT = 60
 # Rows the dashboard shows. "baseline" is included on purpose: it is the line
 # that says which commit the session started from.
-_KINDS = ("baseline", "write", "edit", "command", "delegate")
+_KINDS = ("baseline", "write", "edit", "command", "delegate", "verify")
 # A run id is a client-supplied string when the panel asks for one file back
 # (see read_detail), so it is matched against this before touching the disk.
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -205,6 +205,11 @@ def record(conn: sqlite3.Connection, home: Path, root: Path, kind: str, target: 
     Every mutating tool goes through here, which is also where the baseline is
     made — a caller cannot forget it, and the first change of a session is
     exactly the moment the "before" picture is still available.
+
+    ``returncode`` is only meaningful for "command" and "verify" rows, and the
+    frontend reads three cases out of it: a number is the real exit code,
+    ``None`` means it was killed on the timeout, and ``-1`` means it never
+    started (denylist, or no such executable). Three different sentences.
     """
     if kind not in _KINDS:
         raise ValueError(f"unknown run kind: {kind}")

@@ -50,6 +50,11 @@ DEFAULT_CODING_SETTINGS = {
     # thing here that cannot be undone by ignoring it. The Coding page's
     # "允许写和跑命令" checkbox is this field.
     "allow_write": False,
+    # 改完自动跑一遍验收（applications/coding_verify.py）。默认开：改完不验，
+    # 等于把「测试还过不过」推给下一个打开终端的人。
+    "verify_auto": True,
+    # 空 = 按项目标记自动认一条。填了就用你填的。
+    "verify_command": "",
 }
 
 
@@ -71,7 +76,10 @@ def load_coding_settings(home: Path) -> dict:
     if default_backend not in BACKENDS:
         default_backend = "pi"
     allow_write = bool(settings.get("allow_write", DEFAULT_CODING_SETTINGS["allow_write"]))
-    return {"default_backend": default_backend, "enabled": enabled, "allow_write": allow_write}
+    verify_auto = bool(settings.get("verify_auto", DEFAULT_CODING_SETTINGS["verify_auto"]))
+    verify_command = str(settings.get("verify_command", "") or "").strip()
+    return {"default_backend": default_backend, "enabled": enabled, "allow_write": allow_write,
+            "verify_auto": verify_auto, "verify_command": verify_command}
 
 
 def save_coding_settings(home: Path, payload: dict) -> dict:
@@ -88,8 +96,15 @@ def save_coding_settings(home: Path, payload: dict) -> dict:
     allow_write = current["allow_write"]
     if "allow_write" in payload:
         allow_write = bool(payload["allow_write"])
+    verify_auto = current["verify_auto"]
+    if "verify_auto" in payload:
+        verify_auto = bool(payload["verify_auto"])
+    verify_command = current["verify_command"]
+    if "verify_command" in payload:
+        verify_command = str(payload["verify_command"] or "").strip()
     result = {"default_backend": default_backend, "enabled": enabled,
-              "allow_write": allow_write}
+              "allow_write": allow_write, "verify_auto": verify_auto,
+              "verify_command": verify_command}
     home.mkdir(parents=True, exist_ok=True)
     coding_settings_path(home).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return result

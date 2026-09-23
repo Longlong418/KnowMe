@@ -124,7 +124,8 @@ const assert = (ok, msg) => {
 const escSrc = util.match(/^const esc = [\s\S]*?;\s*$/m);
 assert(escSrc, "esc() found in util.js");
 const app = eval(escSrc[0] + "\n" + codingSrc
-                 + "\n; ({codingTree, codingDiff, codingChanges, codingTime})");
+                 + "\n; ({codingTree, codingDiff, codingChanges, codingTime,"
+                 + " codingDelta, codingVerifyPill})");
 // Reached through `app` rather than destructured: the functions above are
 // function declarations, so a direct eval leaks them into THIS scope, and a
 // destructuring `const codingTree = ...` next to one is a redeclaration.
@@ -212,6 +213,59 @@ process.exit(failures ? 1 : 0);
 """
 
 
+# 验收那一列/那个药丸说的是判决，不是退出码 —— 三段脚本化，跑的就是真的 coding.js。
+VERIFY_HARNESS = r"""
+const fs = require("fs");
+const util = fs.readFileSync(process.argv[2], "utf8");
+const codingSrc = fs.readFileSync(process.argv[3], "utf8");
+let failures = 0;
+const assert = (ok, msg) => {
+  if (!ok) failures++;
+  console.log((ok ? "PASS  " : "FAIL  ") + msg);
+};
+
+const escSrc = util.match(/^const esc = [\s\S]*?;\s*$/m);
+assert(escSrc, "esc() found in util.js");
+const app = eval(escSrc[0] + "\n" + codingSrc
+                 + "\n; ({codingChanges, codingDelta, codingVerifyPill})");
+
+const row = (kind, returncode, detail) => ({ id: "v", at: "2026-09-23T11:59:11",
+  kind, target: "pytest -q", summary: "验收通过", insertions: 0, deletions: 0,
+  returncode, session_id: "s", detail });
+
+(function testAVerifyRowIsLabelledAndJudged() {
+  const html = app.codingChanges([row("verify", 0, "0f1e2d3c4b5a69788796a5b4c3d2e1f0.log")]);
+  assert(html.includes(">验收<"), "a verify row is labelled 验收, not left as the raw kind");
+  assert(/class="cd-ok">通过</.test(html), "exit 0 reads as 通过");
+  assert(/class="cd-bad">失败（退出 1）</.test(app.codingDelta(row("verify", 1))),
+         "a real exit code reads as 失败（退出 N）");
+  assert(/class="cd-warn">超时</.test(app.codingDelta(row("verify", null))),
+         "a null return code is the timeout, not a failure");
+  assert(/class="cd-warn">没跑起来</.test(app.codingDelta(row("verify", -1))),
+         "and -1 (never started) is its own sentence — not 超时, not 失败");
+})();
+
+(function testTheBandPillSaysWhetherTheWorkWasChecked() {
+  const pill = (coding, runs) => app.codingVerifyPill(coding, runs);
+  const pass = pill({settings: {verify_auto: true}}, [row("verify", 0)]);
+  assert(/class="pill pass"/.test(pass) && pass.includes("验收 通过"),
+         "a green verification shows as 验收 通过 in the status band");
+  assert(/class="pill fail"/.test(pill({settings: {verify_auto: true}}, [row("verify", 1)])),
+         "a red one is not dressed up as fine");
+  // 「没验」和「验过了」必须分得开，不然这条状态带就成了安慰剂。
+  assert(pill({settings: {verify_auto: true}, verify_detected: "npm test"}, [])
+           .includes("验收 还没验过"), "nothing verified yet says so, plainly");
+  assert(/class="pill fail"/.test(pill({settings: {verify_auto: true}}, []))
+           && pill({settings: {verify_auto: true}}, []).includes("验收 未配置"),
+         "no command anywhere is 未配置, and that is a problem, not a blank");
+  assert(pill({settings: {verify_auto: false}, verify_detected: "npm test"}, [])
+           .includes("验收 已关"), "auto-verification switched off says 已关");
+})();
+
+process.exit(failures ? 1 : 0);
+"""
+
+
 @pytest.fixture(scope="module")
 def node():
     exe = shutil.which("node")
@@ -240,6 +294,21 @@ def test_the_tree_nests_correctly_and_diffs_are_escaped(node, tmp_path):
     """The real coding.js against the real esc()."""
     assert CODING_JS.exists()
     _run(node, tmp_path, TREE_HARNESS, "coding_tree", UTIL_JS, CODING_JS)
+
+
+def test_a_verify_row_reads_as_a_verdict(node, tmp_path):
+    """验收行说的是「通过 / 失败 / 超时 / 没跑起来」四句话，不是一个退出码；
+    状态带上那句「验收 X」也不能把「没验过」说成「验过了」。"""
+    assert CODING_JS.exists()
+    _run(node, tmp_path, VERIFY_HARNESS, "coding_verify", UTIL_JS, CODING_JS)
+
+
+def test_the_verify_log_is_still_escaped():
+    """验收输出是**项目自己吐出来的文本**，和 patch 一样不可信：它必须走 esc()。
+    写个打印 `<script>` 的测试进去，页面上看到的要是字面的尖括号。"""
+    src = CODING_JS.read_text(encoding="utf-8")
+    assert re.search(r'class="coding-log">\$\{esc\(currentCodingPatch\)\}', src), (
+        "验收/命令的输出不再经过 esc() 了 —— 项目里的文本会直接变成页面上的标记")
 
 
 def test_the_diff_helper_is_still_the_one_rendering_the_patch():

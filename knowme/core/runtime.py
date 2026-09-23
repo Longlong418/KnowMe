@@ -119,6 +119,20 @@ def _status(output: str) -> str:
     return "error" if ("failed" in low or "timed out" in low or low.startswith("error")) else "ok"
 
 
+def _merged(first: LoopResult, second: LoopResult) -> LoopResult:
+    """Two rounds of one turn, as one result.
+
+    The verification retry IS this turn — it happened because of this message,
+    and the text the user reads is the second round's — so the tool calls and
+    the iteration count are added up rather than dropped, and `meta.iterations`
+    tells the truth about a turn that really did run twice. The first reply is
+    thrown away on purpose: it is the round that failed verification.
+    """
+    return LoopResult(reply=second.reply,
+                      tool_calls=[*first.tool_calls, *second.tool_calls],
+                      iterations=first.iterations + second.iterations)
+
+
 def record_step(steps: list, t0: float, kind: str, label: str, detail,
                 ms: int | None = None, status: str = "ok") -> None:
     """Append one timeline step (module-level so the bounds are testable — a
@@ -259,6 +273,37 @@ class AgentRuntime:
             if result is None:
                 result = self.run_loop_turn(spec, session, user_message, notify, stream,
                                             extra_context=extra_context, images=images)
+
+            # 验收：这一轮真动过项目，就跑一遍项目的验收命令；没过就把它交回
+            # 模型，只再修一轮。放这一个位置是有意的 —— front_door 和普通循环
+            # （graph 的 full_agent 节点就是同一个 run_loop_turn，LoopResult 原样
+            # 带回来）两条路都从这里出去，写两处迟早分歧。
+            # 导入写在函数里：core 不能在导入期依赖 applications。
+            from knowme.applications import coding_verify
+
+            if coding_verify.should_verify(result.tool_calls):
+                def _verify_step(outcome):
+                    """验收那一步进轨迹。`status` 必须**按关键字**传：describe() 的
+                    第三个值在 record_step 里对应的位置是 ms，拆开传就会把一个
+                    "error" 塞进时长里，红的验收在轨迹上还是绿的。"""
+                    label, detail, status = coding_verify.describe(outcome)
+                    record_step(steps, t0, "tool", label, detail, status=status)
+
+                outcome = coding_verify.run(self.settings, self.conn,
+                                            session=session, agent_id=resolved.name)
+                _verify_step(outcome)
+                # 修不动就把红的留在收据里让人决定，而不是一直烧 token 到「绿」
+                # 为止（那往往意味着它去改测试的断言了）。
+                for _ in range(coding_verify.MAX_RETRIES):
+                    if not outcome["ran"] or outcome["ok"]:
+                        break
+                    retry = self.run_loop_turn(
+                        spec, session, coding_verify.retry_message(outcome),
+                        notify, stream, extra_context="", images=None)
+                    result = _merged(result, retry)
+                    outcome = coding_verify.run(self.settings, self.conn,
+                                                session=session, agent_id=resolved.name)
+                    _verify_step(outcome)
 
             quick = captured.get("graph_route", {}).get("target") == "quick_reply"
             meta = {

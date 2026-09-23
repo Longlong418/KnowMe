@@ -28,6 +28,16 @@ Everything that changes the working tree goes through applications/coding_runs,
 which writes the baseline row and one row per change. A write that cannot be
 recorded is still a write, so failures there are swallowed — the receipt is
 evidence, not a gate.
+
+AND SOMEBODY CHECKS THE WORK. `verify()` (with applications/coding_verify.py
+choosing the command) runs the project's own test command when a turn actually
+changed something, and records the exit code and the output as one more row.
+It is not one of the eight tools: the model does not ask for it and cannot turn
+it off. It shares `_spawn` with run_command, so the denylist, the env scrub and
+the timeout clamp are written once.
+For `verify` rows, `returncode=None` means it was killed on the timeout and
+`-1` means it never started (denylist or no such executable) — the page says
+「超时」 and 「没跑起来」 respectively, which are different things.
 """
 
 from __future__ import annotations
@@ -58,6 +68,9 @@ MAX_DIFF_CHARS = 6000
 MAX_OUTPUT_CHARS = 8000
 DEFAULT_TIMEOUT = 60
 MAX_TIMEOUT = 600
+# 验收命令的默认超时：一套测试 60 秒跑不完是常态。VERIFY_TIMEOUT 是给验收的
+# 默认值，DEFAULT_TIMEOUT 是给「随手跑一条命令」的。
+VERIFY_TIMEOUT = 300
 
 # Unrecoverable mistakes, refused before a process exists. Deliberately short:
 # a long list invites trust it cannot earn (see the module docstring).
@@ -92,6 +105,15 @@ _WRITE_OFF = (
 def _command_env() -> dict[str, str]:
     """The environment a model-chosen command runs with."""
     return {k: v for k, v in delegate_env().items() if not _SECRET_ENV_RE.search(k)}
+
+
+def _clamp_timeout(seconds, default: int) -> int:
+    """One clamp for both callers (`run_command` and `verify`)."""
+    try:
+        value = int(seconds)
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(value or default, MAX_TIMEOUT))
 
 
 def _resolve(root: Path, relative: str, *, writing: bool = False) -> Path:
@@ -370,30 +392,73 @@ class _Project:
         # replace_all a model that guessed "two places" needs to be told.
         return f"替换了 {replaced} 处。\n" + _wrote(relative, patch)
 
-    def run_command(self, command: str, timeout_seconds: int = DEFAULT_TIMEOUT) -> str:
-        self.ensure_baseline()
+    def _spawn(self, command: str, timeout: int) -> tuple[int | None, str, str]:
+        """在项目根里跑一条 shell 命令，返回 (退出码, 输出, 拒绝原因)。
+
+        两个调用者（模型自己的 `run_command`、和验收的 `verify`）共用这一处：
+        黑名单、环境变量过滤、超时都只写一遍。`refusal` 非空 = 这条命令压根不该
+        起来（黑名单 / 命令不存在）；`returncode is None` 而 `refusal` 为空 =
+        超时被杀。两种情况的说法由调用者按自己的语气给。
+        """
         for pattern, why in _DENIED:
             if re.search(pattern, command, re.IGNORECASE):
-                return (f"拒绝执行：这条命令命中了黑名单（{why}）。\n"
-                        "黑名单只是防手滑，不是沙箱。确实要跑的话请用户自己在终端里跑。")
-        root = self.root
-        timeout = max(1, min(int(timeout_seconds or DEFAULT_TIMEOUT), MAX_TIMEOUT))
+                return None, "", (f"拒绝执行：这条命令命中了黑名单（{why}）。\n"
+                                  "黑名单只是防手滑，不是沙箱。确实要跑的话请用户自己在终端里跑。")
         try:
-            result = subprocess.run(command, shell=True, cwd=root, text=True,
+            result = subprocess.run(command, shell=True, cwd=self.root, text=True,
                                     capture_output=True, check=False,
                                     timeout=timeout, env=_command_env())
         except subprocess.TimeoutExpired:
+            return None, "", ""
+        except OSError as exc:
+            return None, "", f"命令起不来：{exc}"
+        return result.returncode, (result.stdout or "") + (result.stderr or ""), ""
+
+    def run_command(self, command: str, timeout_seconds: int = DEFAULT_TIMEOUT) -> str:
+        self.ensure_baseline()
+        timeout = _clamp_timeout(timeout_seconds, DEFAULT_TIMEOUT)
+        returncode, output, refusal = self._spawn(command, timeout)
+        if refusal:
+            return refusal
+        if returncode is None:
             self.record("command", command, summary=f"超时（{timeout} 秒）",
                         command=command, output="", returncode=None)
             return (f"命令超过 {timeout} 秒还没结束，已经放弃等待。"
                     "默认超时 60 秒，最多 600 秒——长任务可以在 timeout_seconds 里加大。")
-        except OSError as exc:
-            return f"命令起不来：{exc}"
-        output = (result.stdout or "") + (result.stderr or "")
         self.record("command", command, command=command, output=output,
-                    returncode=result.returncode)
+                    returncode=returncode)
         body = _head_tail(output.strip(), MAX_OUTPUT_CHARS) or "(没有输出)"
-        return f"退出码 {result.returncode}\n{body}"
+        return f"退出码 {returncode}\n{body}"
+
+    def verify(self, command: str, timeout_seconds: int = VERIFY_TIMEOUT) -> dict:
+        """跑一遍项目的验收命令，记一条 `verify` 收据，把结果原样交回去。
+
+        这是**验收官**跑的那一条，不是模型要求的，所以它不经过 `gated()`；
+        总开关由 `applications/coding_verify.py::run` 那一处判（唯一的决定点）。
+
+        故意**不**调 `ensure_baseline()`：验收不改东西，而起点必须取在改动之前 ——
+        在一轮改动之后才记「起点」，那个起点里就已经含着这次改动了（Phase 29 的教训）。
+        """
+        timeout = _clamp_timeout(timeout_seconds, VERIFY_TIMEOUT)
+        returncode, output, refusal = self._spawn(command, timeout)
+        if refusal:
+            # 黑名单 / 命令不存在：没跑起来。`returncode=-1` 是这个意思，
+            # 和 None（超时被杀）分开 —— 否则页面上会把「没跑起来」说成「超时」。
+            self.record("verify", command, command=command, output=refusal,
+                        returncode=-1, summary="验收没跑起来")
+            return {"ran": False, "ok": False, "command": command, "returncode": -1,
+                    "output": refusal, "note": refusal}
+        if returncode is None:
+            self.record("verify", command, summary=f"验收超时（{timeout} 秒）",
+                        command=command, output="", returncode=None)
+            return {"ran": True, "ok": False, "command": command, "returncode": None,
+                    "output": "", "note": f"验收超过 {timeout} 秒还没结束，已经杀掉"}
+        ok = returncode == 0
+        self.record("verify", command, command=command, output=output,
+                    returncode=returncode,
+                    summary="验收通过" if ok else f"验收失败（退出 {returncode}）")
+        return {"ran": True, "ok": ok, "command": command, "returncode": returncode,
+                "output": output, "note": ""}
 
 
 def _guard(fn, *args, **kwargs) -> str:
@@ -418,6 +483,16 @@ def _wrote(relative: str, patch: str) -> str:
     insertions, deletions = coding_runs.counts(patch)
     return (f"{relative} 已写入（+{insertions} −{deletions}）：\n"
             + _clip(patch, MAX_DIFF_CHARS, "diff"))
+
+
+def run_verify(settings, conn, *, session=None, agent_id: str = "default",
+               command: str) -> dict:
+    """验收的入口（给运行时用，不是给模型用的 —— 它不在工具清单里）。
+
+    总开关不在这里判：唯一判它的地方是 `applications/coding_verify.py::run`，
+    那里同时管着「自动验收开着吗」和「有没有命令可跑」。这里只管跑和记账。
+    """
+    return _Project(settings, conn, session=session, agent_id=agent_id).verify(command)
 
 
 def make_tools(settings, conn, session=None, agent_id: str = "default") -> list[Tool]:

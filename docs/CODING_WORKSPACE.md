@@ -8,7 +8,7 @@
 一开始它只是个「文件浏览器 + 一个把任务甩给本机 CLI 的按钮」，所以用起来像传声筒：
 你说话，CLI 干活，KnowMe 只负责转述，改了哪里你看不见。
 
-现在分两层：
+现在分四层：
 
 **第一层 —— KnowMe 自己的手**（`knowme/tools/coding.py`）。这些是给模型用的工具，它自己就能
 读文件、搜代码、写文件、跑命令，不必非要把活外包出去：
@@ -32,7 +32,13 @@
 **第三层 —— 收据**（`knowme/applications/coding_runs.py`）。不管上面哪一层动的项目，每次改动都会
 落一行：改了哪个文件或跑了什么命令、`+多少行 −多少行`、patch 存在哪。这就是页面上「改动」那一页。
 
-## 三条边界（重要）
+**第四层 —— 验收官**（`knowme/applications/coding_verify.py`）。收据只说「改了哪几行」，不说
+「测试还过不过」，所以这一轮**只要真动过项目**，KnowMe 就自己跑一遍项目的验收命令，把退出码和
+输出也记进收据；**没过就把失败输出交回给它，只再修一轮**，然后再验一次。修不动就停在红的上面
+让人来决定。三个「不跑」都会说明理由（进轨迹，绝不静默）：总开关关着、自动验收被关掉、
+认不出验收命令。
+
+## 四条边界（重要）
 
 **1. 出不去项目根目录。** 所有路径都走 `applications/coding_workspace.py` 里现成的那套守卫
 （`_relative_path`、`SKIP_FILES`、`SKIP_DIRECTORIES`）—— 页面和 agent 的手**共用同一套规则**，
@@ -46,6 +52,12 @@
 `sudo`、`shutdown`、`curl … | sh` 这类命令，但**别把它当安全机制**：它拦的是"手一抖"，不是"有人存心"。
 真要跑不可信的代码，请自己在容器或虚拟机里跑。这句话同时写在工具描述和
 `knowme/tools/coding.py` 的黑名单函数旁边，模型自己看得见。
+
+**4. 验收 = 真的在跑你项目里的代码。** `npm test` 会执行 `package.json` 里那个脚本，
+`make test` 会执行 Makefile 里的东西 —— 和黑名单那件事一样：这是**卫生**，不是沙箱。
+另外，**验收命令只可能来自两处**：你在 Coding 页填的那条，或者代码里那张固定表认出来的
+（pytest / npm test / make test / go test / cargo test）。**没有任何工具会写 `coding.json`**，
+所以模型编不出一条命令让 KnowMe 去跑。
 
 ## 总开关：`allow_write`
 
@@ -69,15 +81,21 @@
 {
   "default_backend": "pi",
   "enabled": { "pi": true, "claude": false, "codex": false },
-  "allow_write": false
+  "allow_write": false,
+  "verify_auto": true,
+  "verify_command": ""
 }
 ```
 
 | 字段 | 含义 | 页面上在哪 |
 |---|---|---|
-| `allow_write` | 写文件 / 跑命令的总开关 | 状态带上那个开关 |
+| `allow_write` | 写文件 / 跑命令 / 跑验收的总开关 | 状态带上那个开关 |
 | `default_backend` | 交给 CLI 时优先用哪个 | 任务卡上的「后备 CLI」下拉 |
 | `enabled` | 每个 CLI 允不允许用 | 「本机 Coding Agent 设置」折叠区 |
+| `verify_auto` | 改完自动跑一遍验收（默认开） | 折叠区里那个勾 |
+| `verify_command` | 验收命令，**空 = 自动认** | 折叠区那个输入框（placeholder 里就是自动认到的那条） |
+
+`verify_auto` / `verify_command` 也是**只从页面来**：没有任何工具会写这个文件。
 
 「允许 Coding Agent 调用本机 CLI」**不在这个文件里**，它对应配置里的 `experimental`
 （`KNOWME_EXPERIMENTAL`），和 `delegate_task` 一起开关。关掉之后这一页仍然能存后端偏好，
@@ -87,7 +105,8 @@
 
 **`#coding`** 从上到下就是人干活的顺序：
 
-1. **状态带** —— 项目根目录、`读 ✓`、总开关、本机 CLI 状态、有几个文件被改过。
+1. **状态带** —— 项目根目录、`读 ✓`、总开关、本机 CLI 状态、**验收结论**（通过 / 失败 /
+   超时 / 没跑起来 / 还没验过 / 已关 / 未配置）、有几个文件被改过。
 2. **任务卡** —— 一个大输入框 + 一个「让它去做」按钮 + 一个「后备 CLI」下拉。按下去之后，
    它带着项目目录去 `#agent/coding` 那个对话里干活。任务内容会存进浏览器本地
    （`localStorage.knowme_coding_task`），刷新不丢。
@@ -101,13 +120,21 @@
 patch 是**文件内容**，属于不可信文本，每一行都过 `esc()` 再上屏——写个含 `<b>` 的文件进去，
 页面上看到的必须是字面的 `<b>`，不是粗体。
 
+验收那一行说的是判决，不是一个退出码：`通过` / `失败（退出 1）` / `超时` / `没跑起来`。
+它的详情是**项目自己吐出来的文本**（同样不可信），所以也过 `esc()`。
+`#agent/coding` 顶上那条带子也会写一句验收结论 —— 改了东西却不知道测试还过不过，
+是这一页最想回答的问题。
+
 ## 收据是怎么记的
 
-表 `coding_runs`（惰性建表，**不动 `db.py` 的 SCHEMA**，老库零迁移）。五种行：
-`baseline`、`write`、`edit`、`command`、`delegate`。
+表 `coding_runs`（惰性建表，**不动 `db.py` 的 SCHEMA**，老库零迁移）。六种行：
+`baseline`、`write`、`edit`、`command`、`delegate`、`verify`。
 
 - **patch 全文不进 SQLite**，写在 `<home>/coding_runs/<32位十六进制>.diff`。表里只存文件名，
   读回来之前先按 `^[0-9a-f]{32}$` 校验，客户端给的 id 穿不了目录。
+  `verify` 行没有 diff，输出全文落在同目录的 `.log` 里。
+- **`returncode` 三个状态分得开**（页面上也是三句不同的话）：数字 = 真实退出码，
+  `None` = 超时被杀，`-1` = 压根没跑起来（黑名单拒绝 / 没有这个可执行文件）。
 - **`baseline` 是懒的**：不是一打开页面就记，而是**某个会话第一次真要动项目时才记**，而且记的
   是**改动之前**的状态。这就是下一轮「一键撤销」要回滚到的那个点。
 - **不是 git 仓库 / 没装 git → 整块收据静默降级**，绝不因为记账失败而让写入失败。
@@ -117,8 +144,10 @@ patch 是**文件内容**，属于不可信文本，每一行都过 `esc()` 再�
 
 | 文件 | 负责什么 |
 |---|---|
-| `knowme/tools/coding.py` | KnowMe 自己的八个工具（读 / 写 / 跑），路径守卫、总开关、黑名单 |
+| `knowme/tools/coding.py` | KnowMe 自己的八个工具（读 / 写 / 跑），路径守卫、总开关、黑名单、验收怎么跑（`_spawn` / `verify`） |
 | `knowme/applications/coding_runs.py` | 收据：表、patch 文件、baseline |
+| `knowme/applications/coding_verify.py` | 验收官：认验收命令、什么时候不跑、再修一轮说的话 |
+| `knowme/core/runtime.py` | `run_turn` 里那段「验收 + 没过再修一轮」（两条路径共用同一处） |
 | `knowme/applications/coding_workspace.py` | 目录与文件模型、路径守卫、CLI 检测、`coding.json` |
 | `knowme/tools/experimental.py` | 本机 Coding CLI 的调度（`delegate_task`） |
 | `knowme/ops/coding_eval.py` | 跑 git 命令的小工具（argv 写死、不过 shell） |
@@ -128,14 +157,21 @@ patch 是**文件内容**，属于不可信文本，每一行都过 `esc()` 再�
 | `knowme/ops/static/js/chat.js` | `#agent/coding` 顶上那条 `.coding-strip` |
 | `knowme/ops/static/style.css` | 这些块的全部样式 |
 | `evals/deterministic/test_coding_tools.py` | 工具的确定性测试（范围 / 开关 / 收据） |
-| `evals/deterministic/test_coding_frontend.py` | 前端锁：轮询不重建页面、真树、patch 转义、收据行可点 |
+| `evals/deterministic/test_coding_verify.py` | 验收本身：认命令、什么时候不跑、记账与判决 |
+| `evals/deterministic/test_coding_acceptance.py` | 整轮行为：绿的不啰嗦、红的一红一绿、修不动就停 |
+| `evals/deterministic/test_coding_frontend.py` | 前端锁：轮询不重建页面、真树、patch 转义、收据行可点、验收怎么说人话 |
 
 ## 当前限制
 
 - **没有一键撤销**（`baseline` 行已经为它准备好了），也没有完整的并排 diff 面板
   （行号、折叠、左右对照）。
-- **自动验收命令还没接上**：`knowme/ops/coding_eval.py::run_suite` 写好了但没人调用。
-  现在「跑测试」是模型自己想起来就跑。
+- **交给本机 CLI（`delegate_task`）的改动仍然不进收据** —— 那个工具还没接
+  `coding_runs`。但验收**已经把它算进触发条件**：交给 CLI 改过也是改过，更该有人回头
+  看一遍。（`ops/coding_eval.py::run_suite` 那个「跑一串命令」的老函数仍然没人调用 ——
+  验收走的是 `tools/coding.py` 那条路，不经过它。）
+- 页面上**没有**「手动跑一次验收」的按钮：这一轮的产品决定是**自动跑**，命令可以在
+  折叠区里改。
+- 验收命令**不按项目分开存**：现在只有一个项目根，`coding.json` 一个字段就够。
 - 页面上的文件预览**本身还是只读的**——你改不了文件；能改的是 agent（在总开关打开时）。
 - Claude Code 和 Codex 的流式事件不像 `pi` 那样逐条解析，跑完给一段完整摘要。
 - 三个 CLI 的认证和权限各管各的，用之前自己确认登录状态和目录权限。

@@ -14,7 +14,7 @@ let currentCodingRun = "";     // the receipt row whose detail is open
 let currentCodingPatch = "";
 
 const CODING_KIND_ZH = {baseline: "起点", write: "写文件", edit: "改文件",
-                        command: "跑命令", delegate: "交给 CLI"};
+                        command: "跑命令", delegate: "交给 CLI", verify: "验收"};
 
 const codingTime = iso => String(iso || "").slice(11, 16);
 const codingIsChange = r => r.kind !== "baseline";
@@ -28,6 +28,15 @@ const codingChangedFiles = runs =>
 // exited, an edit reports lines added and removed. Both are the answer to
 // "did it actually work", which is the whole point of the receipt.
 function codingDelta(r){
+  if (r.kind === "verify"){
+    // 验收这一列要说的是判决，不是退出码 —— 「退出 1」得让人自己想一秒。三个
+    // 情况分得开：0 是过，null 是超时被杀掉，-1 是根本没跑起来（黑名单拒绝、
+    // 或者没有这个可执行文件）。后两个都不是「失败」，别混成一句话。
+    if (r.returncode === 0) return `<span class="cd-ok">通过</span>`;
+    if (r.returncode == null) return `<span class="cd-warn">超时</span>`;
+    if (r.returncode < 0) return `<span class="cd-warn">没跑起来</span>`;
+    return `<span class="cd-bad">失败（退出 ${r.returncode}）</span>`;
+  }
   if (r.kind === "command" || r.kind === "delegate"){
     // A command row with no return code is one that timed out (coding.py
     // records None only there) — saying "退出 0" about it would be a lie.
@@ -45,6 +54,33 @@ function codingWriteHint(write){
   return write
     ? "它会自己读文件、改文件、跑测试，改了哪里都会留在右边的「改动」里。"
     : "开关关着，它现在只能读和回答；打开上面的开关它才能动手。";
+}
+
+// 验收的结论，一个词。最新一条 verify 收据说了什么；一条都没有就说清楚为什么
+// 没有（开关关着 / 关掉了自动验收 / 压根没认到命令）——「没验」和「验过了」在
+// 这一页上必须分得开，不然这条状态带就成了安慰剂。
+function codingVerdict(coding, runs){
+  const settings = coding.settings || {};
+  const row = runs.find(r => r.kind === "verify");   // 收据是新到旧
+  if (row){
+    if (row.returncode === 0) return {label: "通过", cls: "pass"};
+    if (row.returncode == null) return {label: "超时", cls: "fail"};
+    if (row.returncode < 0) return {label: "没跑起来", cls: "fail"};
+    return {label: "失败", cls: "fail"};
+  }
+  if (!settings.verify_auto) return {label: "已关", cls: "skip"};
+  if (!(settings.verify_command || coding.verify_detected)) return {label: "未配置", cls: "fail"};
+  return {label: "还没验过", cls: "skip"};
+}
+
+function codingVerifyPill(coding, runs){
+  const row = runs.find(r => r.kind === "verify");
+  const verdict = codingVerdict(coding, runs);
+  const what = row ? row.target : ((coding.settings || {}).verify_command
+    || coding.verify_detected || "没认到验收命令");
+  const when = row ? `最近一次 ${codingTime(row.at)}：` : "";
+  return `<span class="pill ${verdict.cls}" title="${esc(when + what)}">验收 ${
+    esc(verdict.label)}</span>`;
 }
 
 function codingStatusBand(coding, root, runs){
@@ -68,6 +104,7 @@ function codingStatusBand(coding, root, runs){
       </label>
       <span class="pill ${coding.execution_enabled && enabled.length ? "pass" : "fail"}"
             title="本机 Coding CLI：KnowMe 可以把大活交给它">本机 CLI ${esc(cli)}</span>
+      ${codingVerifyPill(coding, runs)}
       ${changed.size ? `<span class="pill">${changed.size} 个文件有改动</span>` : ""}
     </div>
   </div>`;
@@ -115,7 +152,17 @@ function codingBackendPanel(coding){
         ${coding.execution_enabled ? "checked" : ""}> 允许 Coding Agent 调用本机 CLI</label>
       <div class="coding-backends">${cards || `<div class="empty">没有检测到本机 Coding CLI。</div>`}</div>
       <div class="meta coding-hint">开关只控制 KnowMe 是否允许选择该 CLI，不会保存或读取它们的登录凭证。</div>
-      <button class="save ghost" onclick="saveCodingSettings()">保存这两个开关</button>
+      <label class="coding-execution"><input id="coding-verify-auto" type="checkbox"
+        ${settings.verify_auto ? "checked" : ""}> 改完自动跑一遍验收</label>
+      <div class="meta coding-hint">动过项目之后，它自己跑一遍下面这条命令，结果记在「改动」里；
+        没过就把失败输出交回给它再修一轮（只一轮）。</div>
+      <label class="fld-inline coding-verify-row" title="留空就用自动认出来的那条">验收命令
+        <input id="coding-verify" type="text" spellcheck="false"
+               value="${esc(settings.verify_command || "")}"
+               placeholder="${esc(coding.verify_detected || "没认到，请自己填一条")}"></label>
+      <div class="meta coding-hint">这条命令只可能来自你，或者那张固定的识别表（pytest / npm test /
+        make test / go test / cargo test）——没有任何工具会去写这个配置。</div>
+      <button class="save ghost" onclick="saveCodingSettings()">保存上面的设置</button>
     </div>
   </details>`;
 }
@@ -182,7 +229,13 @@ async function saveCodingSettings(){
     enabled[input.dataset.codingBackend] = input.checked;
   });
   const execution = document.getElementById("coding-execution");
-  const payload = {action: "save", enabled, execution_enabled: !!(execution && execution.checked)};
+  const verifyAuto = document.getElementById("coding-verify-auto");
+  const verifyCmd = document.getElementById("coding-verify");
+  const payload = {action: "save", enabled, execution_enabled: !!(execution && execution.checked),
+                   verify_auto: !!(verifyAuto && verifyAuto.checked),
+                   // 空字符串是"自动认"，所以要原样存下去 —— 不能被当成"没这个键"
+                   // 而保留旧值，否则你清空它等于没清。
+                   verify_command: verifyCmd ? verifyCmd.value.trim() : ""};
   // The select only lists READY backends, so an empty one means "no preference I
   // can express right now" — omit the key and the stored choice stands, rather
   // than sending "" and having the server reject the whole save.
@@ -386,10 +439,15 @@ function codingStrip(){
   const runs = codingRuns();
   const changed = codingChangedFiles(runs);
   const write = writeAllowed();
+  // 这条带子上也必须看得见验收的结论：改了东西却不知道测试还过不过，是这一页
+  // 最想回答的问题。通过=绿，没过=要点眼色，没验=灰（复用现成的三个类）。
+  const verdict = codingVerdict(D.coding || {}, runs);
+  const verifyCls = verdict.cls === "pass" ? "on" : (verdict.cls === "fail" ? "work" : "");
   return `<div class="coding-strip">
     <span class="cs-root" title="${esc(root)}">⌘ ${esc(root || "未配置项目根目录")}</span>
     <span class="cs-flag ${write ? "on" : ""}">${write ? "可以改文件" : "只读"}</span>
     <span class="cs-flag ${changed.size ? "work" : ""}">${
       changed.size ? `项目里有 ${changed.size} 个文件被改过` : "还没有改动"}</span>
+    <span class="cs-flag ${verifyCls}">验收 ${esc(verdict.label)}</span>
     <a class="cs-link" href="#coding/changes">看改动 →</a></div>`;
 }
