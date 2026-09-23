@@ -32,10 +32,21 @@ def isolated(tmp_path, monkeypatch):
 
 
 def test_rebuild_keeps_the_conversation(isolated):
-    """A settings change swaps the BRAIN, not the thread."""
+    """A settings change swaps the BRAIN, not the thread — nor what the agent
+    remembers of it.
+
+    The second half was missing for a while: rebuild inherited the session id
+    but not the history, so switching provider mid-conversation left the replies
+    on screen (they come from chat_log) while the model had none of them — the
+    next turn answered like a stranger."""
     first = browser_agent.get_agent()
     session = first.session.session_id
     assert session != "default", "a dashboard run must never chat into 'default'"
+    first.conn.executemany(
+        "INSERT INTO chat_log (role, content, session_id) VALUES (?, ?, ?)",
+        [("user", "我们把服务器叫什么？", session),
+         ("assistant", "叫 devbox。", session)])
+    first.conn.commit()
 
     assert browser_agent.rebuild() is None          # None == success
     after = browser_agent.current()
@@ -44,6 +55,11 @@ def test_rebuild_keeps_the_conversation(isolated):
     assert after.session.session_id == session, (
         "rebuild dropped the chat thread — the dock would show an empty "
         "conversation and the user's messages would look lost"
+    )
+    assert [m["content"] for m in after.session.history] == [
+        "我们把服务器叫什么？", "叫 devbox。"], (
+        "rebuild dropped the working memory — the thread is on screen but the "
+        "model cannot see it, so the next reply acts like the chat just started"
     )
 
 

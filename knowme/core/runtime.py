@@ -68,6 +68,31 @@ MAX_STEPS = 40
 _STEP_LABEL_MAX = 80
 _STEP_DETAIL_MAX = 400
 
+# 轨迹是给用户看的，所以这里存的每一句都必须是中文人话。
+# 这些表就是全部说法，前端 js/trace.js 里有一份一模一样的（render.js 直播时
+# 自己拼一遍，因为服务端的那份要等这一轮跑完才到）——改文案要两边一起改。
+_STOP_REASON_ZH = {
+    "end_turn": "直接回答",
+    "tool_use": "要调用工具",
+    "max_tokens": "到达输出上限，回复被截断",
+    "stop_sequence": "遇到停止词",
+    "refusal": "模型拒绝回答",
+    "pause_turn": "暂停，等待继续",
+}
+_GATE_ZH = {"retrieve": "要查记忆", "skip": "不用查记忆"}
+_TARGET_ZH = {"quick_reply": "直接回答", "quick": "直接回答", "full": "完整流程"}
+_COMPACT_ZH = {
+    "tool_budget": "先说清工具结果在哪",
+    "micro_compact": "旧的工具结果收成一行指针",
+    "state_summary": "整段对话压成摘要",
+}
+
+
+def _zh(mapping: dict, key) -> str:
+    """表里有就用表里的，没有就原样输出 —— 供应商多了一个新 stop_reason 时，
+    用户看到的应该是一个陌生的英文词，而不是一句「未知」。"""
+    return mapping.get(str(key), str(key or ""))
+
 
 @dataclass
 class TurnResult:
@@ -162,40 +187,49 @@ class AgentRuntime:
                     "compaction": ev.get("compaction", []),
                 }
                 _step("context",
-                      f"{ev.get('history_messages', 0)}→{ev.get('sent_messages', 0)} msg",
-                      {"_detail": [f"app={ev.get('application_chars', 0)} chars",
-                                   *(f"compact {c}" for c in ev.get("compaction") or [])]})
+                      f"历史 {ev.get('history_messages', 0)} 条 → 送出 "
+                      f"{ev.get('sent_messages', 0)} 条",
+                      {"_detail": "；".join(
+                          [f"附加上下文 {ev.get('application_chars', 0)} 字",
+                           *[f"压缩：{_zh(_COMPACT_ZH, c)}"
+                             for c in ev.get("compaction") or []]])})
             if kind == "gate":
                 captured["gate"] = {"decision": ev.get("decision"), "reason": ev.get("reason")}
-                _step("gate", str(ev.get("decision") or ""),
+                _step("gate", _zh(_GATE_ZH, ev.get("decision")),
                       {"_detail": ev.get("reason") or ""})
             if kind == "route":
                 captured["graph_route"] = {"target": ev.get("target"), "reason": ev.get("reason")}
-                _step("route", f"{ev.get('workflow') or 'graph'} → {ev.get('target')}",
+                _step("route",
+                      f"{ev.get('workflow') or 'graph'} → {_zh(_TARGET_ZH, ev.get('target'))}",
                       {"_detail": ev.get("reason") or ""})
             if kind == "triage":
                 captured["triage_reason"] = ev.get("reason")
             if kind == "graph_end":
                 captured["graph_path"] = ev.get("path")
-                _step("graph", f"{ev.get('workflow')} · {' → '.join(ev.get('path') or [])}",
-                      {"_detail": [f"steps={ev.get('steps')}", f"error={ev.get('error')}"]},
+                _step("graph",
+                      f"工作流 {ev.get('workflow')} · {' → '.join(ev.get('path') or [])}",
+                      {"_detail": "；".join(
+                          [f"共 {ev.get('steps')} 步",
+                           *([f"出错：{ev['error']}"] if ev.get("error") else [])])},
                       ms=ev.get("ms"))
             if kind == "node_end":
-                detail = [f"wrote {k}" for k in ev.get("keys") or []]
+                detail = [f"写入了 {k}" for k in ev.get("keys") or []]
                 if ev.get("error"):
-                    detail.append(f"error {ev.get('error')}")
-                _step("node", str(ev.get("node") or ""), {"_detail": detail},
+                    detail.append(f"出错：{ev.get('error')}")
+                _step("node", str(ev.get("node") or ""), {"_detail": "；".join(detail)},
                       ms=ev.get("ms"), status="error" if ev.get("error") else "ok")
             if kind == "llm":
                 usage = ev.get("usage") or {}
-                _step("llm", f"iter {ev.get('iteration')} · {ev.get('stop_reason')}",
-                      {"_detail": f"tokens {usage.get('in', '?')}→{usage.get('out', '?')}"})
+                _step("llm",
+                      f"第 {ev.get('iteration')} 轮 · {_zh(_STOP_REASON_ZH, ev.get('stop_reason'))}",
+                      {"_detail": f"输入 {usage.get('in', '?')} tokens，"
+                                  f"输出 {usage.get('out', '?')} tokens"})
             if kind == "tool":
                 _step("tool", str(ev.get("tool") or ""),
                       {"_detail": ev.get("output") or ""},
                       status=_status(ev.get("output")))
             if kind == "consolidation":
-                _step("consolidation", f"+{ev.get('new_facts', 0)} facts", {})
+                _step("consolidation", f"新增 {ev.get('new_facts', 0)} 条记忆", {})
         notify = compose(observer, self.tracer.event, _capture)
         # turn_start/end are already written by Tracer.turn/end_turn.  Send
         # them only to the live observer + capture path here, otherwise each

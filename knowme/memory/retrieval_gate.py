@@ -25,7 +25,7 @@ Given the user's message, decide if answering well requires the user's stored
 memories (facts about people, projects, preferences, or past events).
 
 Reply with ONLY this JSON, nothing else:
-{{"retrieve": true/false, "query": "<search keywords if true, else empty>", "reason": "<5 words>"}}
+{{"retrieve": true/false, "query": "<search keywords if true, else empty>", "reason": "<一句中文，给用户看，不超过 15 字>"}}
 
 General knowledge, math, small talk, or self-contained requests → false.
 Anything referencing the user's life, people, plans, or history → true.
@@ -37,7 +37,12 @@ def should_retrieve(
     client: anthropic.Anthropic, small_model: str, message: str
 ) -> tuple[bool, str, str]:
     """Returns (retrieve?, search_query, reason). Fails open: if the gate
-    itself errors, we retrieve — a stale memory beats a lost one."""
+    itself errors, we retrieve — a stale memory beats a lost one.
+
+    The reason is shown to the user on the turn's timeline, so it is written in
+    Chinese (the prompt asks the model for 中文) and the fail-open lines say what
+    happened in 中文 too — keeping the exception name, which is the one part a
+    log reader actually needs."""
     try:
         response = client.messages.create(
             model=small_model,
@@ -48,8 +53,8 @@ def should_retrieve(
         )
         text = "".join(b.text for b in response.content if b.type == "text")
         if "{" not in text:   # a reasoning-only / truncated reply, not an error
-            return True, message, "gate returned no JSON — failing open"
+            return True, message, "门控没有回 JSON，按「检索」处理"
         decision = json.loads(text[text.index("{") : text.rindex("}") + 1])
         return bool(decision.get("retrieve")), decision.get("query", message), decision.get("reason", "")
     except Exception as exc:
-        return True, message, f"gate failed open ({type(exc).__name__})"
+        return True, message, f"门控出错，按「检索」处理（{type(exc).__name__}）"

@@ -254,20 +254,19 @@ function applyStreamEvent(pending, ev){
   } else if (ev.kind === "node_end"){
     (pending.nodes = pending.nodes || {})[ev.node] =
       {status: ev.error ? "error" : "done", ms: ev.ms};
-    pushStep(pending, "node", ev.node,
-             [ ...(ev.keys||[]).map(k => `wrote ${k}`),
-               ...(ev.error ? [`error ${ev.error}`] : []) ].join(", "),
+    pushStep(pending, "node", ev.node, stepDetail("node", ev),
              ev.ms, ev.error ? "error" : "ok");
   } else if (ev.kind === "graph_end"){
     // the engine already measured the whole run — its ms is the graph's own
-    pushStep(pending, "graph",
-             `${ev.workflow} · ${(ev.path||[]).join(" → ")}`,
-             [`steps=${ev.steps}`, `error=${ev.error}`].join(", "),
+    pushStep(pending, "graph", stepLabel("graph", ev), stepDetail("graph", ev),
              ev.ms, ev.error ? "error" : "ok");
   }
+  // 每一步的 label/detail 都由 trace.js 的 stepLabel/stepDetail 生成，和跑完之后
+  // 服务端存进 meta.steps 的那份是同一套说法 —— 直播看起来是英文、回看变中文
+  // 那种事，就是在这里各写各的造成的。
   if (ev.kind === "gate"){
     pending.gate = {decision: ev.decision, reason: ev.reason};
-    pushStep(pending, "gate", ev.decision, ev.reason, Date.now()-pending.started);
+    pushStep(pending, "gate", stepLabel("gate", ev), ev.reason, Date.now()-pending.started);
   } else if (ev.kind === "context"){
     pending.context = {
       application_chars: ev.application_chars,
@@ -275,16 +274,13 @@ function applyStreamEvent(pending, ev){
       sent_messages: ev.sent_messages,
       compaction: ev.compaction || []
     };
-    pushStep(pending, "context",
-      `${ev.history_messages}→${ev.sent_messages} msg`,
-      [`app=${ev.application_chars} chars`,
-       ...(ev.compaction || []).map(c => `compact ${c}`)].join(", "),
-      Date.now()-pending.started);
+    pushStep(pending, "context", stepLabel("context", ev), stepDetail("context", ev),
+             Date.now()-pending.started);
   } else if (ev.kind === "route"){
     pending.graph = {route: ev.target === "quick_reply" ? "quick" : "full",
                      reason: (pending.graph || {}).reason};
-    pushStep(pending, "route", `${ev.workflow || "graph"} → ${ev.target}`,
-             ev.reason, Date.now()-pending.started);
+    pushStep(pending, "route", stepLabel("route", ev), ev.reason,
+             Date.now()-pending.started);
   } else if (ev.kind === "triage"){
     (pending.graph = pending.graph || {}).reason = ev.reason;
   } else if (ev.kind === "text"){
@@ -292,9 +288,8 @@ function applyStreamEvent(pending, ev){
   } else if (ev.kind === "llm"){
     // The one the chips could never show: which iteration, why it stopped, and
     // the tokens it burned — the guts of "what did the agent actually do".
-    const u = ev.usage || {};
-    pushStep(pending, "llm", `iter ${ev.iteration} · ${ev.stop_reason}`,
-             `tokens ${u.in}→${u.out}`, Date.now()-pending.started);
+    pushStep(pending, "llm", stepLabel("llm", ev), stepDetail("llm", ev.usage || {}),
+             Date.now()-pending.started);
   } else if (ev.kind === "tool"){
     const ok = !(ev.output||"").toLowerCase().startsWith("error");
     (pending.tools = pending.tools || []).push({
@@ -304,7 +299,8 @@ function applyStreamEvent(pending, ev){
     pushStep(pending, "tool", ev.tool, ev.output, Date.now()-pending.started, ok ? "ok" : "error");
     pending.stream = "";   // a new assistant turn begins after the tool result
   } else if (ev.kind === "consolidation"){
-    pushStep(pending, "consolidation", `+${ev.new_facts} facts`, "", Date.now()-pending.started);
+    pushStep(pending, "consolidation", stepLabel("consolidation", ev), "",
+             Date.now()-pending.started);
   } else if (ev.kind === "done"){
     pending.pending = false; pending.stream = "";
     if (ev.error) pending.reply = "错误：" + ev.error;

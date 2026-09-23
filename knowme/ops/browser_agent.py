@@ -129,7 +129,11 @@ def get_agent(agent_id: str = "default"):
     # /api/data decided the stale thread was over and minted one dated id, this
     # call decided the same thing a second later and minted another. The page
     # then published the open document under its id while the turn ran in mine.
-    fresh.session.session_id = dash_session(agent_id)
+    #
+    # switch() rather than assigning the id: the web server can be restarted
+    # mid-thread, and a resumed thread whose history is empty is the same
+    # "it forgot what we just said" as the rebuild case above.
+    fresh.session.switch(dash_session(agent_id))
     if agent_id == "default":
         _agent = fresh
     else:
@@ -233,10 +237,14 @@ def rebuild() -> str | None:
                 conn = connect(settings.home, check_same_thread=False)
                 fresh = KnowMe(settings=settings, conn=conn, spec=get_profile(agent_id).spec)
                 old = old_agents.get(agent_id)
-                fresh.session.session_id = (
+                # switch(), not `= session_id`: it also reads the thread back into
+                # working memory. Inheriting the id alone left session.history
+                # empty, so the conversation was still on screen (that comes from
+                # chat_log, read-only) while the model no longer had it — switch
+                # provider mid-chat and the next reply acted like a stranger.
+                fresh.session.switch(
                     old.session.session_id if old is not None
-                    else resume_or_new_session(conn, agent_id)
-                )
+                    else resume_or_new_session(conn, agent_id))
                 fresh_agents[agent_id] = fresh
         except (Exception, SystemExit) as exc:   # get_client raises SystemExit
             for fresh in fresh_agents.values():

@@ -261,7 +261,12 @@ def make_delegate_tool(settings: Settings) -> Tool:
             return f"The '{backend}' coding backend is disabled in Coding Workspace settings."
         executable = shutil.which(BACKENDS[backend]["command"])
         if not executable:
-            return f"{BACKENDS[backend]['label']} isn't installed or isn't on PATH."
+            # 说清「没装」是不够的 —— 用户的下一个问题就是「那怎么装」。pi 的
+            # 安装命令在这里（test_delegate 钉着这一条），claude/codex 是各家
+            # 自己的安装器，提示他们去看官方文档比编一条命令安全。
+            hint = (f" {PI_INSTALL_HINT}" if backend == "pi"
+                    else f" 按 {BACKENDS[backend]['label']} 官方文档装好后重试。")
+            return f"{BACKENDS[backend]['label']} isn't installed or isn't on PATH.{hint}"
 
         from knowme.tools import workspace
         if cwd:

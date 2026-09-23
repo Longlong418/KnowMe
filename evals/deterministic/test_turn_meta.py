@@ -32,13 +32,17 @@ def test_turn_meta_is_saved_with_gate_and_iterations(tmp_path):
     assert meta["model"] == app.settings.model
     assert meta["provider"] == app.settings.provider
     # the turn timeline: gate fires during context assembly (before the loop),
-    # then each iteration contributes its llm call and its tool
+    # then each iteration contributes its llm call and its tool.
+    # 每一步都是给用户看的中文人话 —— 这两行以前是 "iter 1 · tool_use" 和
+    # "tokens 19→132"，用户看不懂（docs/DEVELOPMENT.md Phase 28）。
     steps = meta["steps"]
     assert [s["kind"] for s in steps] == ["gate", "llm", "tool", "llm"]
-    assert steps[0]["label"] == "retrieve"
-    assert steps[1]["label"].startswith("iter 1 ·")
+    assert steps[0]["label"] == "要查记忆"
+    assert steps[1]["label"] == "第 1 轮 · 要调用工具"
+    assert "tokens" in steps[1]["detail"]
     assert steps[2]["label"] == "save_note"
     assert steps[2]["status"] == "ok"
+    assert steps[3]["label"].endswith("直接回答")
     assert all(isinstance(s["ms"], int) for s in steps)
 
 
