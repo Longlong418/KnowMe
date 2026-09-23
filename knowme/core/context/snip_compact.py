@@ -127,6 +127,25 @@ def _remember(conn: sqlite3.Connection, session_id: str, total: int, path: Path)
     conn.commit()
 
 
+def forget(conn: sqlite3.Connection | None, session_id: str) -> None:
+    """Drop this session's watermark — the conversation it described is gone.
+
+    Called when state_summary replaces the conversation with a summary. That
+    summary becomes the new opening, so "how many messages are missing" has to
+    start counting from it; the old number describes a conversation that no
+    longer exists. Leaving it in place makes rebuild() slice a post-summary list
+    at a pre-summary offset — measured: a reopened session came back ten messages
+    SHORTER than the live one, with the newest of them gone.
+
+    Deleting rather than zeroing, because archived_count() reads "no row" as 0
+    and _remember() re-inserts on the next snip.
+    """
+    if conn is None:
+        return
+    conn.execute("DELETE FROM history_snips WHERE session_id = ?", (session_id,))
+    conn.commit()
+
+
 def snip(history: list[dict], home: Path, conn: sqlite3.Connection | None,
          session_id: str, head: int, tail: int) -> list[dict]:
     """Bound `history` to head + 1 + tail, appending what it drops to the archive.

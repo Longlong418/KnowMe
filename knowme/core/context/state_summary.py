@@ -123,6 +123,25 @@ def _record(conn: sqlite3.Connection | None, session_id: str) -> sqlite3.Row | N
     ).fetchone()
 
 
+def _covered(history: list[dict], conn: sqlite3.Connection, session_id: str) -> int:
+    """How many messages of the STORED log this summary accounts for.
+
+    `len(history)` is a count in the WORKING-MEMORY coordinate system, and
+    rebuild() slices the log read back from chat_log. Those are not the same
+    list: snip_compact has already lifted the middle out of `history` and left
+    one marker in its slot. So the raw length under-counts by exactly the
+    archived middle — and a summary of a 20-message conversation recorded
+    `covered = 9`, which made a reopened session come back as the summary plus
+    the eleven messages it already covers.
+
+    Put the archived back and take the marker out, and the two agree:
+    head + tail + archived = the length of the log at this moment. With nothing
+    archived it reduces to len(history), so the un-snipped case is unchanged.
+    """
+    markers = sum(1 for message in history if snip_compact.is_marker(message))
+    return len(history) - markers + snip_compact.archived_count(conn, session_id)
+
+
 def summarize(history: list[dict], fitted: list[dict], home: Path,
               conn: sqlite3.Connection | None, session_id: str, client,
               model: str, max_tokens: int) -> list[dict] | None:
@@ -147,7 +166,14 @@ def summarize(history: list[dict], fitted: list[dict], home: Path,
     # snapshot of a conversation we then failed to summarise is litter.
     archive = _archive(home, session_id, history)
     if conn is not None:
-        _remember(conn, session_id, len(history), archive, summary)
+        # Order matters: _covered() reads the snip watermark, forget() clears it.
+        covered = _covered(history, conn, session_id)
+        _remember(conn, session_id, covered, archive, summary)
+        # This summary is now the conversation's opening, so snip_compact's
+        # watermark ("messages missing from the opening") has to restart from
+        # here. Without this a reopened session sliced the post-summary list at
+        # a pre-summary offset and came back shorter than the live one.
+        snip_compact.forget(conn, session_id)
     return [{"role": "user", "content": marker(summary, archive)}]
 
 
@@ -155,9 +181,12 @@ def rebuild(flat: list[dict], home: Path, conn: sqlite3.Connection | None,
             session_id: str) -> list[dict]:
     """The summary plus everything that arrived after it, for a reopened session.
 
-    `covered` is a COUNT, not an index — the same lesson snip_compact learned.
-    The number of messages the summary accounts for is coordinate-free; an index
-    into one list is wrong the moment it is read against another.
+    `covered` is a COUNT into the STORED log — the coordinate system `flat` is
+    in — not an index into the working copy the summary was made from. A count
+    is not automatically coordinate-free: "not an index" avoids one way of
+    reading a number against the wrong list, and says nothing about the other.
+    That mistake is why `summarize` now computes covered through _covered()
+    rather than taking len(history).
     """
     row = _record(conn, session_id)
     if row is None:
