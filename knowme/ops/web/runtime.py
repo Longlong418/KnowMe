@@ -180,6 +180,20 @@ def WORKFLOW_RUNNERS() -> dict[str, str]:  # noqa: N802 — reads as a table
     return commands.discover()
 
 
+def _bounded(text: str, limit: int = 40_000) -> str:
+    """Cap the digest, and SAY SO when the cap bites.
+
+    It used to be a silent [:4000], which turned a long report into a document
+    that stopped mid-sentence while looking finished — the frame is what the
+    graph card renders, so there was nothing else to compare against. Still
+    bounded (one SSE frame should not be able to carry a megabyte), just far
+    past any real report and honest at the edge.
+    """
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n\n[报告过长，这里只显示前 {limit} 字]"
+
+
 def graph_stream(payload: dict, emit) -> None:
     """Run a graph workflow, streaming its node events as SSE.
 
@@ -197,12 +211,26 @@ def graph_stream(payload: dict, emit) -> None:
     module_name, _, fn_name = target.partition(":")
     try:
         import importlib
+        import inspect
 
         run = getattr(importlib.import_module(module_name), fn_name)
-        state = run(observer=lambda kind, ev: emit(kind, ev))
+        # A workflow that takes input declares a `message` parameter and gets the
+        # payload's topic; one that does not is called exactly as before. Same
+        # convention as commands.run (commands.py:104), so `/gather` and the
+        # dashboard button stay one story.
+        if "message" in inspect.signature(run).parameters:
+            state = run(observer=lambda kind, ev: emit(kind, ev),
+                        message=payload.get("message") or "")
+        else:
+            state = run(observer=lambda kind, ev: emit(kind, ev))
         emit("done", {
             "workflow": name,
-            "digest": (state.get("digest") or "")[:4000],
+            # Not truncated to fit a card: a research report is a document, and
+            # a report that stops mid-sentence with no marker reads as complete.
+            # A bound still exists, but it is now far past any real report and
+            # it says so when it bites.
+            "digest": _bounded(state.get("digest") or ""),
+            "note_id": state.get("note_id", ""),
             "draft_path": state.get("draft_path", ""),
             "errors": state.get("errors") or {},
         })

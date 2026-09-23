@@ -36,6 +36,9 @@ _READER_TOOLS = frozenset({
     "create_skill", "manage_memory", "get_note", "create_note",
     "update_note", "delete_note", "list_notes", "search_notes",
     "list_folders", "get_linked_notes", "parse_links",
+    # search_web finds the pages, read_webpage reads one. The Research agent is
+    # the one that goes looking, so it gets both.
+    "read_webpage",
 })
 
 # The document library (tools/documents.py): list / search / read a window /

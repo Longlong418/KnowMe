@@ -8,7 +8,15 @@ import sqlite3
 
 from knowme.config import Settings
 from knowme.core.tools import ToolRegistry
-from knowme.tools import calendar, memory_admin, messages, notes, search, tool_results
+from knowme.tools import (
+    calendar,
+    memory_admin,
+    messages,
+    notes,
+    search,
+    tool_results,
+    webpage,
+)
 
 
 def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None,
@@ -38,6 +46,9 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None,
     # Web search — pairs with create_event for the multi-tool loop demo
     # ("find the World Cup games left and add them to my calendar").
     registry.register(search.make_tool())
+    # Search tells you WHICH pages are worth reading; this reads one. Registered
+    # next to search because it is the second half of the same job.
+    registry.register(webpage.make_tool())
     # The way back to a long tool result that was compressed on its way into
     # history (runtime/tool_budget.py). Registered unconditionally: whether a
     # turn needs it depends on how big that turn's tool output was, which is not

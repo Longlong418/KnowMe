@@ -36,6 +36,12 @@ def main() -> None:
         from knowme.ops.gather import main as gather_main
 
         gather_main()
+    elif args[0] == "deep_research":
+        from knowme.ops.deep_research import main as research_main
+
+        # The topic is every remaining word, so quoting is optional but allowed:
+        # python -m knowme deep_research 固态电池的产业化进度
+        research_main(" ".join(args[1:]))
     elif args[0] == "skill" and len(args) >= 3 and args[1] == "install":
         from knowme.memory.procedural.installer import install
 

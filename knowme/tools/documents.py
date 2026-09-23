@@ -30,7 +30,7 @@ import sqlite3
 from pathlib import Path
 
 from knowme.applications import library
-from knowme.applications.reader import ReaderError
+from knowme.applications.reader import ReaderError, fetch_url
 from knowme.core.tools import Tool
 
 
@@ -94,7 +94,11 @@ def make_document_tools(conn: sqlite3.Connection, home: Path,
     def _fetch(url: str) -> str:
         """Download a URL into the library and return its first window."""
         try:
-            fetched = library.fetch_url(url)
+            # reader.fetch_url, not library.fetch_url: the download belongs to the
+            # Reader (it owns the scheme check and the 4 MB cap), and the library
+            # only ever sees bytes that already arrived. Calling it on `library`
+            # was an AttributeError dressed up as a fetch failure.
+            fetched = fetch_url(url)
             name = fetched["name"]
             if not Path(name).suffix:
                 name += ".txt"

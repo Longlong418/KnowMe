@@ -171,9 +171,18 @@ def collect(agent_id: str = "default") -> dict:
             elif kind == "context":
                 current["context"] = ev
             elif kind == "route":
-                current["graph"] = {"workflow": ev.get("workflow"),
-                                    "route": "quick" if ev.get("target") == "quick_reply" else "full",
-                                    "reason": (current.get("graph") or {}).get("reason", "")}
+                # Only TRIAGE's route describes this message's door. Every
+                # workflow with a router emits route events, and this branch
+                # folds anything that arrives while a turn is open into that
+                # turn — so a `gather` or a `deep_research` branching in the
+                # background relabelled the user's chat message (its targets are
+                # never "quick_reply", so the turn was recorded as the full
+                # door). The turn card's job is to say which door ONE message
+                # took; a graph running alongside is not that.
+                if ev.get("workflow") == "triage":
+                    current["graph"] = {"workflow": ev.get("workflow"),
+                                        "route": "quick" if ev.get("target") == "quick_reply" else "full",
+                                        "reason": (current.get("graph") or {}).get("reason", "")}
             elif kind == "triage":
                 current.setdefault("graph", {})["reason"] = ev.get("reason", "")
             elif kind == "llm":
@@ -449,7 +458,7 @@ def session_list(conn, agent_id: str = "default") -> list[dict]:
 _FLAGSHIP = {"create_event", "list_events", "save_note", "send_message"}
 _SELFMGMT = {"manage_memory", "update_soul", "create_skill"}
 _APPLE = {"read_apple_calendar", "read_apple_mail", "create_reminder", "create_note"}
-_WEB = {"search_web"}
+_WEB = {"search_web", "read_webpage"}
 
 
 def _tool_source(name: str, mcp_servers: list[str]) -> str:

@@ -8,8 +8,12 @@ unaffordable (the whole thing in context every turn).
 
 import re
 
-from knowme.applications.library import save_document
+import pytest
+
+from knowme.applications.library import list_documents, save_document
+from knowme.applications.reader import ReaderError
 from knowme.db import connect
+from knowme.tools import documents
 from knowme.tools.documents import make_document_tools
 
 
@@ -80,3 +84,44 @@ def test_an_empty_library_says_so_rather_than_failing(tmp_path):
     conn, tools = _tools(tmp_path)
     assert "空的" in tools["list_documents"].fn()
     assert "没有找到" in tools["search_documents"].fn("anything")
+
+
+def test_fetch_document_downloads_parses_and_stores(tmp_path, monkeypatch):
+    """``fetch_document`` shipped broken and no test noticed, because the fetch
+    was the one path the three tests above never walked.
+
+    It called ``library.fetch_url`` — which does not exist. The downloader lives
+    in ``applications/reader.py`` (it owns the scheme check and the 4 MB cap);
+    the library only ever receives bytes that already arrived. So every call
+    raised ``AttributeError``, the surrounding ``except ReaderError`` did not
+    catch it, and a model asking this tool to read a web page got a crash
+    instead of a document.
+
+    Monkeypatched rather than live: this pins the WIRING (download → parse →
+    store → hand back a window). A test that needs the network would fail for
+    reasons that have nothing to do with this file.
+    """
+    conn, tools = _tools(tmp_path, budget=200)
+    monkeypatch.setattr(documents, "fetch_url", lambda url: {
+        "name": "page.html", "raw": b"<p>hello from the web</p>",
+        "content_type": "text/html", "source": url})
+
+    out = tools["fetch_document"].fn("https://example.com/a")
+    assert "hello from the web" in out
+    # It really landed in the library, not just in the reply — otherwise the
+    # next turn's search_documents would not see it.
+    assert [d["title"] for d in list_documents(conn)] == ["page"]
+    # And it is a WINDOW like every other read, not the raw body.
+    assert "第 0–" in out
+
+
+def test_a_failed_fetch_is_a_message_not_an_exception(tmp_path, monkeypatch):
+    def boom(url):
+        raise ReaderError("远程文件太大（最多 4 MB）")
+
+    conn, tools = _tools(tmp_path)
+    monkeypatch.setattr(documents, "fetch_url", boom)
+    out = tools["fetch_document"].fn("https://example.com/huge")
+    # The Reader's own words, so the model can tell the user something true.
+    assert "4 MB" in out
+    assert list_documents(conn) == []
