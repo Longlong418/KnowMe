@@ -28,13 +28,13 @@ generated inline handlers are explicitly exported at the boundary.
 | `models.js`  | `applyModel` (the one `/api/settings` writer), model picker / catalog / pins |
 | `render.js`  | formatters + chat card renderers (`stagesRow`/`teleFooter`) + chatlog + streaming + `sendChat` |
 | `trace.js`   | the turn timeline (`turnTimeline`/`pushStep`/`stepsFromTurn`) — what the agent did, in order |
-| `diagram.js` | `archSVG` (the architecture chart) **and** its live animation (`STAGE`/`hot`/`pollEvents`) |
+| `diagram.js` | `archSVG` (the architecture chart) **and** its live animation (`STAGE`/`hot`/`pollEvents`/`setEventPolling`) |
 | `graph.js`   | graph workflows: data-driven topology chart (`graphSVG` from `d.graph.workflows`), the Overview panel (`graphPanel`), and `animateGraphStage` for `graph_*`/`route` events |
 | `views.js`   | subtab/db helpers, SQL console, Memory/Tools sub-views, the `VIEWS` router object |
 | `chat.js`    | `VIEWS.agent` + chat sessions/history (`loadThreadInto`), model chip, stats toggle |
 | `reader.js`  | `VIEWS.reader`: the document library list, the reading pane (markdown + pdf.js), selection → agent. Also the Coding Workspace helpers |
 | `knowledge.js` | the Knowledge Base actions (notes CRUD, preview, `[[links]]`) |
-| `main.js`    | `render`/`refresh` loop and resizers |
+| `main.js`    | `render`/`refresh` loop and resizers; decides which polls run (5s on most pages, none on the static config pages, and `/api/events` only while a diagram is on screen) |
 | `bootstrap.js` | Native module entrypoint, scoped evaluator, and handler boundary |
 
 `vendor/pdfjs/` is the one thing here that is not ours — a pinned pdf.js build,

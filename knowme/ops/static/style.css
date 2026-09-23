@@ -323,6 +323,11 @@
   .live .dot{animation:pulse 2s ease-in-out infinite}
   /* the header's "the backend is failing" state — see tickLive() in main.js */
   .live.bad{color:var(--bad)} .live.bad .dot{background:var(--bad);animation:none}
+  /* ...and its "this page does not poll" state. NOT a fault, and it must not
+     look like one: the page is static configuration, the poll was stopped on
+     purpose, and the dot stops pulsing so the header doesn't advertise a
+     liveness that isn't being checked. */
+  .live.idle{color:var(--ink3)} .live.idle .dot{background:var(--ink3);animation:none}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
   /* streaming caret — the token-by-token "thinking" cursor */
   .caret{display:inline-block;width:7px;height:14px;margin-left:2px;vertical-align:text-bottom;

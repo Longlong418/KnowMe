@@ -1186,6 +1186,29 @@ def knowledge_action(payload: dict) -> dict:
 
 
 
+# Today's trace file → (size we last measured, how many lines it had). Holding
+# the size is what makes the common poll cheap: the trace is append-only, so an
+# unchanged size means an unchanged line count, and the answer is known without
+# reading the file. Measured on an 85 KB / 111-line trace over a keep-alive
+# connection (what a browser uses — a fresh connection per call adds ~13 ms of
+# TCP setup that hides everything below it): the poll took 7.7 ms, of which
+# 5.3 ms was re-reading and re-parsing a file that had not changed. At 2.2 polls
+# a second that was 62 seconds of server time an hour, spent almost always to
+# report that there was nothing to report.
+_TRACE_LINES: dict[str, tuple[int, int]] = {}
+
+
+def _trace_line_count(path: Path) -> int:
+    """How many lines `path` has, counted only when its size has changed."""
+    size = path.stat().st_size
+    cached = _TRACE_LINES.get(str(path))
+    if cached is not None and cached[0] == size:
+        return cached[1]
+    count = sum(1 for _ in iter_trace_lines(path))
+    _TRACE_LINES[str(path)] = (size, count)
+    return count
+
+
 def events_since(cursor):
     """New trace events past `cursor` (a line count in today's trace file).
     Both the browser and CLI append to this same file,
@@ -1197,15 +1220,26 @@ def events_since(cursor):
     if not path.exists():
         return {"events": [], "cursor": 0}
     try:
+        total = _trace_line_count(path)
+    except TraceEncodingError as exc:
+        return {"events": [], "cursor": 0, "error": str(exc)}
+    if cursor is None or cursor < 0 or cursor >= total:
+        # Two cases, one answer. cursor=None (a fresh browser, or one resuming
+        # after a pause) means "start from now"; a cursor at or past the end
+        # means "you have seen all of it" — which is what most polls are. Both
+        # return the current tail as the new cursor, and neither reads the file.
+        return {"events": [], "cursor": total}
+    try:
         lines = list(iter_trace_lines(path))
     except TraceEncodingError as exc:
         return {"events": [], "cursor": 0, "error": str(exc)}
-    if cursor is None or cursor < 0 or cursor > len(lines):
-        return {"events": [], "cursor": len(lines)}
     out = []
     for ln in lines[cursor:]:
         try:
             out.append(json.loads(ln))
         except json.JSONDecodeError:
             pass
+    # len(lines), not `total`: a turn may have appended a line between the count
+    # and this read, and reporting the older number would hand those lines back
+    # a second time on the next poll — the diagram would blink twice per turn.
     return {"events": out, "cursor": len(lines)}

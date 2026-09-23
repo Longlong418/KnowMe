@@ -31,11 +31,32 @@ function setCount(id, value){
   const el = document.getElementById(id);
   if (el) el.textContent = value;
 }
+// The views that are STATIC CONFIGURATION — 模型 / 设置 / 连接 / 数据库. Nothing
+// on them is produced by the 5s poll: every value they show arrives with the
+// payload and is repainted by the action that changed it (models.js calls
+// refresh() itself after an add or a remove, which is why the switch and the
+// provider list still react the instant you click). So they get ONE fetch when
+// you arrive and then leave the poll alone. Every page that IS fed by the poll
+// — 对话 (new messages from the phone or CLI), 总览, 阅读器, Coding, 知识库 —
+// keeps polling exactly as before.
+//
+// These two live down here rather than up with TITLES for a mechanical reason
+// worth knowing before moving them: four frontend evals lift render() out of
+// this file BY TEXT — from the `function setCount` helper down to the
+// `let lastFetch` line — and eval that slice on its own. Anything render()
+// reads has to be inside that window, or the harness gets a ReferenceError
+// instead of a test result. (If you reword this: do NOT write the helper's name
+// followed by a quoted parenthesis. The counter test scans the whole file with
+// /setCount\("([^"]+)"/ and would read the rest of the sentence as a counter id
+// — it did exactly that to the first version of this comment.)
+const STATIC_VIEWS = new Set(["models", "settings", "connections", "database"]);
+let staticFresh = false;   // ...has a fetch succeeded since we landed on one?
 function render(){
   if (!D) return;
   const [v, subRaw] = (location.hash||"#overview").slice(1).split("/");
   const sub = subRaw || null;
   const view = VIEWS[v] ? v : "overview";
+  if (view !== activeView) staticFresh = false;   // arriving re-arms the one fetch
   // The hash is the source of truth for WHICH agent you are looking at, so a
   // sidebar click, the back button and a pasted #agent/coding link all land the
   // same way. selectAgent() is a pure state switch and never writes the hash,
@@ -98,6 +119,14 @@ function render(){
     if (keepScroll) main.scrollTop = y;
   }
   activeView = view; activeSub = sub;
+  // The trace stream is what lights the diagram up, and the diagram is only on
+  // screen in 总览 and 图工作流 — but the poll used to run from every page,
+  // including the conversation, which is where you spend most of your time.
+  // The question asked here is the same one animateStage() asks before it
+  // lights anything (".arch"), so "no .arch on screen" means, by construction,
+  // "no event could have been seen". typeof because the harnesses that eval
+  // render() do not load diagram.js — the same guard repaintCoding() uses.
+  if (typeof setEventPolling === "function") setEventPolling(!!document.querySelector(".arch"));
   document.getElementById("model").textContent = `${D.provider} · ${D.model}`;
   syncAgentChrome();
   setCount("n-gw", (D.chat_log||[]).length);
@@ -140,6 +169,13 @@ function tickLive(){
     return;
   }
   if (!D) return;
+  // A stopped poll has to SAY it is stopped, or the counter just climbs and
+  // reads as a backend that stopped answering — the exact impression the bad
+  // state above exists to prevent, on a page where stopping is deliberate.
+  if (STATIC_VIEWS.has(activeView) && staticFresh){
+    el.innerHTML = `<span class="live idle"><span class="dot"></span>不自动刷新</span> · 进本页时更新过一次 · ${esc(D.home)}`;
+    return;
+  }
   const ago = Math.round((Date.now()-lastFetch)/1000);
   el.innerHTML = `<span class="live"><span class="dot"></span>实时</span> · ${ago} 秒前更新 · ${esc(D.home)}`;
 }
@@ -158,6 +194,10 @@ async function refresh(){
     // list and announced 还没有历史对话, then the next poll brought it back.
     if (next && next.agent_id && next.agent_id !== ACTIVE_AGENT) return;
     D = next; fetchError = null; lastFetch = Date.now();
+    // A fetch that SUCCEEDED on one of the static pages is that page's one
+    // refresh. Set only on success, so a backend that is down when you land
+    // there keeps being retried instead of freezing the page for good.
+    if (STATIC_VIEWS.has(activeView)) staticFresh = true;
     render(); tickLive();
     syncModelChip();  // keep the conversation's model pill in sync with the active brain
     applyTele();      // reflect the stats on/off choice (default on)
@@ -211,5 +251,20 @@ window.__hold = (v)=>{ animating = v; };   // test hook: freeze the diagram
 // panel does not exist until render() has run, and refresh() calls it.
 if (!location.hash) location.hash = "#agent/" + ACTIVE_AGENT;
 wireChrome();
-refresh(); setInterval(refresh, 5000); setInterval(tickLive, 1000);
-pollEvents(); setInterval(pollEvents, 450);   // live harness animation
+// The 5s poll goes through a tick so the static pages can opt out after their
+// one fetch. The check is OUT HERE and not inside refresh(), because refresh()
+// is also what every action calls to repaint after a change (models.js after a
+// pin or a delete, memory.js, the coding switch) — skipping inside refresh()
+// would silently stop those from painting at all.
+refresh();
+setInterval(() => {
+  if (STATIC_VIEWS.has(activeView) && staticFresh) return;
+  refresh();
+}, 5000);
+setInterval(tickLive, 1000);
+// /api/events is NOT started here. render() starts and stops it, because only
+// 总览 and 图工作流 have anything for it to light up — see setEventPolling().
+// On a bookmarked #models the page now fetches once and then sits still; the
+// header says so ("不自动刷新"). The trade, deliberately taken: while you are
+// parked on a config page a backend outage is not visible until you move, which
+// is the same thing that is true of the page's contents.

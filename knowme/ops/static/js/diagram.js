@@ -109,6 +109,7 @@ const STAGE = {
   consolidation: {nodes:["consolidation","semantic"],edges:["e-consol-sem"],            label:"整理记忆"},
 };
 let evCursor = null, evQueue = [], playing = false, animating = false;
+let eventTimer = null;   // the poll's interval id while it is running, else null
 
 function hot(sel, cls, ms){
   document.querySelectorAll(sel).forEach(el => {   // every diagram copy lights up
@@ -144,4 +145,28 @@ async function pollEvents(){
     }
     evCursor = r.cursor;
   } catch(e){ /* server busy */ }
+}
+// Start or stop the poll, called by render() with the answer to "is a diagram
+// on screen". These events exist to light one up and nothing else reads them,
+// so polling from a page that has no diagram was 2.2 requests a second that
+// could not paint anything — and the conversation is where you spend most of
+// your time, so that was most of the poll's whole cost. Only 总览 and 图工作流
+// draw a chart (both carry the `.arch` class), so they keep the fast poll and
+// every other page now costs nothing at all.
+function setEventPolling(on){
+  if (on){
+    if (eventTimer != null) return;   // already polling — every 5s render() lands here
+    // Resume from NOW, never from where we left off: that cursor points at
+    // every turn that happened while you were on another page, and replaying
+    // them would flash the diagram once per turn you did not come to watch.
+    // A null cursor is the existing "start fresh" signal — the server answers
+    // it with the current tail and no events (see events_since).
+    evCursor = null;
+    pollEvents();
+    eventTimer = setInterval(pollEvents, 450);
+    return;
+  }
+  if (eventTimer == null) return;
+  clearInterval(eventTimer);
+  eventTimer = null;
 }
