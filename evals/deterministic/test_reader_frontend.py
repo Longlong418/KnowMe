@@ -621,6 +621,10 @@ pendingTests.push((function testPdfZoom() {
   const VIEWS = {};
   const esc = s => String(s).replace(/[&<>"]/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // The panel asks the Coding page for a one-line strip when the agent is
+  // `coding` (chat.js). That strip is coding.js's, and coding.js is loaded from
+  // its own lock — here the panel's own markup is what is under test.
+  function codingStrip() { return ""; }
   eval(chatSrc.slice(from, to));
   const html = VIEWS.agent(D, "coding");
 

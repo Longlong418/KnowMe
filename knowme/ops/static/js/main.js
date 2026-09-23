@@ -75,6 +75,15 @@ function render(){
     // repaint entirely when the log has not changed.
   } else if ((view === "memory" || view === "settings" || view === "database" || view === "models" || view === "connections") && editing && !subChanged){
     // don't wipe an in-progress edit on the 5s refresh — but DO switch sub-tabs
+  } else if (view === "coding" && !subChanged){
+    // Same trap as the Reader and the agent pane, and the same fix — this page
+    // used to be the one view without a guard, so every 5s poll rebuilt #view
+    // from scratch. What that destroyed here: which <details> directories you
+    // had folded open, where the file tree was scrolled, the open preview, and
+    // the patch you had expanded in 改动. (The task textarea only survived
+    // because it is written to localStorage.) Nothing on this page is fed by the
+    // poll — the receipt list and the switch are only ever repainted by the
+    // action that changed them — so skip the rebuild entirely.
   } else if (view === "knowledge" && !subChanged && (editing || currentNoteId)){
     // Keep the selected note open while the 5s data poll updates the sidebar.
   } else {
@@ -102,6 +111,11 @@ function render(){
   // machine, so the same rebuild needs its composer bound — wireChat() also
   // wires the reader panel (wireAsk) for exactly this reason.
   if (view === "reader"){ restoreReaderState(); wireChat(); }
+  // The Coding page is skipped above, so this is where it picks up what the
+  // poll has: the switch, the tab counts and the receipt (a change made in the
+  // agent's thread has to appear here without a reload). It never touches the
+  // file tree or the task textarea — that is the state the skip exists for.
+  if (view === "coding" && typeof repaintCoding === "function") repaintCoding();
   if (view === "knowledge" && typeof restoreKnowledgeState === "function"){
     restoreKnowledgeState();
   }

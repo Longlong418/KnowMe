@@ -45,10 +45,16 @@ class KnowMe:
         from knowme.memory import Memory
 
         self.memory = Memory(self.conn, self.settings, self.client, agent_id=self.agent_id)
-        self.tools = build_registry(self.conn, self.settings, self.memory)
-        self.mcp_bridge = getattr(self.tools, "mcp_bridge", None)
+        # The session is built BEFORE the tools, because the coding tools stamp
+        # every change with the thread it happened in. They read the id at CALL
+        # time (Session holds no tools, so nothing here depends on the order) —
+        # a value captured at construction would be the thread you were in when
+        # the process started, not the one you are in now.
         self.session = Session(self.settings, memory=self.memory, conn=self.conn,
                                agent_id=self.agent_id)
+        self.tools = build_registry(self.conn, self.settings, self.memory,
+                                    session=self.session)
+        self.mcp_bridge = getattr(self.tools, "mcp_bridge", None)
         self.tracer = Tracer(self.settings)
         self.runtime = AgentRuntime(
             self.settings, client=self.client, conn=self.conn, memory=self.memory,

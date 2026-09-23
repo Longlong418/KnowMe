@@ -732,42 +732,27 @@ const VIEWS = {
     }
     return h;
   },
-  coding(d){
+  // Three bands, top to bottom in the order a person works: what this page is
+  // pointed at and what the agent may do here, one box to say what you want, and
+  // then the project itself. The old page said the root three times and gave the
+  // task box and the CLI settings equal weight, so the two things you need to
+  // know before typing — can it write? is the CLI there? — were the two things
+  // hardest to find. Layout and rules: coding.js.
+  coding(d, sub){
     const ws = d.workspace || {root:"", entries:[]};
-    const coding = d.coding || {backends:[], settings:{default_backend:"pi",enabled:{}}, execution_enabled:false};
-    const entries = ws.entries || [];
-    let h = `<div class="meta" style="margin-bottom:12px"><b>Coding Workspace</b> — 只读浏览项目文件，并把当前文件安全注入 Coding Agent。</div>`;
-    h += `<div class="card" style="border-color:var(--accent);background:var(--accent-soft);margin-bottom:16px">
-      <div style="font-family:var(--mono);word-break:break-all">${esc(ws.root || "未配置项目根目录")}</div>
-      <div class="meta" style="margin-top:8px">当前 MVP 不执行命令、不直接写文件；需要修改时，可切换 Coding Agent，使用明确的委派任务并查看 Trace。</div>
-    </div>`;
-    h += codingControls(coding, ws.root);
-    h += `<div style="display:grid;grid-template-columns:minmax(260px,0.8fr) minmax(0,1.6fr);gap:16px">`;
-    h += `<section><h2>项目文件</h2><div class="card" style="padding:8px;max-height:620px;overflow:auto">`;
-    if (!entries.length) h += `<div class="empty">没有可浏览的文本文件。</div>`;
-    else entries.forEach(entry => {
-      const encoded = encodeURIComponent(entry.path);
-      const indent = Math.min(entry.depth || 0, 8) * 14;
-      const icon = entry.kind === "directory" ? "▸" : "·";
-      const action = entry.kind === "file"
-        ? `onclick="openCodingFileEncoded('${encoded}')" style="cursor:pointer"`
-        : "";
-      h += `<div ${action} style="padding:5px 6px 5px ${8 + indent}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-        <span style="color:var(--ink2);margin-right:6px">${icon}</span>${esc(entry.name)}
-        ${entry.kind === "file" ? `<small class="meta" style="margin-left:6px">${entry.size} B</small>` : ""}
-      </div>`;
-    });
-    h += `</div></section>`;
-    h += `<section><h2>文件预览</h2>`;
-    if (currentCodingFile) {
-      h += `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px">
-        <code style="word-break:break-all">${esc(currentCodingFile)}</code>
-        <button class="save ghost" onclick="closeCodingFile()">关闭</button></div>
-        <pre style="max-height:580px;overflow:auto;white-space:pre-wrap">${esc(currentCodingContent)}</pre></div>`;
-    } else {
-      h += `<div class="card empty">从左侧选择一个文本文件。打开后，它会自动进入当前 Agent 的 Context Bridge。</div>`;
-    }
-    h += `</section></div>`;
+    const coding = d.coding || {backends:[], settings:{default_backend:"pi",enabled:{}},
+                                execution_enabled:false};
+    const runs = d.coding_runs || [];
+    sub = sub || "files";
+    // Three stable wrappers (coding-band / coding-tabs / coding-pane) are what
+    // this page's actions repaint through — the view itself is not rebuilt
+    // while you are on it. The tree and the textarea stay outside them on
+    // purpose: they hold state the server does not have.
+    let h = `<div id="coding-band">${codingStatusBand(coding, ws.root, runs)}</div>`;
+    h += codingTaskCard(coding, ws.root, !!((coding.settings || {}).allow_write));
+    h += codingBackendPanel(coding);
+    h += `<div id="coding-tabs">${codingTabs(sub, runs, ws.entries || [])}</div>`;
+    h += `<div id="coding-pane">${sub === "changes" ? codingChanges(runs) : codingFiles(ws)}</div>`;
     return h;
   },
   database(d, sub){

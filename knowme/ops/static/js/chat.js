@@ -55,6 +55,7 @@ VIEWS.agent = function(){
       <span class="agent-title"><span class="agent-icon">${esc(a.icon || "✦")}</span>${name} Agent</span>
       <span class="arch-status"></span>
     </div>
+    ${ACTIVE_AGENT === "coding" ? codingStrip() : ""}
     <div class="sesshead">
       <button class="sessbtn" onclick="newChat()">+ 新建对话</button>
       <button class="sessbtn" onclick="toggleSessMenu(event)">历史记录 &#9662;</button>

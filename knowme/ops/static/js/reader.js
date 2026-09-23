@@ -906,10 +906,13 @@ async function openCodingFile(path){
     content: currentCodingContent, selection: "", agent_id: ACTIVE_AGENT,
     session_id: SESSION || D?.current_sessions?.[ACTIVE_AGENT] || "default"
   });
-  if (activeView === "coding") render();
+  if (activeView === "coding") repaintCodingPreview();
 }
 function closeCodingFile(){
   currentCodingFile = "";
   currentCodingContent = "";
-  if (activeView === "coding") render();
+  // The preview, not the view: render() no longer rebuilds #coding while you
+  // are on it (see main.js), and the file tree beside the preview must keep the
+  // directories you folded open.
+  if (activeView === "coding") repaintCodingPreview();
 }

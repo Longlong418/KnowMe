@@ -11,7 +11,14 @@ from knowme.core.tools import ToolRegistry
 from knowme.tools import calendar, memory_admin, messages, notes, search, tool_results
 
 
-def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) -> ToolRegistry:
+def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None,
+                   session=None) -> ToolRegistry:
+    """Every tool this process knows how to run.
+
+    Which of them one agent actually sees is AgentSpec.tools (applied in
+    core/runtime.py), not this function — so nothing here is per-agent except
+    the agent id stamped on what a tool writes.
+    """
     registry = ToolRegistry()
     registry.register(
         calendar.make_tool(
@@ -105,8 +112,19 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
     # memory, the notes are one shared pool: the agent id here only stamps what
     # create_note writes, so the dashboard can say which Agent captured a note.
     from knowme.tools.knowledge import make_knowledge_tools
-    knowledge_agent_id = getattr(memory, "agent_id", "default")
-    for tool in make_knowledge_tools(conn, knowledge_agent_id).values():
+    agent_id = getattr(memory, "agent_id", "default")
+    for tool in make_knowledge_tools(conn, agent_id).values():
+        registry.register(tool)
+
+    # KnowMe's own hands on the project (tools/coding.py). Reads are always
+    # registered; write_file/edit_file/run_command are too, and refuse when the
+    # Coding page's allow_write switch is off — a model that knows it has
+    # withheld hands asks you to enable them, one that has no such tool invents
+    # a workaround. Which agents SEE them is their AgentSpec (see the coding
+    # profile in agents/catalog.py).
+    from knowme.tools import coding
+
+    for tool in coding.make_tools(settings, conn, session=session, agent_id=agent_id):
         registry.register(tool)
 
     return registry

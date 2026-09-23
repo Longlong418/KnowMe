@@ -500,15 +500,38 @@
   .agent-title{display:flex;align-items:center;gap:8px;font-weight:650;font-size:15px}
   .agent-title .agent-icon{color:var(--accent)}
   .agent-view .chatlog{flex:1}
-  /* Coding Workspace: task controls sit above the existing read-only file tree. */
-  .coding-control-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,1fr);gap:16px;margin-bottom:16px}
-  .coding-section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
-  .coding-task-card .editor{width:100%;box-sizing:border-box;resize:vertical;min-height:96px}
-  .coding-task-actions{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-top:10px;flex-wrap:wrap}
+  /* --- Coding Workspace. Three bands, in the order a person works: what it may
+     do here, one box for the task, then the project and its receipt. Only the
+     pieces with no existing equivalent get rules — cards, pills, tabs and
+     .empty/.meta come from the shared definitions above. */
+  .coding-band{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px}
+  .cb-path{display:flex;align-items:baseline;gap:8px;min-width:0;flex:1}
+  .cb-path .cb-label{font-size:11px;color:var(--ink3);flex:none}
+  .cb-path code{font-family:var(--mono);font-size:12.5px;color:var(--ink2);word-break:break-all}
+  .cb-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .cb-switch{display:flex;align-items:center;gap:8px;padding:6px 11px;border:1px solid var(--line2);
+    border-radius:9px;cursor:pointer;background:var(--bg);transition:border-color .15s}
+  .cb-switch:hover{border-color:var(--accent)}
+  .cb-switch.on{border-color:var(--good);background:var(--good-soft)}
+  .cb-switch input{accent-color:var(--good);margin:0}
+  .cb-switch b{font-size:12.5px;font-weight:600}
+  .cb-switch small{color:var(--ink3);font-size:11px}
+  .coding-task-card{padding:14px;margin-bottom:12px}
+  .ctc-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px}
+  .ctc-head b{font-size:14px}
+  .ctc-head .meta{margin:0}
+  .coding-task-card .editor{width:100%;box-sizing:border-box;resize:vertical;min-height:88px;
+    font-family:inherit;font-size:13.5px;line-height:1.55}
+  .ctc-actions{display:flex;align-items:center;gap:14px;margin-top:10px;flex-wrap:wrap}
+  .ctc-actions .meta{margin:0;flex:1;min-width:140px}
   .fld-inline{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)}
   .fld-inline select{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;color:var(--ink);font-size:13px}
+  .coding-config{margin-bottom:16px;padding:0 14px}
+  .coding-config>summary{cursor:pointer;padding:12px 0;font-size:13px;color:var(--ink2)}
+  .coding-config[open]>summary{color:var(--ink);border-bottom:1px solid var(--line);margin-bottom:12px}
+  .coding-config-body{padding-bottom:14px}
   .coding-backends{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
-  .coding-execution{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12.5px;color:var(--ink2)}
+  .coding-execution{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:12.5px;color:var(--ink2)}
   .coding-execution input{accent-color:var(--accent)}
   .coding-backend{display:flex;align-items:flex-start;gap:9px;padding:10px;border:1px solid var(--line2);border-radius:9px;cursor:pointer;background:var(--bg)}
   .coding-backend:hover{border-color:var(--accent)}
@@ -520,7 +543,61 @@
   .coding-status.ok{color:var(--good)}
   .coding-status.bad{color:var(--bad)}
   .coding-hint{margin-top:10px;line-height:1.5}
-  @media (max-width:800px){.coding-control-grid{grid-template-columns:1fr}}
+  /* The tree. Nesting is done by padding-left (see codingTree) because the
+     server hands over ONE flat sorted list; <details> supplies the folding, so
+     the page keeps no state of its own to lose on a repaint. */
+  .coding-grid{display:grid;grid-template-columns:minmax(260px,0.85fr) minmax(0,1.6fr);gap:16px}
+  .coding-tree{padding:8px;max-height:600px;overflow:auto}
+  .ct-dir>summary{cursor:pointer;padding:5px 6px;font-size:13px;border-radius:6px;list-style:none}
+  .ct-dir>summary::-webkit-details-marker{display:none}
+  .ct-dir>summary:before{content:"▸";color:var(--ink3);display:inline-block;width:12px;font-size:10px}
+  .ct-dir[open]>summary:before{content:"▾"}
+  .ct-dir>summary:hover{background:var(--accent-soft);color:var(--accent)}
+  .ct-file{padding:5px 6px;font-size:13px;border-radius:6px;cursor:pointer;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ct-file:hover{background:var(--accent-soft);color:var(--accent)}
+  .coding-preview{padding:12px}
+  .cp-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:9px}
+  .cp-head code{font-size:12.5px;word-break:break-all}
+  .coding-preview pre{max-height:560px;overflow:auto;white-space:pre-wrap;margin:0;font-size:12.5px}
+  /* The receipt: one row per change, and the patch behind it. */
+  .coding-runs{padding:6px;margin-bottom:12px}
+  .cr-row{display:grid;grid-template-columns:44px 62px minmax(0,1fr) auto 14px;gap:10px;
+    align-items:center;padding:7px 9px;border-radius:7px;font-size:12.5px}
+  .cr-row.on{background:var(--accent-soft)}
+  .cr-row:not(.flat){cursor:pointer}
+  .cr-row:not(.flat):hover{background:var(--accent-soft)}
+  .cr-time{color:var(--ink3);font-variant-numeric:tabular-nums}
+  .cr-kind{font-size:10.5px;font-weight:600;text-align:center;padding:2px 6px;border-radius:99px;
+    background:var(--line);color:var(--ink2)}
+  .cr-kind.k-write,.cr-kind.k-edit{background:var(--accent-soft);color:var(--accent)}
+  .cr-kind.k-baseline{background:var(--line);color:var(--ink3)}
+  .cr-target{font-family:var(--mono);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cr-delta{white-space:nowrap;font-variant-numeric:tabular-nums}
+  .cd-add{color:var(--good);font-weight:600}
+  .cd-del{color:var(--bad);font-weight:600}
+  .cd-ok{color:var(--good)}
+  .cd-bad{color:var(--bad)}
+  .cd-warn{color:var(--ink3)}
+  .cr-open{color:var(--ink3);font-size:10px}
+  .coding-detail{padding:12px}
+  .coding-diff,.coding-log{margin:0;max-height:520px;overflow:auto;font-family:var(--mono);
+    font-size:12px;line-height:1.55;white-space:pre}
+  .coding-diff .dl-add{color:var(--good);display:block;background:var(--good-soft)}
+  .coding-diff .dl-del{color:var(--bad);display:block;background:var(--bad-soft)}
+  .coding-diff .dl-h{color:var(--accent);display:block}
+  .coding-diff .dl-f{color:var(--ink3);display:block}
+  /* The one-line strip on the Coding Agent's own thread (chat.js). */
+  .coding-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;
+    padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:12px}
+  .coding-strip .cs-root{font-family:var(--mono);font-size:11.5px;color:var(--ink2);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
+  .cs-flag{color:var(--ink3)}
+  .cs-flag.on{color:var(--good);font-weight:600}
+  .cs-flag.work{color:var(--accent);font-weight:600}
+  .cs-link{margin-left:auto;color:var(--accent);text-decoration:none;font-weight:600;white-space:nowrap}
+  .cs-link:hover{text-decoration:underline}
+  @media (max-width:800px){.coding-grid{grid-template-columns:1fr}}
   /* the composer is sticky, not fixed: the pane's scrollbar stays its own, and
      the pane drops its bottom padding so the bar reaches the bottom edge */
   main:has(.agent-view){padding-bottom:0}

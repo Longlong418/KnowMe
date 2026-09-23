@@ -45,6 +45,16 @@ _DOCUMENT_TOOLS = frozenset({
     "list_documents", "search_documents", "open_document", "fetch_document",
 })
 
+# The Coding Agent's own hands (tools/coding.py): look at the project, change
+# it, run it. Confined to the project root; write_file/edit_file/run_command
+# additionally need the Coding page's allow_write switch, which is off by
+# default. delegate_task stays in the list on purpose — a big refactor is still
+# better handed to a local CLI, and now the agent can check what it did.
+_CODING_TOOLS = frozenset({
+    "list_files", "read_file", "search_files", "git_status", "git_diff",
+    "write_file", "edit_file", "run_command", "delegate_task",
+})
+
 
 PROFILES: tuple[AgentProfile, ...] = (
     AgentProfile(
@@ -58,18 +68,23 @@ PROFILES: tuple[AgentProfile, ...] = (
         id="coding",
         name="Coding",
         icon="⌘",
-        description="理解项目、检索资料，并把编码任务交给受控工作区。",
+        description="读项目、改项目、跑测试；需要时把大活交给本机 CLI，并核对它到底改了什么。",
         spec=AgentSpec(
             name="coding",
             system_prompt=(
                 "You are the Coding Agent in a local personal-agent workspace. "
                 "Explain code plainly, inspect before changing, preserve existing work, "
-                "and make small verifiable changes. Use tools only when they help."
+                "and make small verifiable changes. Use tools only when they help. "
+                "You have your own tools (read_file, search_files, git_status, and — when "
+                "the user has switched them on — write_file, edit_file, run_command) and "
+                "they only work inside the project root; read before you write, and say "
+                "which files you changed and what you ran. If a write is refused, the "
+                "user has not enabled it yet: ask them to, instead of working around it."
             ),
             tools=frozenset({
                 "get_document", "search_web", "read_tool_result", "skill",
-                "create_skill", "save_note", "manage_memory", "delegate_task",
-                "github_read",
+                "create_skill", "save_note", "manage_memory", "github_read",
+                *_CODING_TOOLS,
             }),
         ),
     ),

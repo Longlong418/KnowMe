@@ -1,10 +1,18 @@
-"""Safe, read-only project browsing for the Coding Workspace MVP.
+"""Safe project access for the Coding Workspace: the page, and the rules.
 
-The first Coding Workspace slice deliberately has a small contract: choose the
-directory KnowMe was started in (or set ``KNOWME_PROJECT_ROOT``), browse text
-files, and open one into the Agent Context Bridge.  It does not execute shell
-commands or write arbitrary files.  Those operations need a separate approval
-surface and remain on the roadmap.
+This module is the ONE place that decides what is in bounds. Choosing the
+project root (``KNOWME_PROJECT_ROOT``, or the launch directory), resolving a
+relative path without letting it escape, and naming the files that are never
+touched (.env, .git, .knowme, …) all happen here — tools/coding.py imports
+these guards rather than reimplementing them, so the page and the agent's own
+hands cannot disagree about the boundary.
+
+The PAGE is still read-only, and the switches in ``coding.json`` say what the
+agent may do: ``enabled``/``default_backend`` pick the local CLI to delegate to,
+and ``allow_write`` gates the write_file / edit_file / run_command tools
+(.knowme/coding_runs.py keeps the receipt of everything they change).  Browsing
+and reading are always allowed; that is what makes ``allow_write`` the only
+consent the user has to give.
 """
 
 from __future__ import annotations
@@ -13,6 +21,8 @@ import json
 import os
 import shutil
 from pathlib import Path
+
+from knowme.applications.coding_runs import read_detail
 
 MAX_ENTRIES = 500
 MAX_READ_BYTES = 240_000
@@ -36,6 +46,10 @@ BACKENDS = {
 DEFAULT_CODING_SETTINGS = {
     "default_backend": "pi",
     "enabled": {"pi": True, "claude": False, "codex": False},
+    # Off until the user says otherwise: KnowMe editing your files is the one
+    # thing here that cannot be undone by ignoring it. The Coding page's
+    # "允许写和跑命令" checkbox is this field.
+    "allow_write": False,
 }
 
 
@@ -56,7 +70,8 @@ def load_coding_settings(home: Path) -> dict:
     default_backend = settings.get("default_backend", DEFAULT_CODING_SETTINGS["default_backend"])
     if default_backend not in BACKENDS:
         default_backend = "pi"
-    return {"default_backend": default_backend, "enabled": enabled}
+    allow_write = bool(settings.get("allow_write", DEFAULT_CODING_SETTINGS["allow_write"]))
+    return {"default_backend": default_backend, "enabled": enabled, "allow_write": allow_write}
 
 
 def save_coding_settings(home: Path, payload: dict) -> dict:
@@ -70,7 +85,11 @@ def save_coding_settings(home: Path, payload: dict) -> dict:
     default_backend = payload.get("default_backend", current["default_backend"])
     if default_backend not in BACKENDS:
         raise ValueError("unknown coding backend")
-    result = {"default_backend": default_backend, "enabled": enabled}
+    allow_write = current["allow_write"]
+    if "allow_write" in payload:
+        allow_write = bool(payload["allow_write"])
+    result = {"default_backend": default_backend, "enabled": enabled,
+              "allow_write": allow_write}
     home.mkdir(parents=True, exist_ok=True)
     coding_settings_path(home).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return result
@@ -184,14 +203,23 @@ def workspace_info(relative: str | None = None) -> dict:
     return payload
 
 
-def workspace_action(payload: dict) -> dict:
-    """Handle the read-only workspace API action."""
+def workspace_action(payload: dict, home: Path | None = None) -> dict:
+    """Handle the workspace API actions: list, read, and one stored diff.
+
+    ``home`` is only needed for "run" — the receipt's detail files live under
+    KNOWME_HOME, not under the project, because the project is the user's and
+    they did not ask KnowMe to leave files in it.
+    """
     try:
         action = payload.get("action", "list")
         if action == "list":
             return {"ok": True, **workspace_info(payload.get("path"))}
         if action == "read":
             return {"ok": True, "file": read_file(payload.get("path", ""))}
+        if action == "run":
+            if home is None:
+                return {"ok": False, "error": "这一轮没有配置 KNOWME_HOME，读不到收据"}
+            return {"ok": True, "detail": read_detail(home, payload.get("detail", ""))}
         return {"ok": False, "error": f"unknown workspace action: {action}"}
     except (OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}

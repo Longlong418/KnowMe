@@ -384,6 +384,10 @@ def collect(agent_id: str = "default") -> dict:
         },
         "db": db_info,
         "workspace": workspace_info(),
+        # The receipt for the Coding page: what the agent changed in the project
+        # (and the baseline it started from). Metadata only — a diff can be
+        # megabytes, so the text is fetched per row through /api/workspace.
+        "coding_runs": coding_runs_info(conn),
         "coding": coding_info(),
         "settings": info,
         "providers": [asdict(view) for view in list_providers()],
@@ -492,12 +496,27 @@ def workspace_info(relative: str | None = None) -> dict:
 
 
 def workspace_action(payload: dict) -> dict:
-    """Handle a read-only Coding Workspace request."""
+    """Handle a Coding Workspace request: list, read, or one stored diff.
+
+    Home is handed over because the receipts live under KNOWME_HOME rather than
+    in the project — the project is yours, and KnowMe does not leave its
+    bookkeeping in it.
+    """
     from knowme.applications.coding_workspace import workspace_action as run_action
 
     agent_id = payload.get("agent_id") or "default"
     get_profile(agent_id)
-    return run_action(payload)
+    settings = load_settings()
+    settings.ensure_home()
+    return run_action(payload, settings.home)
+
+
+def coding_runs_info(conn) -> list[dict]:
+    """The change receipt for the project root, newest first (no diff text)."""
+    from knowme.applications.coding_runs import recent_runs
+    from knowme.applications.coding_workspace import project_root
+
+    return recent_runs(conn, project_root())
 
 
 def coding_info() -> dict:
