@@ -1,4 +1,9 @@
-"""MVP guarantees: profiles share the core but never share private state."""
+"""MVP guarantees, and where the line between Agents sits.
+
+Agents share MEMORY — facts, episodes and notes are one pool, so any Agent
+recalls all of it and any Agent may correct it (the rows keep an agent_id, but
+only as a "who wrote this down" label). They do NOT share CONVERSATIONS: a
+session belongs to the Agent you had it with. Both halves are pinned here."""
 
 from knowme.agents import get_profile, list_profiles
 from knowme.db import connect
@@ -44,13 +49,30 @@ def test_sessions_and_history_are_isolated_by_agent(tmp_path):
     assert resume_or_new_session(conn, "coding") == "same-id"
 
 
-def test_one_agent_cannot_edit_or_delete_another_agents_fact(tmp_path):
+def test_any_agent_can_correct_a_fact_another_agent_recorded(tmp_path):
+    """The inverse of what this test used to pin, and the reason the user asked
+    for it: the memory is theirs, not the Coding agent's, so telling the
+    Research agent "that's wrong" has to actually fix it."""
     conn = connect(tmp_path)
     general = SqliteFactStore(conn, agent_id="default")
     coding = SqliteFactStore(conn, agent_id="coding")
     general.add("project", "keep this")
     fact_id = general.list()[0]["id"]
 
-    assert coding.update(fact_id, "overwritten") is False
-    assert coding.delete(fact_id) is False
-    assert general.list()[0]["content"] == "keep this"
+    assert coding.update(fact_id, "corrected by coding") is True
+    assert general.list()[0]["content"] == "corrected by coding"
+    # ...and one Agent forgetting something removes it for everyone.
+    assert coding.delete(fact_id) is True
+    assert general.list() == []
+
+
+def test_a_fact_written_by_one_agent_is_found_by_another(tmp_path):
+    """Reads too, not just writes: the point of sharing is that the agent you
+    happen to be talking to knows what you already told a different one."""
+    conn = connect(tmp_path)
+    coding = SqliteFactStore(conn, agent_id="coding")
+    coding.add("user", "lives in Dalian")
+
+    assert SqliteFactStore(conn, agent_id="learning").search("Dalian") == [
+        "[user] lives in Dalian"
+    ]

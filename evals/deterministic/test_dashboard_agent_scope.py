@@ -1,19 +1,24 @@
-"""Dashboard payloads must not expose another Agent's private state."""
+"""What the dashboard hands one Agent.
+
+Memory is shared, so the payload carries every Agent's facts/episodes/notes and
+labels each row with who recorded it. Conversations are not shared, so chat_log
+(and the sessions list) is still trimmed to the Agent you are looking at — the
+second half of that split is what this file pins now."""
 
 from knowme.config import Settings
 from knowme.db import connect
 
 
-def test_collect_scopes_memory_chat_and_database_samples(tmp_path, monkeypatch):
+def test_collect_shares_memory_and_scopes_chat(tmp_path, monkeypatch):
     from knowme.ops import web
 
     settings = Settings(home=tmp_path)
     settings.ensure_home()
     conn = connect(tmp_path)
     conn.execute("INSERT INTO facts (subject, content, agent_id) VALUES (?, ?, ?)",
-                 ("default", "private default fact", "default"))
+                 ("default", "default fact", "default"))
     conn.execute("INSERT INTO facts (subject, content, agent_id) VALUES (?, ?, ?)",
-                 ("coding", "private coding fact", "coding"))
+                 ("coding", "coding fact", "coding"))
     conn.execute("INSERT INTO episodes (happened_at, summary, agent_id) VALUES (?, ?, ?)",
                  ("2026-09-21", "default episode", "default"))
     conn.execute("INSERT INTO episodes (happened_at, summary, agent_id) VALUES (?, ?, ?)",
@@ -34,11 +39,19 @@ def test_collect_scopes_memory_chat_and_database_samples(tmp_path, monkeypatch):
     monkeypatch.setattr(web.browser_agent, "current_agents", dict)
 
     payload = web.collect("coding")
-    assert [row["content"] for row in payload["facts"]] == ["private coding fact"]
-    assert [row["summary"] for row in payload["episodes"]] == ["coding episode"]
+    # Memory: both Agents' rows, newest first, each carrying its stamp.
+    assert sorted(row["content"] for row in payload["facts"]) == [
+        "coding fact", "default fact"]
+    assert sorted(row["agent_id"] for row in payload["facts"]) == ["coding", "default"]
+    assert sorted(row["summary"] for row in payload["episodes"]) == [
+        "coding episode", "default episode"]
+    # Conversation: only this Agent's.
     assert [row["content"] for row in payload["chat_log"]] == ["coding chat"]
+    # The database tab has to agree with the memory page about the same table.
     facts_table = next(table for table in payload["db"]["tables"] if table["name"] == "facts")
-    assert [row["content"] for row in facts_table["sample"]] == ["private coding fact"]
+    assert facts_table["count"] == 2
+    chat_table = next(table for table in payload["db"]["tables"] if table["name"] == "chat_log")
+    assert chat_table["count"] == 1
     assert payload["sessions"] == []
 
 

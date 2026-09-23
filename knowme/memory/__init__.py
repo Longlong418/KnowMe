@@ -47,9 +47,11 @@ class Memory:
         # episode_store: inject an already-built store (the dashboard caches ONE
         # NotionEpisodeStore process-wide — its constructor hits the network,
         # so building one per Memory would re-query Notion on every poll).
-        # agent_id: which agent this memory belongs to. All fact/episode/chat
-        # writes and reads are scoped to it, so two agents never share a memory
-        # they didn't choose to (default = "default", the single agent today).
+        # agent_id: "who wrote this down", not "what this agent may see". Facts,
+        # episodes and notes are ONE shared pool; this id is only the stamp that
+        # new rows carry so the dashboard can say which Agent recorded them.
+        # Conversations DO stay separate (chat_log / sessions / the Context
+        # Bridge below are still scoped) — memory is shared, threads are not.
         self.conn = conn
         self.settings = settings
         self.client = client
@@ -174,16 +176,16 @@ class Memory:
         is a file you can open" is true. state.db stays the queryable source of
         truth; this file is a generated view, refreshed after each turn.
 
-        Only exports THIS agent's facts and episodes — a multi-agent workspace
-        shows each agent's own memory in its own MEMORY.md (Phase 2+ will put
-        one per agent under a directory keyed by agent name)."""
+        Exports the whole shared pool, so any agent's turn rewrites the same
+        complete file. Scoping this by agent_id was worse than it looked: the
+        home is shared, MEMORY.md is one file, so whichever agent happened to
+        run last overwrote the others' memories with its own — the file got
+        smaller the more you used KnowMe."""
         facts = self.conn.execute(
-            "SELECT subject, content FROM facts WHERE agent_id = ? ORDER BY subject, id",
-            (self.agent_id,),
+            "SELECT subject, content FROM facts ORDER BY subject, id"
         ).fetchall()
         eps = self.conn.execute(
-            "SELECT happened_at, summary FROM episodes WHERE agent_id = ? ORDER BY happened_at DESC, id DESC",
-            (self.agent_id,),
+            "SELECT happened_at, summary FROM episodes ORDER BY happened_at DESC, id DESC"
         ).fetchall()
         lines = [
             "# KnowMe memory",

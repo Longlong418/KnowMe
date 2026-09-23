@@ -83,12 +83,14 @@ _COLS = "id, title, folder, content, created_at, updated_at, agent_id"
 def _agent_conds(agent_id: str | None) -> tuple[list[str], list]:
     """The WHERE conditions that scope a notes query to one Agent.
 
-    ``agent_id=None`` means NO scoping — every Agent's notes. That is what the
-    Dashboard's knowledge view asks for, because the human reading it owns all
-    the notes; it is one knowledge base, not one per Agent. The Agents' own
-    tools never pass None (they close over their own id), so an Agent still
-    cannot read another Agent's notes. None is deliberately explicit: it has to
-    be written out, so no existing caller can widen its scope by accident.
+    Calling this with None (now the default everywhere) means NO scoping — it is
+    one knowledge base, not one per Agent, and an Agent can read and correct a
+    note another one wrote. `agent_id` survives on new rows as the "who wrote
+    this down" stamp the view labels them with, never as a fence.
+
+    The parameter is kept rather than deleted because the semantic backends
+    (mem0/zep/notion) partition by agent on their side; a caller that genuinely
+    needs one Agent's slice can still say so.
     """
     if agent_id is None:
         return [], []
@@ -110,8 +112,9 @@ def _select(conn: sqlite3.Connection, conds: list[str], params: list,
 
 
 def get_note(conn: sqlite3.Connection, note_id: str,
-             agent_id: str | None = "default") -> Note | None:
-    """Get a note by ID. Pass agent_id=None to find it whoever owns it."""
+             agent_id: str | None = None) -> Note | None:
+    """Get a note by ID. Pass an agent_id to look inside one Agent's notes only
+    (nobody does today — notes are shared)."""
     _ensure_table(conn)
     conds, params = _agent_conds(agent_id)
     conds.insert(0, "id = ?")
@@ -146,11 +149,11 @@ def create_note(conn: sqlite3.Connection, title: str, folder: str = "default", c
 
 def update_note(conn: sqlite3.Connection, note_id: str, content: str,
                 title: str | None = None, folder: str | None = None,
-                agent_id: str | None = "default") -> Note | None:
-    """Update a note's content. agent_id=None updates it whoever owns it.
+                agent_id: str | None = None) -> Note | None:
+    """Update a note's content.
 
     Editing never reassigns a note: the row keeps the agent_id it was created
-    with even when the human edits it from another Agent's view.
+    with even when another Agent (or the human) edits it.
     """
     note = get_note(conn, note_id, agent_id)
     if not note:
@@ -175,8 +178,8 @@ def update_note(conn: sqlite3.Connection, note_id: str, content: str,
 
 
 def delete_note(conn: sqlite3.Connection, note_id: str,
-                agent_id: str | None = "default") -> bool:
-    """Delete a note. agent_id=None deletes it whoever owns it."""
+                agent_id: str | None = None) -> bool:
+    """Delete a note, whoever wrote it."""
     _ensure_table(conn)
     conds, params = _agent_conds(agent_id)
     conds.insert(0, "id = ?")
@@ -187,8 +190,8 @@ def delete_note(conn: sqlite3.Connection, note_id: str,
 
 
 def list_notes(conn: sqlite3.Connection, folder: str | None = None,
-               agent_id: str | None = "default") -> list[Note]:
-    """List notes, optionally filtered by folder. agent_id=None lists all Agents'."""
+               agent_id: str | None = None) -> list[Note]:
+    """List notes, optionally filtered by folder."""
     _ensure_table(conn)
     conds, params = _agent_conds(agent_id)
     if folder:
@@ -197,8 +200,8 @@ def list_notes(conn: sqlite3.Connection, folder: str | None = None,
     return _select(conn, conds, params)
 
 
-def list_folders(conn: sqlite3.Connection, agent_id: str | None = "default") -> list[str]:
-    """List every folder that has a note. agent_id=None spans all Agents."""
+def list_folders(conn: sqlite3.Connection, agent_id: str | None = None) -> list[str]:
+    """List every folder that has a note."""
     _ensure_table(conn)
     conds, params = _agent_conds(agent_id)
     cursor = conn.execute(
@@ -208,8 +211,8 @@ def list_folders(conn: sqlite3.Connection, agent_id: str | None = "default") -> 
 
 
 def search_notes(conn: sqlite3.Connection, query: str,
-                 agent_id: str | None = "default") -> list[Note]:
-    """Search notes by title or content. agent_id=None searches all Agents'."""
+                 agent_id: str | None = None) -> list[Note]:
+    """Search notes by title or content, across every Agent's notes."""
     _ensure_table(conn)
     conds, params = _agent_conds(agent_id)
     conds.append("(title LIKE ? OR content LIKE ?)")
@@ -218,8 +221,8 @@ def search_notes(conn: sqlite3.Connection, query: str,
 
 
 def get_linked_notes(conn: sqlite3.Connection, note_id: str,
-                     agent_id: str | None = "default") -> list[Note]:
-    """Get notes that link TO this note. agent_id=None spans all Agents.
+                     agent_id: str | None = None) -> list[Note]:
+    """Get notes that link TO this note.
 
     A [[link]] in a note the Learning agent wrote can point at a note the Reader
     agent wrote — the human's knowledge base is one graph, so the backlinks
@@ -240,7 +243,13 @@ def get_linked_notes(conn: sqlite3.Connection, note_id: str,
 
 
 def make_knowledge_tools(conn: sqlite3.Connection, agent_id: str = "default") -> dict:
-    """Return a dict of knowledge-tool-name -> Tool instance."""
+    """Return a dict of knowledge-tool-name -> Tool instance.
+
+    `agent_id` is a STAMP, not a scope: it is what create_note writes on the row
+    so the dashboard can show which Agent captured a note. Every other tool
+    passes None and therefore reaches every note — the knowledge base belongs to
+    the human, not to the Agent that happened to be open when they saved it.
+    """
     from knowme.core.tools import Tool
 
     return {
@@ -255,7 +264,7 @@ def make_knowledge_tools(conn: sqlite3.Connection, agent_id: str = "default") ->
                 },
                 "required": ["note_id"],
             },
-            fn=lambda note_id, **_: get_note(conn, note_id, agent_id) or {"error": "Note not found"},
+            fn=lambda note_id, **_: get_note(conn, note_id, None) or {"error": "Note not found"},
         ),
         "create_note": Tool(
             name="create_note",
@@ -289,7 +298,7 @@ def make_knowledge_tools(conn: sqlite3.Connection, agent_id: str = "default") ->
                 "required": ["note_id", "content"],
             },
             fn=lambda note_id, content, title=None, folder=None, **_: update_note(
-                conn, note_id, content, title, folder, agent_id
+                conn, note_id, content, title, folder, None
             ) or {"error": "Note not found"},
         ),
         "delete_note": Tool(
@@ -303,7 +312,7 @@ def make_knowledge_tools(conn: sqlite3.Connection, agent_id: str = "default") ->
                 },
                 "required": ["note_id"],
             },
-            fn=lambda note_id, **_: {"deleted": delete_note(conn, note_id, agent_id)},
+            fn=lambda note_id, **_: {"deleted": delete_note(conn, note_id, None)},
         ),
         "list_notes": Tool(
             name="list_notes",
@@ -315,7 +324,7 @@ def make_knowledge_tools(conn: sqlite3.Connection, agent_id: str = "default") ->
                     "folder": {"type": "string", "description": "Filter by folder."},
                 },
             },
-            fn=lambda folder=None, **_: list_notes(conn, folder, agent_id),
+            fn=lambda folder=None, **_: list_notes(conn, folder, None),
         ),
         "search_notes": Tool(
             name="search_notes",
@@ -328,14 +337,14 @@ def make_knowledge_tools(conn: sqlite3.Connection, agent_id: str = "default") ->
                 },
                 "required": ["query"],
             },
-            fn=lambda query, **_: search_notes(conn, query, agent_id),
+            fn=lambda query, **_: search_notes(conn, query, None),
         ),
         "list_folders": Tool(
             name="list_folders",
             description="List all folders that contain notes. "
                         "Use when the user wants to see their organization structure.",
             input_schema={"type": "object", "properties": {}},
-            fn=lambda **_: list_folders(conn, agent_id),
+            fn=lambda **_: list_folders(conn, None),
         ),
         "get_linked_notes": Tool(
             name="get_linked_notes",
@@ -348,7 +357,7 @@ def make_knowledge_tools(conn: sqlite3.Connection, agent_id: str = "default") ->
                 },
                 "required": ["note_id"],
             },
-            fn=lambda note_id, **_: get_linked_notes(conn, note_id, agent_id),
+            fn=lambda note_id, **_: get_linked_notes(conn, note_id, None),
         ),
         "parse_links": Tool(
             name="parse_links",

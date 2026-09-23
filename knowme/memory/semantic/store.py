@@ -107,8 +107,21 @@ def _searchable(text: str) -> bool:
 
 
 class SqliteFactStore:
+    """ONE pool of facts, shared by every Agent.
+
+    There is no agent scoping on any query here, and that is the design: it is
+    the USER's memory, not the Coding agent's — so any Agent recalls all of it
+    and any Agent can correct or forget a fact another one recorded. `agent_id`
+    survives purely as a label ("who wrote this down") for the dashboard.
+
+    The mental model to keep: MEMORY is shared, CONVERSATIONS are not. chat_log,
+    sessions and the Context Bridge still separate one agent's thread from
+    another's — see test_multi_agent_workspace.py, which pins both halves.
+    """
+
     def __init__(self, conn: sqlite3.Connection, agent_id: str = "default"):
         self.conn = conn
+        # Not a filter — the stamp add() writes on new rows.
         self.agent_id = agent_id
 
     def add(self, subject: str, content: str, source: str = "user") -> None:
@@ -130,8 +143,8 @@ class SqliteFactStore:
             rows = self.conn.execute(
                 "SELECT f.id, f.subject, f.content FROM facts_fts JOIN facts f "
                 "ON f.id = facts_fts.rowid "
-                "WHERE facts_fts MATCH ? AND f.agent_id = ? ORDER BY rank LIMIT ?",
-                (fts, self.agent_id, top_k),
+                "WHERE facts_fts MATCH ? ORDER BY rank LIMIT ?",
+                (fts, top_k),
             ).fetchall()
         seen = {r["id"] for r in rows}
         # The substring pass fills only the slots FTS left over. An all-CJK query
@@ -143,9 +156,9 @@ class SqliteFactStore:
                 break
             for r in self.conn.execute(
                 "SELECT id, subject, content FROM facts "
-                "WHERE agent_id = ? AND (content LIKE ? OR subject LIKE ?) "
+                "WHERE content LIKE ? OR subject LIKE ? "
                 "ORDER BY id DESC LIMIT ?",
-                (self.agent_id, f"%{term}%", f"%{term}%", top_k),
+                (f"%{term}%", f"%{term}%", top_k),
             ):
                 if r["id"] not in seen:
                     seen.add(r["id"])
@@ -162,8 +175,8 @@ class SqliteFactStore:
     def list(self, limit: int = 200) -> list[dict]:
         rows = self.conn.execute(
             "SELECT id, subject, content, source, created_at FROM facts "
-            "WHERE agent_id = ? ORDER BY id DESC LIMIT ?",
-            (self.agent_id, limit),
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -175,21 +188,18 @@ class SqliteFactStore:
     def update(self, fact_id: int, content: str, subject: str | None = None) -> bool:
         if subject is None:
             cur = self.conn.execute(
-                "UPDATE facts SET content=? WHERE id=? AND agent_id=?",
-                (content, fact_id, self.agent_id),
+                "UPDATE facts SET content=? WHERE id=?", (content, fact_id)
             )
         else:
             cur = self.conn.execute(
-                "UPDATE facts SET content=?, subject=? WHERE id=? AND agent_id=?",
-                (content, subject.lower().strip(), fact_id, self.agent_id),
+                "UPDATE facts SET content=?, subject=? WHERE id=?",
+                (content, subject.lower().strip(), fact_id),
             )
         self.conn.commit()
         return cur.rowcount > 0
 
     def delete(self, fact_id: int) -> bool:
-        cur = self.conn.execute(
-            "DELETE FROM facts WHERE id=? AND agent_id=?", (fact_id, self.agent_id)
-        )
+        cur = self.conn.execute("DELETE FROM facts WHERE id=?", (fact_id,))
         self.conn.commit()
         return cur.rowcount > 0
 
@@ -198,9 +208,8 @@ class SqliteFactStore:
         if source_id == target_id:
             return False
         rows = self.conn.execute(
-            "SELECT id, subject, content FROM facts "
-            "WHERE id IN (?, ?) AND agent_id = ?",
-            (source_id, target_id, self.agent_id),
+            "SELECT id, subject, content FROM facts WHERE id IN (?, ?)",
+            (source_id, target_id),
         ).fetchall()
         by_id = {row["id"]: row for row in rows}
         source, target = by_id.get(source_id), by_id.get(target_id)
@@ -214,13 +223,9 @@ class SqliteFactStore:
             merged = f"{merged}\n{addition}" if merged else addition
         try:
             self.conn.execute(
-                "UPDATE facts SET content=? WHERE id=? AND agent_id=?",
-                (merged, target_id, self.agent_id),
+                "UPDATE facts SET content=? WHERE id=?", (merged, target_id)
             )
-            self.conn.execute(
-                "DELETE FROM facts WHERE id=? AND agent_id=?",
-                (source_id, self.agent_id),
-            )
+            self.conn.execute("DELETE FROM facts WHERE id=?", (source_id,))
             self.conn.commit()
         except sqlite3.Error:
             self.conn.rollback()

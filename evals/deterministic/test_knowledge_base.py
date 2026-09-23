@@ -1,7 +1,11 @@
-"""Knowledge Base invariants: usable CRUD, and the right things stay scoped.
+"""Knowledge Base invariants: usable CRUD, and who can see whose notes.
 
-Two audiences read these notes. The human's dashboard sees all of them; an
-Agent's own tools see only its own. Both halves are asserted here.
+There is one knowledge base. The human's dashboard shows all of it, and so do
+the Agents' own tools — a note captured in one conversation is there in the
+next, whichever Agent you are talking to. Each note still carries the agent_id
+of whoever created it, as a label rather than a fence. Passing an agent_id
+explicitly still narrows a query (the semantic backends partition that way);
+that narrower path is asserted too, so it does not rot.
 """
 
 import pytest
@@ -14,6 +18,7 @@ from knowme.tools.knowledge import (
     get_note,
     linkify_content,
     list_notes,
+    make_knowledge_tools,
     parse_links,
     search_notes,
     update_note,
@@ -60,17 +65,13 @@ def test_wiki_links_are_deduplicated_and_escaped_for_html(tmp_path):
     assert "&lt;script&gt;" in html
 
 
-def test_dashboard_shows_every_agent_but_the_agents_tools_stay_scoped(tmp_path, monkeypatch):
-    """The dashboard is the human's view; a tool call is an Agent's.
+def test_dashboard_and_the_agents_tools_both_see_every_note(tmp_path, monkeypatch):
+    """One knowledge base, two ways in.
 
-    This used to assert the opposite — that the dashboard filtered notes by the
-    selected Agent — and that filter is why the knowledge base looked empty
-    whenever the selected Agent had not written any notes yet. The human owns
-    every note in their own knowledge base, so the browser shows them all.
-
-    The isolation that MATTERS is unchanged and is asserted at the bottom: an
-    Agent's own tools still cannot see another Agent's notes. Losing that half
-    while fixing the first is the failure this test exists to catch.
+    This test used to assert that the dashboard showed every Agent's notes while
+    the Agents' tools stayed scoped. That split is what the user reported as a
+    bug ("我现在前端看不到记忆了"): a note saved while talking to one Agent was
+    invisible to the next one.
     """
     from knowme.config import Settings
     from knowme.ops import web
@@ -103,11 +104,20 @@ def test_dashboard_shows_every_agent_but_the_agents_tools_stay_scoped(tmp_path, 
         "title": "Coding note", "agent_id": "default"})
     assert saved["ok"] is True and saved["note"]["agent_id"] == "coding"
 
-    # The Agents' tools are the boundary, and it still holds.
+    # The Agents' own tools reach the same notes. This is the half that changed:
+    # the Coding agent's tool registry, not just the browser, now finds the note
+    # the Learning agent wrote.
     conn = connect(tmp_path)
+    coding_tools = make_knowledge_tools(conn, "coding")
+    found = coding_tools["search_notes"].fn("learning only")
+    assert [n["title"] for n in found] == ["Learning note"]
+    assert coding_tools["get_note"].fn(learning["id"])["title"] == "Learning note"
+    # Asking for one Agent explicitly still narrows — that path is kept for the
+    # backends that partition remotely, so it must not rot.
     assert [n["content"] for n in list_notes(conn, agent_id="coding")] == ["edited"]
-    assert [n["content"] for n in list_notes(conn, agent_id="learning")] == ["learning only"]
     assert get_note(conn, learning["id"], "coding") is None
+    # create_note still stamps its own Agent, so the label stays truthful.
+    assert coding_tools["create_note"].fn("From coding")["agent_id"] == "coding"
 
     assert web.knowledge_action({"action": "delete", "note_id": coding["id"],
                                        "agent_id": "default"})["ok"] is True

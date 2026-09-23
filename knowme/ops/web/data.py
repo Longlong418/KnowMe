@@ -57,6 +57,13 @@ from knowme.core.tools import as_text
 _notion_store = None                       # built once (its constructor calls Notion)
 _notion_episodes: tuple[float, list] | None = None   # (fetched_at, items)
 
+# The ONE table that is still per-Agent. Memory (facts / episodes / notes) is one
+# shared pool — every Agent recalls all of it and any Agent may correct it — but
+# a conversation belongs to the Agent you had it with. The database tab has to
+# agree with the memory tab, or the same rows show up under one Agent here and
+# under another there. Change this tuple, not the queries.
+PER_AGENT_TABLES = ("chat_log",)
+
 
 def invalidate_notion_cache() -> None:
     """Forget cached Notion clients/results after connection settings change."""
@@ -92,15 +99,19 @@ def collect(agent_id: str = "default") -> dict:
 
     def episodes_payload() -> dict:
         """Episodes from the active backend: sqlite (default) or notion.
-        A Notion outage must not take down the whole web payload."""
+        A Notion outage must not take down the whole web payload.
+
+        The sqlite branch is the SHARED pool (no agent filter — memory is one
+        pool; see SqliteFactStore). The notion branch below stays per-agent on
+        purpose: that backend partitions by agent_id on Notion's side, and we
+        cannot change how an external service scopes its own data."""
         if settings.episodic_store != "notion":
             return {
                 "source": "sqlite",
                 "error": "",
                 "items": rows(
                     "SELECT id, happened_at, summary, agent_id "
-                    "FROM episodes WHERE agent_id=? ORDER BY happened_at DESC",
-                    (agent_id,),
+                    "FROM episodes ORDER BY happened_at DESC",
                 ),
             }
         try:
@@ -242,7 +253,7 @@ def collect(agent_id: str = "default") -> dict:
         info = conn.execute(f"PRAGMA table_info({name})").fetchall()
         cols = [r["name"] for r in info]
         types = {r["name"]: r["type"] for r in info}
-        scoped = "agent_id" in cols
+        scoped = name in PER_AGENT_TABLES
         where = " WHERE agent_id=?" if scoped else ""
         args = (agent_id,) if scoped else ()
         count = conn.execute(f"SELECT COUNT(*) FROM {name}{where}", args).fetchone()[0]
@@ -295,11 +306,12 @@ def collect(agent_id: str = "default") -> dict:
                   for e in events if e.get("type") == "graph_end"][-8:][::-1]
 
     return {
-        # WHOSE data this is. Much of the payload is agent-scoped (facts,
-        # episodes, skills, and sessions_by_agent — which is filled for the
-        # requested agent only), so the page has to be able to tell that an
-        # answer arriving late belongs to the agent you just left. See the
-        # matching check in static/js/main.js refresh().
+        # WHOSE data this is. Part of the payload is agent-scoped (chat_log,
+        # skills, traces, and sessions_by_agent — filled for the requested agent
+        # only), so the page has to be able to tell that an answer arriving late
+        # belongs to the agent you just left. Memory is no longer in that set:
+        # facts/episodes/notes are the same for every Agent. See the matching
+        # check in static/js/main.js refresh().
         "agent_id": agent_id,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "home": str(home.resolve()),
@@ -333,9 +345,11 @@ def collect(agent_id: str = "default") -> dict:
              "session_id": current_sessions[profile.id]}
             for profile in profiles
         ],
+        # The shared pool — agent_id rides along so the row can say who recorded
+        # it, but nothing is filtered by it. chat_log below is still scoped.
         "facts": rows(
             "SELECT id, subject, content, source, agent_id, created_at "
-            "FROM facts WHERE agent_id=? ORDER BY id DESC", (agent_id,)
+            "FROM facts ORDER BY id DESC"
         ),
         "episodes": episodes_data["items"],
         "episodes_source": episodes_data["source"],
@@ -452,8 +466,9 @@ def knowledge_info() -> dict:
 
     Not filtered by Agent: this is the human's own knowledge base and they own
     every note in it, whatever Agent wrote it. Each row still carries its
-    agent_id so the view can label where the note came from. (the Agents' own
-    tools stay scoped — see knowme/tools/knowledge.py:_agent_conds.)
+    agent_id so the view can label where the note came from. The Agents' own
+    tools now pass agent_id=None too — notes are shared, like facts and
+    episodes (see knowme/tools/knowledge.py:_agent_conds).
     """
     from knowme.tools.knowledge import list_folders, list_notes
     settings = load_settings()

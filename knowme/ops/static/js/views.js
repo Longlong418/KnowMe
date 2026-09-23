@@ -61,10 +61,21 @@ async function runQuery(){
 
 // --- Memory sub-tabs. Memory is the friendly, per-pillar view of what persists;
 // the Data tab shows the SAME rows as raw SQLite tables (see the explainer).
+//
+// Nothing here is filtered by ACTIVE_AGENT, on purpose. Memory is ONE pool
+// shared by every Agent — filtering it by the Agent you happen to be looking at
+// is what made this page look empty ("我现在前端看不到记忆了"), and the same bug
+// the knowledge base already had fixed once. The server stopped filtering, and
+// this file used to filter a second time; one decision point, or they drift.
+// Each row instead says WHO recorded it (see memAgentTag below).
+function memAgentTag(agentId){
+  // "谁记的" — a label, not a fence: any Agent can correct any of these rows.
+  return `<span class="srcpill" title="这条记忆是哪个 Agent 记下的（记忆本身是共用的）">${esc(agentId || "default")}</span>`;
+}
 function memOverview(d){
   const s = d.stats;
-  const facts = d.facts.filter(f => (f.agent_id||"default") === ACTIVE_AGENT);
-  const episodes = d.episodes.filter(e => !e.agent_id || e.agent_id === ACTIVE_AGENT);
+  const facts = d.facts;
+  const episodes = d.episodes;
   const pillars = [
     ["语义记忆","semantic",facts.length+" 条事实","关于你和相关人员的持久、提炼后的事实"],
     ["情景记忆","episodic",episodes.length+" 条情景","每次整理生成一条带日期的摘要——有意保持精简"],
@@ -72,6 +83,11 @@ function memOverview(d){
   ].map(([t,sub,n,desc]) => `<div class="box" style="min-width:0" onclick="location.hash='memory/${sub}'">
       <b>${t} <span class="meta" style="font-weight:400">· ${n}</span></b><span>${desc}</span></div>`).join("");
   return `<div class="card" style="border-color:var(--accent);background:var(--accent-soft)">
+      <b>所有 Agent 共用同一套记忆。</b>
+      <div class="r">不管你现在选的是哪个 Agent，它读到的、能改的都是这一套——你告诉过某个 Agent 的事，
+      换一个 Agent 它也知道。每行右边的标签写的是<b>谁记下的</b>，那只是出处，不是权限：
+      任何一个 Agent 都可以更正或遗忘另一条记录。（<b>对话</b>则不共用——每个 Agent 有自己的一条会话。）</div></div>
+    <div class="card" style="border-color:var(--accent);background:var(--accent-soft)">
       <b>记忆与数据库——同一文件的两种视图。</b>
       <div class="r">此标签页按记忆支柱整理展示 KnowMe 记住的内容。<a class="reveal" onclick="location.hash='database'">数据库标签页</a>
       则以原始 SQLite 表（以及 FTS5 关键词索引）的形式展示完全相同的数据。底层都是
@@ -87,20 +103,22 @@ function memOverview(d){
     <div class="meta" style="margin-top:14px">文件：${reveal("state.db","state.db")} · ${reveal("MEMORY.md","MEMORY.md")} · ${reveal("SOUL.md","SOUL.md")} · ${reveal("skills","skills/")}</div>`;
 }
 function memSemantic(d){
-  const facts = d.facts.filter(f => (f.agent_id||"default") === ACTIVE_AGENT);
+  const facts = d.facts;
   let h = `<div class="meta" style="margin-bottom:12px">从你告诉 KnowMe 的内容中提炼出的持久事实——
-    这是最精简、复用率最高的存储。你可以编辑或遗忘任意事实；更改将在下一轮对话生效。</div>`;
-  h += `<div class="card" style="padding:4px 8px"><table><tr><th>主题</th><th>事实</th><th>来源</th><th></th></tr>${
+    这是最精简、复用率最高的存储。你可以编辑或遗忘任意事实；更改将在下一轮对话生效。
+    所有 Agent 共用这一套，标签写的是谁记下的。</div>`;
+  h += `<div class="card" style="padding:4px 8px"><table><tr><th>主题</th><th>事实</th><th>来源</th><th>谁记的</th><th></th></tr>${
     facts.map(f => `<tr id="fact-${f.id}">
       <td><code>${esc(f.subject)}</code></td>
       <td class="fc">${esc(f.content)}</td>
       <td class="meta">${esc({user:"用户",consolidation:"记忆整理"}[f.source] || f.source)}</td>
+      <td>${memAgentTag(f.agent_id)}</td>
       <td style="white-space:nowrap"><a class="reveal" onclick="editFact(${f.id})">编辑</a> · <a class="reveal" onclick="mergeFact(${f.id})">合并</a> · <a class="reveal del" onclick="delMem('delete_fact',${f.id})">删除</a></td>
     </tr>`).join("")}</table></div>`;
   return h;
 }
 function memEpisodic(d){
-  const episodes = d.episodes.filter(e => !e.agent_id || e.agent_id === ACTIVE_AGENT);
+  const episodes = d.episodes;
   const src = d.episodes_source || "sqlite";
   let h = `<div class="meta" style="margin-bottom:8px">后端：<span class="srcpill">${esc(src)}</span></div>`;
   if (d.episodes_error) h += `<div class="card empty">无法从 Notion 读取情景记忆：${esc(d.episodes_error)}</div>`;
@@ -109,8 +127,9 @@ function memEpisodic(d){
     而不是保存每条消息。逐条原始对话位于数据库标签页中的
     <a class="reveal" onclick="location.hash='database/chat_log'"><code>chat_log</code> 表</a>（数据量较大的表）；
     情景记忆只是其中的精华。</span></div>`;
-  h += `<div class="card" style="padding:4px 8px"><table><tr><th>日期</th><th>情景</th><th></th></tr>${
+  h += `<div class="card" style="padding:4px 8px"><table><tr><th>日期</th><th>情景</th><th>谁记的</th><th></th></tr>${
     episodes.map(e => `<tr><td class="meta">${esc(e.happened_at)}</td><td>${esc(e.summary)}</td>
+      <td>${memAgentTag(e.agent_id)}</td>
       <td><a class="reveal del" onclick="delMem('delete_episode','${e.id}')">删除</a></td></tr>`).join("")}</table></div>`;
   return h;
 }
@@ -145,9 +164,8 @@ function memSoul(d){
     <div class="meta" style="margin-top:10px">${reveal("SOUL.md","在编辑器中打开 SOUL.md")}</div>`;
 }
 function memConsolidation(d){
-  const distilled = d.facts.filter(f => f.source==="consolidation" &&
-    (f.agent_id||"default") === ACTIVE_AGENT);
-  const episodes = d.episodes.filter(e => !e.agent_id || e.agent_id === ACTIVE_AGENT);
+  const distilled = d.facts.filter(f => f.source==="consolidation");
+  const episodes = d.episodes;
   let h = `<div class="card"><b>工作原理。</b> <span class="r">每经过 ${d.consolidate_every} 轮对话，
     一个低成本模型就会读取尚未整理的 ${"<code>chat_log</code>"}，将其提炼为持久的
     <b>事实</b>（语义记忆）和一条<b>情景</b>（情景记忆）。批量处理可以降低成本，

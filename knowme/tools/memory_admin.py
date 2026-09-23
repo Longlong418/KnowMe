@@ -67,7 +67,7 @@ def make_manage_memory_tool(memory) -> Tool:
                 return "Only facts can be merged (episodes are historical)."
             ok = facts.merge(int(source_id), int(target_id))
             return (f"Merged fact #{source_id} into #{target_id}." if ok
-                    else "Both fact ids must belong to this Agent and be different.")
+                    else "Both fact ids must exist and be different.")
         return "action must be one of: search, update, delete, merge"
 
     return Tool(

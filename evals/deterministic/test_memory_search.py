@@ -195,11 +195,15 @@ def test_a_chinese_query_that_matches_nothing_still_returns_nothing(facts):
     assert facts.search("养猫") == []
 
 
-def test_the_substring_pass_stays_inside_the_agent(facts):
-    """The LIKE pass is a second query, so it needs the second query's
-    WHERE clause — another agent's memory must not leak into this one."""
+def test_the_substring_pass_reaches_another_agents_fact(facts):
+    """The LIKE pass is a second query, so it carries its own WHERE clause —
+    and now that clause is empty, like the FTS one. A CJK fact recorded by one
+    Agent has to be reachable from another, or half of the shared memory would
+    only be shared for Latin text."""
     facts.add("user", "在大连海事大学读硕士研究生。")
-    assert SqliteFactStore(facts.conn, agent_id="research").search("大连海事大学") == []
+    assert SqliteFactStore(facts.conn, agent_id="research").search("大连海事大学") == [
+        "[user] 在大连海事大学读硕士研究生。"
+    ]
 
 
 def test_the_gate_query_carries_the_fact_into_the_turn(tmp_path):

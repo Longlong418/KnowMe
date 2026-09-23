@@ -101,7 +101,9 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
                                     settings.tool_result_budget).values():
         registry.register(tool)
 
-    # Knowledge base tools — Sapphire-style notes with [[wiki-links]].
+    # Knowledge base tools — Sapphire-style notes with [[wiki-links]]. Like
+    # memory, the notes are one shared pool: the agent id here only stamps what
+    # create_note writes, so the dashboard can say which Agent captured a note.
     from knowme.tools.knowledge import make_knowledge_tools
     knowledge_agent_id = getattr(memory, "agent_id", "default")
     for tool in make_knowledge_tools(conn, knowledge_agent_id).values():

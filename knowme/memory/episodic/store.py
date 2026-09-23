@@ -14,8 +14,13 @@ from knowme.memory.semantic.store import _fts_query, _searchable, _substring_ter
 
 
 class SqliteEpisodeStore:
+    """ONE pool of episodes, shared by every Agent — same rule as the facts
+    (see SqliteFactStore's docstring): no query here is scoped by agent_id, and
+    `agent_id` survives only as the "who wrote this down" stamp add() writes."""
+
     def __init__(self, conn: sqlite3.Connection, agent_id: str = "default"):
         self.conn = conn
+        # Not a filter — the stamp add() writes on new rows.
         self.agent_id = agent_id
 
     def add(self, summary: str, happened_at: str) -> None:
@@ -37,9 +42,9 @@ class SqliteEpisodeStore:
         if fts:
             rows = self.conn.execute(
                 "SELECT e.id, e.happened_at, e.summary FROM episodes_fts JOIN episodes e "
-                "ON e.id = episodes_fts.rowid WHERE episodes_fts MATCH ? AND e.agent_id = ? "
+                "ON e.id = episodes_fts.rowid WHERE episodes_fts MATCH ? "
                 "ORDER BY rank, e.happened_at DESC LIMIT ?",
-                (fts, self.agent_id, top_k),
+                (fts, top_k),
             ).fetchall()
         seen = {r["id"] for r in rows}
         for term in _substring_terms(query):
@@ -47,9 +52,9 @@ class SqliteEpisodeStore:
                 break
             for r in self.conn.execute(
                 "SELECT id, happened_at, summary FROM episodes "
-                "WHERE agent_id = ? AND summary LIKE ? "
+                "WHERE summary LIKE ? "
                 "ORDER BY happened_at DESC LIMIT ?",
-                (self.agent_id, f"%{term}%", top_k),
+                (f"%{term}%", top_k),
             ):
                 if r["id"] not in seen:
                     seen.add(r["id"])
@@ -58,21 +63,21 @@ class SqliteEpisodeStore:
 
     def recent(self, top_k: int = 3) -> list[str]:
         rows = self.conn.execute(
-            "SELECT happened_at, summary FROM episodes WHERE agent_id = ? "
+            "SELECT happened_at, summary FROM episodes "
             "ORDER BY happened_at DESC LIMIT ?",
-            (self.agent_id, top_k),
+            (top_k,),
         ).fetchall()
         return [f"({r['happened_at']}) {r['summary']}" for r in rows]
 
     def list(self, limit: int = 200) -> list[dict]:
         rows = self.conn.execute(
             "SELECT id, happened_at, summary, created_at FROM episodes "
-            "WHERE agent_id = ? ORDER BY id DESC LIMIT ?",
-            (self.agent_id, limit),
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 
     def delete(self, episode_id: int) -> bool:
-        cur = self.conn.execute("DELETE FROM episodes WHERE id=? AND agent_id = ?", (episode_id, self.agent_id))
+        cur = self.conn.execute("DELETE FROM episodes WHERE id=?", (episode_id,))
         self.conn.commit()
         return cur.rowcount > 0
