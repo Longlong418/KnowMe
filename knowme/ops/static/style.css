@@ -604,7 +604,17 @@
   .cs-flag.work{color:var(--accent);font-weight:600}
   .cs-link{margin-left:auto;color:var(--accent);text-decoration:none;font-weight:600;white-space:nowrap}
   .cs-link:hover{text-decoration:underline}
-  @media (max-width:800px){.coding-grid{grid-template-columns:1fr}}
+  /* 深度研究页：一栏是这张图和它实际跑过的波次，一栏是报告。跟 Coding 页同一套
+     两栏比例，所以下面那条窄屏规则一起管。 */
+  .dr-grid{display:grid;grid-template-columns:minmax(260px,0.85fr) minmax(0,1.6fr);gap:16px}
+  .dr-grid section{min-width:0}   /* 不加 min-width:0 的话里面那张 SVG 会把栅格撑破 */
+  .dr-row{display:flex;gap:8px;margin:10px 0}
+  .dr-row input{flex:1;min-width:0;border:1px solid var(--line);border-radius:7px;
+    background:var(--bg);color:var(--ink);padding:8px 10px;outline:none;font:inherit}
+  .dr-row input:focus{border-color:var(--accent)}
+  .dr-grid .live-dot{display:inline-block;width:7px;height:7px;border-radius:99px;
+    background:var(--accent);margin-right:5px;animation:pulse 1.2s infinite}
+  @media (max-width:800px){.coding-grid,.dr-grid{grid-template-columns:1fr}}
   /* the composer is sticky, not fixed: the pane's scrollbar stays its own, and
      the pane drops its bottom padding so the bar reaches the bottom edge */
   main:has(.agent-view){padding-bottom:0}

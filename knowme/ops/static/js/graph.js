@@ -394,6 +394,26 @@ function graphCol(key, wave){
   </div>`;
 }
 
+// One wave's row of cards. Split out because two pages draw it — the Graph tab's
+// runner and the research page — and two copies of a bar chart's arithmetic drift.
+// `w.nodes` holds card KEYS (see graphKey), not node names: a wave holds the
+// cards that started together, and one node can contribute several.
+function graphWaveRow(w, i){
+  const R = graphRun;
+  const done = w.nodes.map(k => R.nodes[k] || {}).filter(n => n.ms != null);
+  const slowest = done.length ? Math.max(...done.map(n => n.ms)) : 0;
+  const sum = done.reduce((a, n) => a + n.ms, 0);
+  return `<div class="meta" style="margin:14px 0 6px">波次 ${i + 1} · ${w.nodes.length} 个节点${
+    slowest ? ` · ${(slowest/1000).toFixed(1)} 秒`
+      + (w.nodes.length > 1 ? `（串行执行需要 ${(sum/1000).toFixed(1)} 秒）` : "") : ""}</div>
+    <div class="cmp-grid">${w.nodes.map(k => graphCol(k, w)).join("")}</div>`;
+}
+
+// Every wave, for a page that draws the whole run at once.
+function graphWaves(){
+  return graphRun.waves.map((w, i) => graphWaveRow(w, i)).join("");
+}
+
 function graphRunPanel(){
   const R = graphRun;
   const btn = `<button class="btn" onclick="runGraph('gather')" ${R.running ? "disabled" : ""}>
@@ -404,16 +424,7 @@ function graphRunPanel(){
     <span class="meta" style="margin-left:10px">同时获取 GitHub、网页、日历和记忆。
     只生成建议，不直接执行；摘要会写入发件箱。</span>`;
   if (R.error) h += `<div class="meta" style="color:var(--bad);margin-top:10px">${esc(R.error)}</div>`;
-  R.waves.forEach((w, i) => {
-    // w.nodes holds card KEYS (see graphKey), not names — a wave is the cards in
-    // it, and one node can now contribute several.
-    const done = w.nodes.map(k => R.nodes[k] || {}).filter(n => n.ms != null);
-    const slowest = done.length ? Math.max(...done.map(n => n.ms)) : 0;
-    const sum = done.reduce((a, n) => a + n.ms, 0);
-    h += `<div class="meta" style="margin:14px 0 6px">波次 ${i + 1} · ${w.nodes.length} 个节点${slowest ? ` · ${(slowest/1000).toFixed(1)} 秒`
-      + (w.nodes.length > 1 ? `（串行执行需要 ${(sum/1000).toFixed(1)} 秒）` : "") : ""}</div>
-      <div class="cmp-grid">${w.nodes.map(k => graphCol(k, w)).join("")}</div>`;
-  });
+  R.waves.forEach((w, i) => { h += graphWaveRow(w, i); });
   if (R.totalMs) h += `<div class="meta" style="margin-top:12px">完成耗时
     ${(R.totalMs/1000).toFixed(1)} 秒${R.draft ? ` · 已保存到 <code>${esc(R.draft)}</code>` : ""}</div>`;
   if (R.digest) h += `<div class="card" style="margin-top:10px">${renderMarkdown(R.digest)}</div>`;

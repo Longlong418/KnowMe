@@ -21,6 +21,7 @@ const TITLES = {agent:"对话", overview:"总览", gateway:"网关", loop:"循�
                 settings:"行为——每轮对话如何运行",
                 database:"数据库——KnowMe 在 state.db 中保存的一切"};
 TITLES.coding = "Coding Workspace";
+TITLES.deepresearch = "深度研究——给一个主题，它自己查几轮再写报告";
 // The sidebar counters. These used to be bare getElementById(...).textContent
 // writes, and when 6ee4900 removed the duplicate 记忆数据 nav entry it took that
 // entry's <span id="n-mem"> with it — so render() threw HERE, and everything
@@ -105,6 +106,12 @@ function render(){
     // because it is written to localStorage.) Nothing on this page is fed by the
     // poll — the receipt list and the switch are only ever repainted by the
     // action that changed them — so skip the rebuild entirely.
+  } else if (view === "deepresearch" && !subChanged){
+    // Same trap again. This page has an <input> you are still typing a topic
+    // into, an SVG that is lit by the SSE stream, and a report the stream just
+    // painted — and it polls nothing, because everything on it arrives on the
+    // run's own stream. A 5s rebuild would wipe all three mid-run; nothing here
+    // would put them back.
   } else if (view === "knowledge" && !subChanged && (editing || currentNoteId)){
     // Keep the selected note open while the 5s data poll updates the sidebar.
   } else {
@@ -145,6 +152,13 @@ function render(){
   // agent's thread has to appear here without a reload). It never touches the
   // file tree or the task textarea — that is the state the skip exists for.
   if (view === "coding" && typeof repaintCoding === "function") repaintCoding();
+  // The research page is skipped above too, so this is where it picks up the one
+  // thing the poll DOES carry for it: the knowledge note holding the last report.
+  // While a run is in flight repaintResearch() has the truth; the note is what
+  // makes the report survive a reload. Same typeof guard as the Coding page —
+  // this file is eval'd on its own by four frontend evals that never load
+  // deepresearch.js.
+  if (view === "deepresearch" && typeof repaintResearch === "function") repaintResearch();
   if (view === "knowledge" && typeof restoreKnowledgeState === "function"){
     restoreKnowledgeState();
   }
