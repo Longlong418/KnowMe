@@ -9,11 +9,36 @@
 
 // --- layered layout: START at the left, each node one column after its
 // furthest predecessor. Small graphs only (triage is 5 nodes) — no library.
+//
+// A CYCLE CANNOT BE LAYERED, so the back edges are found first and left out of
+// the relaxation. deep_research loops (research → research) and the relaxation
+// below is `layer[dst] = max(layer[dst], layer[src] + 1)`: fed its own output,
+// the node gains a column on every pass and ends up off the canvas entirely —
+// the whole chart slides right and the loop is never seen. A back edge is an
+// edge into a node still on the DFS stack, which includes a node pointing at
+// ITSELF; graphSVG draws those as an arc instead.
+//
+// For a DAG (triage, gather) nothing is ever a back edge, so every number this
+// returns is the one it returned before — the regression lock asserts the two
+// existing charts' SVG is byte-identical.
 function graphLayout(wf){
   const names = ["START", ...wf.nodes.map(n => n.name), "END"];
+  const out = {}; names.forEach(n => out[n] = []);
+  wf.edges.forEach(e => { if (out[e.src]) out[e.src].push(e.dst); });
+  const back = new Set(), mark = {};             // 1 = on the stack, 2 = done
+  const peel = n => {
+    mark[n] = 1;
+    out[n].forEach(d => {
+      if (mark[d] === 1) back.add(n + "|" + d);   // into a node we are inside of
+      else if (!mark[d]) peel(d);
+    });
+    mark[n] = 2;
+  };
+  names.forEach(n => { if (!mark[n]) peel(n); });
   const layer = {START: 0};
   for (let pass = 0; pass < names.length; pass++)     // relax until stable
     wf.edges.forEach(e => {
+      if (back.has(e.src + "|" + e.dst)) return;
       const src = layer[e.src] ?? 0;
       layer[e.dst] = Math.max(layer[e.dst] ?? 0, src + 1);
     });
@@ -22,19 +47,26 @@ function graphLayout(wf){
     if (layer[n] == null) layer[n] = 0;
     (cols[layer[n]] = cols[layer[n]] || []).push(n);
   });
-  return {layer, cols: cols.filter(c => c && c.length)};
+  return {layer, cols: cols.filter(c => c && c.length), back};
 }
 
 function graphSVG(wf, opts = {}){
-  const {cols} = graphLayout(wf);
+  const {cols, back} = graphLayout(wf);
   const kinds = Object.fromEntries(wf.nodes.map(n => [n.name, n.kind]));
   const W = 168, H = 52, GX = 74, GY = 22, PAD = 14;
-  const height = Math.max(...cols.map(c => c.length)) * (H + GY) - GY + PAD * 2;
+  // A loop is drawn ABOVE its box (see edgeLine), so a chart that has one has
+  // to reserve that much headroom or the arc pokes out of the viewBox and gets
+  // clipped. A chart with no back edge reserves nothing — top === PAD and every
+  // number below is the one it was before, which is what keeps the existing
+  // charts byte-identical.
+  const LOOP = 30;
+  const top = PAD + (back.size ? LOOP + 12 : 0);
+  const height = Math.max(...cols.map(c => c.length)) * (H + GY) - GY + PAD + top;
   const width = cols.length * (W + GX) - GX + PAD * 2;
   const pos = {};
   cols.forEach((col, ci) => col.forEach((n, ri) => {
     const colH = col.length * (H + GY) - GY;
-    pos[n] = {x: PAD + ci * (W + GX), y: PAD + (height - PAD * 2 - colH) / 2 + ri * (H + GY)};
+    pos[n] = {x: PAD + ci * (W + GX), y: top + (height - top - PAD - colH) / 2 + ri * (H + GY)};
   }));
   // Ids carry the workflow name. START and END exist in EVERY workflow, so on a
   // page showing two charts an un-namespaced `g-START` lit both of them at once
@@ -49,7 +81,8 @@ function graphSVG(wf, opts = {}){
   const NODE_ZH = {START:"开始", END:"结束", classify:"分类", calendar:"今日日历",
     route:"路由", quick_reply:"快速回复", full_agent:"完整智能体",
     scan_github:"扫描 GitHub", scan_web:"扫描网页", scan_calendar:"扫描日历",
-    scan_memory:"扫描记忆", synthesize:"综合整理"};
+    scan_memory:"扫描记忆", synthesize:"综合整理",
+    plan:"拆解子问题", research:"研究一轮", save:"存档"};
   const nodeBox = n => {
     const p = pos[n];
     if (n === "START" || n === "END")
@@ -64,10 +97,22 @@ function graphSVG(wf, opts = {}){
   };
   const edgeLine = e => {
     const a = pos[e.src], b = pos[e.dst];
+    const cls = `flow${e.conditional ? " dash" : ""}`;
+    const id = `g-${wf.name}-${e.src}-${e.dst}`;
+    // A back edge cannot use the S-curve below: src and dst are the SAME box,
+    // so x1 and x2 are computed from one `pos` entry, the curve has zero width,
+    // and it hides behind the node it is supposed to be coming back to. A loop
+    // has to leave one side and arrive at another — out of the right edge, over
+    // the top, down into the top edge.
+    if (back.has(e.src + "|" + e.dst)){
+      const rx = a.x + W, ry = a.y + H/2, tx = a.x + W/2;
+      return `<path class="${cls}" data-edge="${id}"
+        d="M${rx} ${ry} C${rx + 46} ${ry} ${rx + 46} ${a.y - LOOP} ${tx + 32} ${a.y - LOOP} C${tx} ${a.y - LOOP} ${tx} ${a.y - 22} ${tx} ${a.y}" marker-end="url(#garr)"/>`;
+    }
     const x1 = a.x + (e.src === "START" ? W/2 + 34 : W), y1 = a.y + H/2;
     const x2 = b.x + (e.dst === "END" ? W/2 - 34 : 0), y2 = b.y + H/2;
     const mx = (x1 + x2) / 2;
-    return `<path class="flow${e.conditional ? " dash" : ""}" data-edge="g-${wf.name}-${e.src}-${e.dst}"
+    return `<path class="${cls}" data-edge="${id}"
       d="M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}" marker-end="url(#garr)"/>`;
   };
   return `<div style="overflow-x:auto"><svg viewBox="0 0 ${width} ${height}" class="arch graphchart"
@@ -169,8 +214,13 @@ function animateGraphStage(ev){
   }
   else if (ev.type === "route"){
     status(`路由 → ${ev.target}`);
+    // The EDGE lights, the target node does not. node_start owns a node's light
+    // and holds it for as long as the node is working; lighting it here too does
+    // nothing node_start is not about to do, and this timer then takes the class
+    // away again 1400ms later — so the node went dark a second into a two-minute
+    // run. deep_research's self-loop made it obvious: research → research relit
+    // the node that had just finished and unlit the round that had just begun.
     hot(`[data-edge="g-${w}-${ev.router}-${ev.target}"]`, "live", 1400);
-    hot(`[data-node="g-${w}-${ev.target}"]`, "hot", 1400);
   }
   else if (ev.type === "graph_end"){
     hot(`[data-node="g-${w}-END"]`, "hot", 1000);
@@ -202,11 +252,27 @@ function graphLive(name){
 // `node`. Swap the key, reuse .cmp-grid/.cmp-col, and it reads as a sibling
 // because it is one.
 let graphRun = {running: false, workflow: "", nodes: {}, order: [], waves: [],
-                digest: "", draft: "", error: "", ticker: null};
+                visit: {}, digest: "", draft: "", noteId: "", error: "", ticker: null};
 
 function graphResetRun(workflow){
-  graphRun = {running: true, workflow, nodes: {}, order: [], waves: [],
-              digest: "", draft: "", error: "", ticker: graphRun.ticker};
+  graphRun = {running: true, workflow, nodes: {}, order: [], waves: [], visit: {},
+              digest: "", draft: "", noteId: "", error: "", ticker: graphRun.ticker};
+}
+
+// A node that runs more than once needs one card PER RUN. deep_research goes
+// round the loop three times, and keying the cards by node name alone meant all
+// three cards were the same card: the third round's state overwrote the first's,
+// so the trace showed three identical rows all reporting the last round's time
+// while a round was still running. The key is therefore `name#visit`.
+//
+// node_start carries `visit`; node_end does NOT (test_graph_stream.py pins its
+// key set to exactly workflow/node/ms/keys/error, and that is the right call —
+// a card wants the name and the cost, not the payload), so the current visit is
+// remembered here from the last node_start. visit 1 keeps the PLAIN NAME as its
+// key, which is what makes this invisible for triage and gather: every one of
+// their visits is 1, so every key and every rendered pixel is what it was.
+function graphKey(name, visit){
+  return (visit || 1) > 1 ? `${name}#${visit}` : name;
 }
 
 function graphApplyEvent(ev){
@@ -216,17 +282,22 @@ function graphApplyEvent(ev){
     R.order = ev.nodes || [];
     R.order.forEach(n => R.nodes[n] = {status: "waiting"});
   } else if (k === "node_start"){
+    const key = graphKey(ev.node, ev.visit);
+    R.visit[ev.node] = ev.visit || 1;
     // A wave is "the nodes that started before any of them finished". That is
     // exactly what the engine means by a wave, and it is what the row groups by.
+    // A re-entry starts after every earlier member finished, so it opens a wave
+    // of its own — the loop reads top to bottom, one row per round.
     const open = R.waves[R.waves.length - 1];
-    if (open && !open.closed) open.nodes.push(ev.node);
-    else R.waves.push({nodes: [ev.node], closed: false});
-    R.nodes[ev.node] = {status: "running", startedAt: performance.now()};
+    if (open && !open.closed) open.nodes.push(key);
+    else R.waves.push({nodes: [key], closed: false});
+    R.nodes[key] = {status: "running", name: ev.node, startedAt: performance.now()};
   } else if (k === "node_end"){
     const w = R.waves[R.waves.length - 1];
     if (w) w.closed = true;   // first finish closes the wave for new members
-    R.nodes[ev.node] = {status: ev.error ? "error" : "done", ms: ev.ms,
-                        keys: ev.keys || [], error: ev.error || ""};
+    R.nodes[graphKey(ev.node, R.visit[ev.node])] =
+      {status: ev.error ? "error" : "done", name: ev.node, ms: ev.ms,
+       keys: ev.keys || [], error: ev.error || ""};
   } else if (k === "route"){
     R.route = {target: ev.target, reason: ev.reason};
   } else if (k === "graph_end"){
@@ -234,21 +305,29 @@ function graphApplyEvent(ev){
   } else if (k === "done"){
     R.running = false;
     R.digest = ev.digest || ""; R.draft = ev.draft_path || ""; R.error = ev.error || "";
+    R.noteId = ev.note_id || "";
   }
 }
 
-async function runGraph(workflow){
+// `message` is the input a workflow takes (`/deep_research <topic>`); a workflow
+// that declares no such parameter ignores it — the server decides, by looking at
+// the runner's signature, so this stays one code path for every workflow.
+// `onFrame` is who repaints: the Graph tab redraws the whole view, the research
+// page repaints only its own panel (and must, or the topic being typed into its
+// input would be wiped every 100ms).
+async function runGraph(workflow, message = "", onFrame = null){
   if (graphRun.running) return;
+  const repaint = onFrame || render;
   graphResetRun(workflow);
   // Without a ticker the elapsed numbers freeze and the cards look identical to
   // a sequential run — the one thing this view exists to disprove.
   clearInterval(graphRun.ticker);
-  graphRun.ticker = setInterval(() => { if (graphRun.running) render(); }, 100);
-  render();
+  graphRun.ticker = setInterval(() => { if (graphRun.running) repaint(); }, 100);
+  repaint();
   try {
     const res = await fetch("/api/graph/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({workflow}),
+      body: JSON.stringify({workflow, message}),
     });
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -263,7 +342,7 @@ async function runGraph(workflow){
         const line = p.trim();
         if (!line.startsWith("data:")) continue;
         try { graphApplyEvent(JSON.parse(line.slice(5))); } catch (e) { /* partial frame */ }
-        render();
+        repaint();
       }
     }
   } catch (e){
@@ -271,32 +350,41 @@ async function runGraph(workflow){
   } finally {
     graphRun.running = false;
     clearInterval(graphRun.ticker);
-    render();
+    repaint();
   }
 }
 
-function graphCol(name){
-  const n = graphRun.nodes[name] || {status: "waiting"};
+// `key` is a card's identity (`name`, or `name#visit`); `wave` is the wave that
+// card belongs to, passed in rather than searched for. Looking it up by name —
+// `waves.find(w => w.nodes.includes(name))` — always found the FIRST wave the
+// name appeared in, so once a node could run twice the second round was timed
+// against the first round's peers.
+function graphCol(key, wave){
+  const n = graphRun.nodes[key] || {status: "waiting"};
+  const name = n.name || key;
+  // Only a repeated node needs its round number on the card; triage and gather
+  // never produce a key with one, so their headings are unchanged.
+  const label = key.includes("#") ? `${esc(name)} <span class="chip">第 ${key.split("#")[1]} 轮</span>`
+                                  : esc(name);
   if (n.status === "waiting")
-    return `<div class="cmp-col" style="opacity:.5"><div class="cmp-h"><b>${esc(name)}</b></div>
+    return `<div class="cmp-col" style="opacity:.5"><div class="cmp-h"><b>${label}</b></div>
       <div class="meta">排队中</div></div>`;
   if (n.status === "running"){
     const el = ((performance.now() - n.startedAt) / 1000).toFixed(1);
-    return `<div class="cmp-col"><div class="cmp-h"><b>${esc(name)}</b></div>
+    return `<div class="cmp-col"><div class="cmp-h"><b>${label}</b></div>
       <div class="meta"><span class="live-dot"></span>${el}s</div></div>`;
   }
   if (n.status === "error")
-    return `<div class="cmp-col err"><div class="cmp-h"><b>${esc(name)}</b></div>
+    return `<div class="cmp-col err"><div class="cmp-h"><b>${label}</b></div>
       <div class="meta" style="color:var(--bad)">${esc(n.error)}</div></div>`;
   // The bar is scaled to the SLOWEST node in this node's wave, and every faster
   // node prints what it spent waiting at the barrier. That number is the honest
   // cost of wave execution — printing it teaches more than hiding it would.
-  const wave = graphRun.waves.find(w => w.nodes.includes(name));
-  const peers = (wave ? wave.nodes : [name]).map(x => (graphRun.nodes[x] || {}).ms || 0);
+  const peers = (wave ? wave.nodes : [key]).map(x => (graphRun.nodes[x] || {}).ms || 0);
   const slowest = Math.max(...peers, 1);
   const pct = Math.round((n.ms || 0) / slowest * 100);
   const waited = slowest - (n.ms || 0);
-  return `<div class="cmp-col"><div class="cmp-h"><b>${esc(name)}</b>
+  return `<div class="cmp-col"><div class="cmp-h"><b>${label}</b>
       <span class="chip">${n.ms}ms</span></div>
     <div class="wavebar"><i style="width:${pct}%"></i></div>
     <div class="meta">${waited > 20 && peers.length > 1
@@ -317,12 +405,14 @@ function graphRunPanel(){
     只生成建议，不直接执行；摘要会写入发件箱。</span>`;
   if (R.error) h += `<div class="meta" style="color:var(--bad);margin-top:10px">${esc(R.error)}</div>`;
   R.waves.forEach((w, i) => {
-    const done = w.nodes.filter(n => (R.nodes[n] || {}).ms != null);
-    const slowest = done.length ? Math.max(...done.map(n => R.nodes[n].ms)) : 0;
-    const sum = done.reduce((a, n) => a + R.nodes[n].ms, 0);
+    // w.nodes holds card KEYS (see graphKey), not names — a wave is the cards in
+    // it, and one node can now contribute several.
+    const done = w.nodes.map(k => R.nodes[k] || {}).filter(n => n.ms != null);
+    const slowest = done.length ? Math.max(...done.map(n => n.ms)) : 0;
+    const sum = done.reduce((a, n) => a + n.ms, 0);
     h += `<div class="meta" style="margin:14px 0 6px">波次 ${i + 1} · ${w.nodes.length} 个节点${slowest ? ` · ${(slowest/1000).toFixed(1)} 秒`
       + (w.nodes.length > 1 ? `（串行执行需要 ${(sum/1000).toFixed(1)} 秒）` : "") : ""}</div>
-      <div class="cmp-grid">${w.nodes.map(graphCol).join("")}</div>`;
+      <div class="cmp-grid">${w.nodes.map(k => graphCol(k, w)).join("")}</div>`;
   });
   if (R.totalMs) h += `<div class="meta" style="margin-top:12px">完成耗时
     ${(R.totalMs/1000).toFixed(1)} 秒${R.draft ? ` · 已保存到 <code>${esc(R.draft)}</code>` : ""}</div>`;

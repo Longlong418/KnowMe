@@ -301,6 +301,7 @@ def collect(agent_id: str = "default") -> dict:
 
     # --- graph workflows: topology straight from the engine (never hand-drawn,
     # so the picture can't drift) + quick/full split from the trace events
+    from knowme.graph.workflows.deep_research import deep_research_topology
     from knowme.graph.workflows.gather import gather_topology
     from knowme.graph.workflows.triage import triage_topology
     graph_routes = [e.get("target") for e in events if e.get("type") == "route"]
@@ -386,7 +387,7 @@ def collect(agent_id: str = "default") -> dict:
             # `knowme gather` is a routine you run yourself and ignores this flag
             # entirely, so the UI must not say "off = no graphs run".
             "enabled": settings.graph_workflows,
-            "workflows": [triage_topology(), gather_topology()],
+            "workflows": [triage_topology(), gather_topology(), deep_research_topology()],
             "runs": graph_runs,
             "stats": {"quick": sum(1 for t in graph_routes if t == "quick_reply"),
                       "full": sum(1 for t in graph_routes if t == "full_agent")},
