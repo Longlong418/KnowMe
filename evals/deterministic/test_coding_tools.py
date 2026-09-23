@@ -221,6 +221,29 @@ def test_commands_do_not_see_secret_environment_variables(hands, monkeypatch):
     assert "gone" in run(hands, "run_command", command=probe)
 
 
+def test_commands_leave_no_bytecode_in_the_project(hands, monkeypatch):
+    """跑命令不在项目里留下 .pyc —— 这是「验收把绿读成红」那个 bug 的锁。
+
+    CPython 判断一个 .pyc 还新不新，看的是「源文件 mtime（整秒）+ 源文件字节数」。
+    验收那个循环里，模型刚把 `return 1` 改成 `return 2`（一样长）、又落在同一秒，
+    Python 就照旧拿旧字节码跑，把一个已经修好的绿读成红，于是白修一轮、再验一次
+    还是红。所以 KnowMe 起的命令一律不许写 .pyc：循环里没有旧缓存，也就读不回旧的。
+
+    故意用行为锁，而不是断言那个环境变量 —— 变量被谁删掉、或者被挪去别处，这里就红。
+    先用 delenv 把外部的同名变量清掉，免得测试因为跑测试的人设过它而假绿。
+    """
+    allow_write(hands)
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    (hands.root / "importer.py").write_text(
+        "import sys\nsys.path.insert(0, 'src')\nimport app\nprint(app.hi())\n",
+        encoding="utf-8")
+
+    answer = run(hands, "run_command", command=f'"{sys.executable}" importer.py')
+
+    assert "退出码 0" in answer and "1" in answer   # 真的 import 成功了，不是空过
+    assert list(hands.root.rglob("*.pyc")) == []
+
+
 # --------------------------------------------------------------- the receipt
 
 

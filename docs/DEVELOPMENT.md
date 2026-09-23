@@ -1,5 +1,77 @@
 # KnowMe 开发文档
 
+## Phase 32：验收会把绿读成红（2026-09-23）
+
+### 一、怎么发现的：跑全量测试，它红了
+
+`pytest evals/deterministic` 跑出 **1 failed**，红的正是验收功能自己的测试
+（`test_coding_acceptance.py::test_a_red_verification_goes_back_to_the_model_once`）。
+它期望两次验收的退出码是 `[0, 1]`（先红、改对了再绿），实际拿到 `[1, 1]`——**第二次还是红的**。
+
+但它**时红时绿**：单跑那一个用例 6 次全过，把修复收起来再单跑 6 次也全过，只有整目录跑的时候
+红过一次。这种"看运气"的红最容易被当成 flaky 划掉，所以没划，去挖了根因。
+
+### 二、根因：CPython 判断 `.pyc` 新不新，只看两样东西
+
+源文件的 **mtime（整秒）+ 字节数**。两样都没变，它就认为缓存还是新的，直接拿旧字节码跑。
+
+验收这个循环恰好**专门制造**这个条件：
+
+```
+模型写 app.py   →  def value():    return 1        ← 26 字节
+验收跑一遍      →  红了，同时生成 __pycache__/app.cpython-311.pyc
+模型改 app.py   →  def value():    return 2        ← 还是 26 字节！
+验收再跑一遍    →  只要这两次写入落在同一秒 → Python 用旧字节码 → 还是红
+```
+
+`return 1` → `return 2` 只换了一个字符，**字节数一模一样**；而"改一个文件、再跑一遍"就是验收
+存在的意义，本来就又快又密。于是：**已经修好的绿，被读成红**，然后模型白修一轮、再验还是红，
+最后把一条假红线留在收据里。
+
+### 三、改了什么：一行
+
+`knowme/tools/coding.py` 的 `_command_env()`（模型命令和验收共用的那处环境）里加上：
+
+```python
+env["PYTHONDONTWRITEBYTECODE"] = "1"
+```
+
+KnowMe 起的命令**一律不许写 `.pyc`**，循环里就没有自己造的旧缓存可读。顺带一个好处：跑命令
+不会在你项目里留下 `__pycache__`——和验收命令带 `-p no:cacheprovider`（不留 `.pytest_cache`）
+是同一个立场。代价是每次起命令都要重新编译一遍，换来的是判断不再看秒针。
+
+### 四、一个我之前说错的地方，记在这儿
+
+我一开始的注释写的是"这个 flag 连 `.pyc` 的**读取**一起关掉"。**这是错的**，实测打脸了：
+`PYTHONDONTWRITEBYTECODE` 只挡写入，读取那条路根本不看这个开关。所以准确的说法是——
+
+* KnowMe 自己的命令不写 `.pyc` → 循环里没有旧缓存 → **这个 bug 没了**；
+* 但如果磁盘上已经有一个**别人**写的 `.pyc`（比如你自己在终端跑过 pytest），Python 照样会读它。
+  它只在"那个人和模型的两次写入落在同一秒"时才变旧，属于本来就在的竞争，这次不动它。
+
+注释已经按这个说法改过来了。
+
+### 五、验证
+
+* **机制留在案上**：写了个探针，两轮分别用"不加 flag"和"加 flag"跑同一个剧本
+  （写 26 字节 → 跑 → 改成同样 26 字节、mtime 拨回同一秒 → 再跑）：
+
+  | | 第一轮跑完生成的 `.pyc` | 第二轮（代码已经是 `return 2`） |
+  |---|---|---|
+  | 不加 flag | 2 个 | 红 ❌ 判错了 |
+  | 加 flag | 0 个 | 绿 ✅ 判对了 |
+
+* **加了把确定性的锁**：`test_coding_tools.py::test_commands_leave_no_bytecode_in_the_project`
+  ——跑一条命令去 import 项目里的模块，然后断言项目里**一个 `.pyc` 都没有**。
+  特意锁行为而不是断言那个环境变量：变量被删了、被挪走了，这条就红。反向验证过，
+  把修复收起来它红的正是 `src/__pycache__/app.cpython-311.pyc`。
+
+  原来那条 `test_coding_acceptance` 是靠秒针撞上的，改了代码它照样能绿，**锁不住**，
+  所以另立了这条。
+
+* 全量：`pytest evals/deterministic -q` → **752 passed / 62 skipped / 0 failed**；
+  `ruff check` 干净。
+
 ## Phase 31：工具结果收进折叠盒，只先给你一部分（2026-09-23）
 
 **你报的原话**：「现在工具调用的具体大结果会直接显示在下边，而且特别长，我希望它可以加一个
@@ -2147,10 +2219,12 @@ cd D:\LLM\Agent\knowme-agent
   都不能每 5 秒重建一次，否则用户正在输入或正在选的内容会被清掉。
   加视图时照着 `render()` 里已有的分支写。
 - 前端改了 `.js`/`.css` 刷新浏览器即可；**改了 `.py` 必须重启 Web**。
-- **当前基线**（2026-09-23 Phase 31 之后）：`pytest evals/deterministic -q` → **751 passed /
+- **当前基线**（2026-09-23 Phase 32 之后）：`pytest evals/deterministic -q` → **752 passed /
   62 skipped / 0 failed**；`ruff check knowme` 干净。`evals/judge/` 那 26 个用例缺 `deepeval`，
   单独跑那个目录会报 ERROR，跟着全量跑表现为 skipped——与改动无关，别看错。
   （Phase 26 时的 694/89/0 里面那 89 个 skipped 包含 judge 那批。）
+  > Phase 31 时这里记的是 751/62/0，但**那是撞上的**：Phase 32 修的
+  > `test_coding_acceptance` 那条是看秒针的，写那份基线的时候它正好绿了一次。
 - **改完 `.py` 一定要重启 Web**——静态文件（`.js`/`.css`/`html`）每次请求都从磁盘读，
   硬刷新就能看到；但 `ops/web/` 及其 import 的一切都在内存里。
   （2026-09-21 亲自踩到：改了 `library.py` 后接口还是旧行为，以为改错了。）

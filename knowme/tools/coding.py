@@ -103,8 +103,27 @@ _WRITE_OFF = (
 
 
 def _command_env() -> dict[str, str]:
-    """The environment a model-chosen command runs with."""
-    return {k: v for k, v in delegate_env().items() if not _SECRET_ENV_RE.search(k)}
+    """The environment a model-chosen command runs with.
+
+    PYTHONDONTWRITEBYTECODE=1 is not tidiness — it is correctness. CPython
+    decides whether a cached .pyc is current by (source mtime in whole seconds,
+    source size). The model rewrites a file inside the verify→fix→verify loop
+    and `return 1` -> `return 2` keeps the byte count identical, so if the
+    rewrite lands in the same second Python happily imports the *old* bytecode
+    and reports the old result — a green fix read back as red, and a retry that
+    "can't" fix something already fixed.
+
+    The flag stops the commands we spawn from *writing* .pyc files, so the
+    verify loop has no stale cache of its own to read back. It does not stop
+    Python from reading a .pyc that was already on disk (the read path ignores
+    sys.dont_write_bytecode) — but a .pyc someone else wrote is keyed to the
+    mtime of the source at *their* write, so it only goes stale if they and the
+    model write in the same second. Cost: imports are re-compiled on every
+    spawned command. The user's own terminal is unaffected.
+    """
+    env = delegate_env()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return {k: v for k, v in env.items() if not _SECRET_ENV_RE.search(k)}
 
 
 def _clamp_timeout(seconds, default: int) -> int:
