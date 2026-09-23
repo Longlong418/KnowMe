@@ -12,6 +12,7 @@ const FEATURES = [
   "diagram.js",
   "graph.js",
   "views.js",
+  "coding.js",
   "chat.js",
   "reader.js",
   "knowledge.js",

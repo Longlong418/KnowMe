@@ -103,6 +103,8 @@ class Handler(BaseHTTPRequestHandler):
             relative = parse_qs(urlparse(self.path).query).get("path", [""])[0]
             self._send(json.dumps(workspace_info(relative or None), default=str).encode(),
                        "application/json")
+        elif self.path == "/api/coding":
+            self._send(json.dumps(coding_info(), default=str).encode(), "application/json")
         elif self.path.startswith("/api/reveal"):
             from urllib.parse import parse_qs, unquote, urlparse
 
@@ -227,6 +229,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/knowledge": knowledge_action,
                   "/api/library": library_action,
                   "/api/workspace": workspace_action,
+                  "/api/coding": coding_action,
                   "/api/reader": None,
                   "/api/connections": None, "/api/connections/test": None,
                   "/api/providers": None, "/api/extras": extras_action}

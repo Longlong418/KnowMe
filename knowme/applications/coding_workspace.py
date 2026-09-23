@@ -10,6 +10,8 @@ surface and remain on the roadmap.
 from __future__ import annotations
 
 import os
+import json
+import shutil
 from pathlib import Path
 
 MAX_ENTRIES = 500
@@ -24,6 +26,73 @@ TEXT_SUFFIXES = frozenset({
     ".py", ".ps1", ".sh", ".sql", ".toml", ".ts", ".tsx", ".txt",
     ".vue", ".xml", ".yaml", ".yml",
 })
+
+
+BACKENDS = {
+    "pi": {"label": "pi", "command": "pi", "description": "轻量本地编码 Agent"},
+    "claude": {"label": "Claude Code", "command": "claude", "description": "Anthropic 的本地编码 CLI"},
+    "codex": {"label": "Codex", "command": "codex", "description": "OpenAI 的本地编码 CLI"},
+}
+DEFAULT_CODING_SETTINGS = {
+    "default_backend": "pi",
+    "enabled": {"pi": True, "claude": False, "codex": False},
+}
+
+
+def coding_settings_path(home: Path) -> Path:
+    return home / "coding.json"
+
+
+def load_coding_settings(home: Path) -> dict:
+    """Read the small, non-secret Coding Workspace configuration."""
+    path = coding_settings_path(home)
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        settings = {}
+    enabled = dict(DEFAULT_CODING_SETTINGS["enabled"])
+    enabled.update({k: bool(v) for k, v in (settings.get("enabled") or {}).items()
+                    if k in BACKENDS})
+    default_backend = settings.get("default_backend", DEFAULT_CODING_SETTINGS["default_backend"])
+    if default_backend not in BACKENDS:
+        default_backend = "pi"
+    return {"default_backend": default_backend, "enabled": enabled}
+
+
+def save_coding_settings(home: Path, payload: dict) -> dict:
+    """Persist backend switches without ever storing credentials."""
+    current = load_coding_settings(home)
+    enabled = current["enabled"]
+    incoming = payload.get("enabled") or {}
+    for name in BACKENDS:
+        if name in incoming:
+            enabled[name] = bool(incoming[name])
+    default_backend = payload.get("default_backend", current["default_backend"])
+    if default_backend not in BACKENDS:
+        raise ValueError("unknown coding backend")
+    result = {"default_backend": default_backend, "enabled": enabled}
+    home.mkdir(parents=True, exist_ok=True)
+    coding_settings_path(home).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    return result
+
+
+def coding_backends(home: Path) -> dict:
+    """Return safe installation/status information for the Coding page."""
+    settings = load_coding_settings(home)
+    items = []
+    for name, definition in BACKENDS.items():
+        executable = shutil.which(definition["command"])
+        items.append({
+            "id": name,
+            "label": definition["label"],
+            "description": definition["description"],
+            "command": definition["command"],
+            "path": executable or "",
+            "installed": bool(executable),
+            "enabled": bool(settings["enabled"].get(name)),
+            "default": settings["default_backend"] == name,
+        })
+    return {"settings": settings, "backends": items}
 
 
 def project_root() -> Path:

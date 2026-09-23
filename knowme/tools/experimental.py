@@ -109,6 +109,48 @@ def _record_subagent_usage(settings: Settings, tin: int, tout: int) -> None:
         f.write(json.dumps(record) + "\n")
 
 
+def _coding_backend_settings(settings: Settings) -> dict:
+    from knowme.applications.coding_workspace import load_coding_settings
+
+    return load_coding_settings(settings.home)
+
+
+def _backend_command(backend: str, executable: str, task: str, settings: Settings) -> list[str]:
+    """Build a non-interactive command for a local coding CLI.
+
+    Each CLI keeps its own authentication. KnowMe only passes the selected
+    model when the CLI accepts the common ``--model`` spelling; API keys are
+    deliberately not placed in these argv lists.
+    """
+    if backend == "claude":
+        command = [executable, "-p", task]
+        if settings.model:
+            command += ["--model", settings.model]
+        return command
+    if backend == "codex":
+        command = [executable, "exec", "--full-auto"]
+        if settings.model:
+            command += ["--model", settings.model]
+        command.append(task)
+        return command
+    raise ValueError(f"unsupported coding backend: {backend}")
+
+
+def _run_cli_backend(backend: str, command: list[str], workdir: Path, timeout: int) -> tuple:
+    """Run a non-pi backend and return the same core result fields."""
+    try:
+        result = subprocess.run(
+            command, cwd=workdir, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=timeout,
+            check=False, env=_delegate_env(),
+        )
+    except subprocess.TimeoutExpired:
+        return None, "", f"{backend} timed out", True
+    except OSError as exc:
+        return None, "", str(exc), False
+    return result.returncode, (result.stdout or ""), (result.stderr or ""), False
+
+
 def _run_pi_json(cmd: list, workdir: Path, timeout: int, notify):
     """Run pi in --mode json, relaying curated events through `notify` as they
     stream. Returns (returncode, reply_text, stderr, raw_lines, tin, tout,
@@ -195,7 +237,7 @@ PLANNED = [
 
 
 def make_delegate_tool(settings: Settings) -> Tool:
-    """The Sub-Agents box, wired for real: delegate a coding task to pi.
+    """The Sub-Agents box, wired for local coding CLIs.
 
     Same honesty contract as every KnowMe tool — the return string says exactly
     what happened (done / failed / timed out / pi not installed), short enough
@@ -203,14 +245,23 @@ def make_delegate_tool(settings: Settings) -> Tool:
     """
 
     def delegate_task(task: str = "", cwd: str = "", timeout_seconds: int = 0,
-                      _notify=None) -> str:
+                      backend: str = "auto", _notify=None) -> str:
         notify = _notify or (lambda kind, ev: None)
         if not task.strip():
             return ("delegate_task needs a 'task' — a plain-English description of the "
                     "coding job, e.g. 'fix the failing test in this repo'.")
-        pi_bin = shutil.which("pi")
-        if not pi_bin:
-            return f"pi isn't installed, so I can't delegate. Install it with: {PI_INSTALL_HINT}"
+        from knowme.applications.coding_workspace import BACKENDS
+
+        coding_settings = _coding_backend_settings(settings)
+        if backend == "auto":
+            backend = coding_settings["default_backend"]
+        if backend not in BACKENDS:
+            return f"Unknown coding backend '{backend}'. Choose pi, claude, or codex."
+        if not coding_settings["enabled"].get(backend):
+            return f"The '{backend}' coding backend is disabled in Coding Workspace settings."
+        executable = shutil.which(BACKENDS[backend]["command"])
+        if not executable:
+            return f"{BACKENDS[backend]['label']} isn't installed or isn't on PATH."
 
         from knowme.tools import workspace
         if cwd:
@@ -230,18 +281,20 @@ def make_delegate_tool(settings: Settings) -> Tool:
         # pin; fall back to pi's own default if
         # this provider isn't mappable. -a/--no-session = headless; stdin=DEVNULL
         # so pi never blocks on a TTY it doesn't have under the server.
-        cmd = _pi_command(pi_bin)
+        cmd = _pi_command(executable) if backend == "pi" else _backend_command(
+            backend, executable, task, settings)
         pi_prov = PI_PROVIDER.get(settings.provider)
-        if pi_prov and settings.model:
+        if backend == "pi" and pi_prov and settings.model:
             cmd += ["--provider", pi_prov, "--model", settings.model]
             key = _provider_key(settings.provider)
             if key:
                 cmd += ["--api-key", key]
-        json_mode = _pi_supports_json(pi_bin)
+        json_mode = backend == "pi" and _pi_supports_json(executable)
         if json_mode:
             cmd += ["--mode", "json"]
-        cmd += _project_pi_flags()   # the repo's own extensions + skills ride along
-        cmd += ["-p", task, "-a", "--no-session"]
+        if backend == "pi":
+            cmd += _project_pi_flags()   # the repo's own extensions + skills ride along
+            cmd += ["-p", task, "-a", "--no-session"]
 
         raw_events: list[str] = []
         cost = 0.0
@@ -256,7 +309,7 @@ def make_delegate_tool(settings: Settings) -> Tool:
                 return (f"pi was still working after {timeout}s so I stopped it — try a smaller "
                         f"task, or raise KNOWME_DELEGATE_TIMEOUT.")
             stdout_text = reply
-        else:
+        elif backend == "pi":
             try:
                 result = subprocess.run(cmd, cwd=workdir, stdin=subprocess.DEVNULL,
                                         capture_output=True, text=True, timeout=timeout,
@@ -267,13 +320,22 @@ def make_delegate_tool(settings: Settings) -> Tool:
             except OSError as exc:
                 return f"Couldn't launch pi: {exc}"
             code, stdout_text, stderr = result.returncode, result.stdout, result.stderr
+        else:
+            code, stdout_text, stderr, timed_out = _run_cli_backend(
+                backend, cmd, workdir, timeout)
+            if timed_out:
+                return (f"{backend} was still working after {timeout}s so I stopped it — "
+                        "try a smaller task or raise KNOWME_DELEGATE_TIMEOUT.")
+            if code is None:
+                return f"Couldn't launch {backend}: {stderr}"
 
-        # Full pi transcript alongside the work (workspace) or in the outbox;
-        # in json mode the raw event stream is preserved too (pi-events.jsonl).
-        transcript = (workdir / "pi-transcript.log") if in_workspace else (
-            settings.home / "outbox" / f"delegate-{datetime.now():%Y%m%d-%H%M%S}.log")
+        # Keep a full transcript alongside the work (workspace) or in the outbox;
+        # in pi JSON mode the raw event stream is preserved too.
+        transcript_name = f"{backend}-transcript.log"
+        transcript = (workdir / transcript_name) if in_workspace else (
+            settings.home / "outbox" / f"delegate-{backend}-{datetime.now():%Y%m%d-%H%M%S}.log")
         transcript.parent.mkdir(parents=True, exist_ok=True)
-        transcript.write_text(f"$ {' '.join(cmd[:-4])} -p {task!r}   (cwd: {workdir})\n\n"
+        transcript.write_text(f"$ {' '.join(cmd)}   (cwd: {workdir})\n\n"
                               f"--- reply ---\n{stdout_text}\n--- stderr ---\n{stderr}",
                               encoding="utf-8")
         if raw_events:
@@ -282,13 +344,13 @@ def make_delegate_tool(settings: Settings) -> Tool:
 
         if code != 0:
             err = (stderr or stdout_text).strip()[-200:] or "no output"
-            return f"pi hit an error: {err} (full log: {transcript})"
-        summary = (stdout_text or "").strip()[-500:] or "(pi finished but printed nothing)"
+            return f"{backend} hit an error: {err} (full log: {transcript})"
+        summary = (stdout_text or "").strip()[-500:] or f"({backend} finished but printed nothing)"
         if cost:
             summary += f"\n(sub-agent spend: ~${cost:.4f}, logged to usage.jsonl)"
 
         if not in_workspace:
-            return f"pi finished the delegated task in {workdir}.\n{summary}\n(full log: {transcript})"
+            return f"{backend} finished the delegated task in {workdir}.\n{summary}\n(full log: {transcript})"
 
         # Scratch task: document the run (dated MANIFEST) and auto-run the script,
         # feeding the run result back into the loop so the model can react to it.
@@ -296,7 +358,7 @@ def make_delegate_tool(settings: Settings) -> Tool:
         run = workspace.autorun(workdir)
         workspace.write_manifest(workdir, settings.provider, settings.model or "(default)", task, files, run)
         made = ", ".join(p.name for p in files[:6]) or "no files"
-        lines = [f"pi finished. Files saved to {workdir} ({made}).", summary]
+        lines = [f"{backend} finished. Files saved to {workdir} ({made}).", summary]
         if run is not None:
             entry, code, out, secs = run
             verdict = "still running (interactive)" if code is None else ("ran clean" if code == 0 else f"exited {code}")
@@ -306,8 +368,7 @@ def make_delegate_tool(settings: Settings) -> Tool:
     return Tool(
         name="delegate_task",
         description=("Delegate a CODING task (fixing tests, multi-file edits, writing "
-                     "programs) to pi, a specialist coding agent running locally on this "
-                     "machine. Give it a self-contained task and, when the work targets an "
+                     "programs) to a local coding specialist. Give it a self-contained task and, when the work targets an "
                      "existing project, that project's absolute path as cwd. Use this for "
                      "real programming work instead of describing code in chat."),
         input_schema={
@@ -319,6 +380,8 @@ def make_delegate_tool(settings: Settings) -> Tool:
                         "description": "Absolute path of the repo/directory to work in; omit for a scratch sandbox"},
                 "timeout_seconds": {"type": "integer",
                                     "description": "Max seconds to let pi work (default 300)"},
+                "backend": {"type": "string", "enum": ["auto", "pi", "claude", "codex"],
+                            "description": "Local coding CLI to use; auto uses the Coding Workspace default"},
             },
             "required": ["task"],
         },

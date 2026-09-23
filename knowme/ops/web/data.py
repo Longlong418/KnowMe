@@ -384,6 +384,7 @@ def collect(agent_id: str = "default") -> dict:
         },
         "db": db_info,
         "workspace": workspace_info(),
+        "coding": coding_info(),
         "settings": info,
         "providers": [asdict(view) for view in list_providers()],
         "knowledge_info": knowledge_info(),
@@ -497,6 +498,42 @@ def workspace_action(payload: dict) -> dict:
     agent_id = payload.get("agent_id") or "default"
     get_profile(agent_id)
     return run_action(payload)
+
+
+def coding_info() -> dict:
+    """Return non-secret Coding Workspace backend status."""
+    from knowme.applications.coding_workspace import coding_backends
+
+    settings = load_settings()
+    settings.ensure_home()
+    return {**coding_backends(settings.home), "execution_enabled": settings.experimental}
+
+
+def coding_action(payload: dict) -> dict:
+    """Save Coding Workspace backend switches and return fresh status."""
+    from knowme.applications.coding_workspace import coding_backends, save_coding_settings
+
+    settings = load_settings()
+    settings.ensure_home()
+    if payload.get("action", "save") != "save":
+        return {"ok": False, "error": f"unknown coding action: {payload.get('action')}"}
+    try:
+        saved = save_coding_settings(settings.home, payload)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": str(exc)}
+    execution_enabled = payload.get("execution_enabled")
+    rebuild_error = None
+    if execution_enabled is not None and bool(execution_enabled) != settings.experimental:
+        result = apply_settings({"experimental": bool(execution_enabled)})
+        if result.get("error"):
+            return {"ok": False, "error": result["error"]}
+        rebuild_error = browser_agent.rebuild()
+        settings = load_settings()
+    response = {"ok": True, **coding_backends(settings.home), "saved": saved,
+                "execution_enabled": settings.experimental}
+    if rebuild_error:
+        response["warning"] = rebuild_error
+    return response
 
 
 def tools_info() -> dict:

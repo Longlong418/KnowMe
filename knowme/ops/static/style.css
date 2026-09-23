@@ -500,6 +500,27 @@
   .agent-title{display:flex;align-items:center;gap:8px;font-weight:650;font-size:15px}
   .agent-title .agent-icon{color:var(--accent)}
   .agent-view .chatlog{flex:1}
+  /* Coding Workspace: task controls sit above the existing read-only file tree. */
+  .coding-control-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,1fr);gap:16px;margin-bottom:16px}
+  .coding-section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+  .coding-task-card .editor{width:100%;box-sizing:border-box;resize:vertical;min-height:96px}
+  .coding-task-actions{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-top:10px;flex-wrap:wrap}
+  .fld-inline{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)}
+  .fld-inline select{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;color:var(--ink);font-size:13px}
+  .coding-backends{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+  .coding-execution{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12.5px;color:var(--ink2)}
+  .coding-execution input{accent-color:var(--accent)}
+  .coding-backend{display:flex;align-items:flex-start;gap:9px;padding:10px;border:1px solid var(--line2);border-radius:9px;cursor:pointer;background:var(--bg)}
+  .coding-backend:hover{border-color:var(--accent)}
+  .coding-backend.unavailable{opacity:.55;cursor:not-allowed}
+  .coding-backend input{margin-top:3px;accent-color:var(--accent)}
+  .coding-backend-copy{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .coding-backend-copy small{color:var(--ink3);line-height:1.35}
+  .coding-status{font-size:10px;font-style:normal;font-weight:600}
+  .coding-status.ok{color:var(--good)}
+  .coding-status.bad{color:var(--bad)}
+  .coding-hint{margin-top:10px;line-height:1.5}
+  @media (max-width:800px){.coding-control-grid{grid-template-columns:1fr}}
   /* the composer is sticky, not fixed: the pane's scrollbar stays its own, and
      the pane drops its bottom padding so the bar reaches the bottom edge */
   main:has(.agent-view){padding-bottom:0}

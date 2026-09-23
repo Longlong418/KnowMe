@@ -734,12 +734,14 @@ const VIEWS = {
   },
   coding(d){
     const ws = d.workspace || {root:"", entries:[]};
+    const coding = d.coding || {backends:[], settings:{default_backend:"pi",enabled:{}}, execution_enabled:false};
     const entries = ws.entries || [];
     let h = `<div class="meta" style="margin-bottom:12px"><b>Coding Workspace</b> — 只读浏览项目文件，并把当前文件安全注入 Coding Agent。</div>`;
     h += `<div class="card" style="border-color:var(--accent);background:var(--accent-soft);margin-bottom:16px">
       <div style="font-family:var(--mono);word-break:break-all">${esc(ws.root || "未配置项目根目录")}</div>
       <div class="meta" style="margin-top:8px">当前 MVP 不执行命令、不直接写文件；需要修改时，可切换 Coding Agent，使用明确的委派任务并查看 Trace。</div>
     </div>`;
+    h += codingControls(coding, ws.root);
     h += `<div style="display:grid;grid-template-columns:minmax(260px,0.8fr) minmax(0,1.6fr);gap:16px">`;
     h += `<section><h2>项目文件</h2><div class="card" style="padding:8px;max-height:620px;overflow:auto">`;
     if (!entries.length) h += `<div class="empty">没有可浏览的文本文件。</div>`;
