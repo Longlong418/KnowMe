@@ -904,30 +904,99 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 .cmp-h code{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:15ch; }
 
 
-/* Models page: provider card grid + edit modal. */
+/* Card grid — NOT the Models page's any more. These four classes (plus
+   .provdel below) survive because the CONNECTIONS page carries them: its cards
+   are `class="provcard conncard"` on purpose. Models moved to the register +
+   sheet below, so nothing here should be re-styled for Models' sake. */
 .provgrid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:12px; }
 .provcard{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
   padding:16px 14px 12px; display:flex; flex-direction:column; align-items:flex-start;
   gap:6px; position:relative; }
-.provcard .prov-current{ position:absolute; top:10px; right:10px; }
 .provlogo{ width:44px; height:44px; border-radius:var(--radius); }
 .provname{ font-weight:700; font-size:14px; }
-.provstatus{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink2); }
-.provdot{ width:9px; height:9px; border-radius:99px; flex-shrink:0; }
 .provactions{ display:flex; gap:8px; margin-top:4px; }
 .provactions .save{ padding:5px 12px; font-size:12px; }
-.provmodal-back{ position:fixed; inset:0; background:rgba(40,30,15,.5); z-index:60;
-  display:flex; align-items:center; justify-content:center; }
-.provmodal{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
-  padding:20px; width:min(520px, 92vw); max-height:90vh; overflow-y:auto; }
-.provmodal-models{ width:min(640px, 92vw); min-height:min(430px, 90vh); padding:24px; }
-/* The "add provider" card: same footprint as a provider card, dashed so it
-   reads as an empty slot rather than a provider. */
-.provadd{ border-style:dashed; cursor:pointer; align-items:center; text-align:center; }
-.provadd:hover{ border-color:var(--accent); }
-.provadd .provplus{ font-size:34px; line-height:1; color:var(--ink2); }
-.provadd .provname{ font-weight:600; }
 .provdel:hover{ border-color:var(--bad) !important; color:var(--bad) !important; }
+
+/* --- Models page: a register of providers + the selected one's sheet ------
+   Eleven identical cards told you nothing about which provider mattered and
+   made you open a modal to read anything. Here a row is one line of a register
+   and the sheet beside it is where you actually edit — so the thing you are
+   changing stays next to the list you are choosing from, and no modal is
+   needed at all. */
+.mw{ display:grid; grid-template-columns:minmax(270px, 330px) minmax(0, 1fr);
+  gap:18px; align-items:start; }
+/* Totals across the top, set like a ledger's: mono, spaced, quiet. */
+.mw-bar{ grid-column:1 / -1; display:flex; align-items:baseline; gap:14px;
+  border-bottom:1px solid var(--line2); padding-bottom:9px; }
+.mw-tally{ font-family:var(--mono); font-size:11.5px; letter-spacing:.04em; color:var(--ink3); }
+.mw-tally b{ color:var(--ink); font-weight:700; }
+.mw-add{ margin-left:auto; }
+
+.mw-list{ background:var(--panel); border:1px solid var(--line);
+  border-radius:var(--radius); overflow:hidden; }
+.mw-row{ display:flex; align-items:center; gap:9px; width:100%; height:38px;
+  padding:0 11px 0 8px; background:none; border:0; border-bottom:1px solid var(--line);
+  color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
+.mw-row:last-child{ border-bottom:0; }
+.mw-row:hover{ background:var(--accent-soft); }
+/* The marker is the same inset bar the sidebar uses for the page you are on —
+   one language for "this one", everywhere. */
+.mw-row.on{ background:var(--accent-soft); box-shadow:inset 3px 0 0 var(--accent); }
+/* Numbered in a fixed-width column: that is what makes a list read as a
+   register rather than a menu, and it lets you say "the third one" out loud. */
+.mw-no{ flex:0 0 auto; width:22px; text-align:right; font-family:var(--mono);
+  font-size:10.5px; color:var(--ink3); font-variant-numeric:tabular-nums; }
+.mw-row.on .mw-no{ color:var(--accent); }
+.mw-logo{ flex:0 0 auto; width:18px; height:18px; object-fit:contain; }
+.mw-name{ flex:0 0 auto; font-size:13px; font-weight:600; white-space:nowrap; }
+/* Only the current provider has a model to name, so this is empty for every
+   other row — right-aligned so the few that ARE filled line up as a column. */
+.mw-model{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; text-align:right; font-family:var(--mono); font-size:11px;
+  color:var(--ink2); }
+
+/* Status as a stamp, not a coloured dot: it names the state in words, and the
+   dashed outline reads "not set" without needing a legend.
+   .off is deliberately MUTED, not 朱砂: with eleven providers and one key
+   saved, ten red stamps is a wall of alarm over the state that is simply the
+   default. Red is for something being wrong; nothing is wrong, it is unset.
+   The tally above the register is what answers "how many are ready". */
+.mw-stamp{ flex:0 0 auto; font-family:var(--mono); font-size:10px; letter-spacing:.04em;
+  padding:1.5px 5px; border:1px solid currentColor; border-radius:2px; }
+.mw-stamp.cur{ color:var(--on-accent); background:var(--accent); border-color:var(--accent); }
+.mw-stamp.on{ color:var(--good); }
+.mw-stamp.idle{ color:var(--ink3); }
+.mw-stamp.off{ color:var(--ink3); border-style:dashed; }
+
+/* The sheet. Sticky, so it stays beside the row you are reading however long
+   the register gets; top clears the sticky .pagehead above it. */
+.mw-pane{ position:sticky; top:88px; background:var(--panel);
+  border:1px solid var(--line); border-radius:var(--radius); }
+.mw-pane-h{ display:flex; align-items:center; gap:11px; padding:14px 16px;
+  border-bottom:1px solid var(--line); }
+.mw-pane-logo{ width:26px; height:26px; object-fit:contain; }
+.mw-pane-t{ flex:1; min-width:0; }
+.mw-pane-name{ font-weight:700; font-size:15px; }
+.mw-pane-sub{ font-family:var(--mono); font-size:11px; color:var(--ink3); margin-top:2px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mw-pane-b{ padding:14px 16px; }
+/* A field 830px wide is unreadable — the eye loses the line on the way back.
+   Cap the fields, not the sheet: the empty column on the right belongs to the
+   sheet, which is what a form on a wide desk should look like. Capping .fld
+   rather than its input keeps each model picker's ▾ attached to its box. */
+.mw-pane-b > .fld{ max-width:520px; }
+.mw-pane-f{ display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding:11px 16px; border-top:1px solid var(--line); background:var(--bg); }
+.mw-pane-f .meta{ margin:0 0 0 auto; }
+.mw-empty{ padding:40px 20px; text-align:center; font-size:13px; color:var(--ink3); }
+
+/* Below this the two columns stop fitting side by side; stack them and let the
+   sheet scroll with the page instead of sticking inside a short viewport. */
+@media (max-width: 980px){
+  .mw{ grid-template-columns:1fr; }
+  .mw-pane{ position:static; }
+}
 
 .model-picker{ position:relative; }
 .model-picker-input{ display:flex; align-items:stretch; }

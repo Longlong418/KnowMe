@@ -221,14 +221,43 @@ async function pinModel(provider, model, action){
   if (!r.error){ editing = false; await refresh(); }
 }
 
-// --- Models page: a grid of provider cards (logo, name, status dot, actions)
-// plus an edit modal. Status is derived, never stored: unconfigured = no key,
-// configured = key set but disabled, enabled = key set and available. The
-// ACTIVE provider (settings.provider) can't be disabled (server guards too).
+// --- Models page: a workbench, not a card gallery.
+//
+// A register of providers on the left, the selected provider's sheet on the
+// right. Every ACTION lives in the sheet, which is why a row can be a plain
+// <button> and why this page no longer needs a modal: nothing has to be
+// layered over anything else to be reachable, and the thing you are editing
+// stays next to the list you are choosing from.
+//
+// .provgrid/.provcard/.provlogo/.provname/.provactions are NOT this page's any
+// more — the Connections page carries them (views.js connectionCard), so they
+// stay in style.css untouched. Everything below is new and models-only.
+//
+// Status is derived, never stored: unconfigured = no key, configured = key set
+// but disabled, enabled = key set and available. The ACTIVE provider
+// (settings.provider) can't be disabled (server guards too).
 function providerCardStatus(p, st){
   const keySet = !!(p.fields && p.fields[0] && p.fields[0].configured);
   if (!keySet) return "unconfigured";
   return (st.disabled_providers || []).includes(p.key) ? "configured" : "enabled";
+}
+
+// Which provider the sheet is showing, and whose catalog _modalModels holds.
+// The second one is the reason the 5s rebuild does not re-fetch a model list
+// every 5 seconds: the sheet is repainted on every poll, and painting it must
+// cost nothing.
+let selProvider = null;
+let _modalModelsFor = null;
+
+// A status stamp, in the register's own words. "configured" reads 已停用 rather
+// than statusZh's 已配置 on purpose: a key that is saved but switched off is
+// the one state where 已配置 would read as "this is working", which is the
+// opposite of what it means.
+function statusStamp(status, current){
+  if (current) return `<span class="mw-stamp cur">当前</span>`;
+  if (status === "enabled") return `<span class="mw-stamp on">已启用</span>`;
+  if (status === "configured") return `<span class="mw-stamp idle">已停用</span>`;
+  return `<span class="mw-stamp off">未配置</span>`;
 }
 
 function modelsGrid(d){
@@ -238,50 +267,137 @@ function modelsGrid(d){
     : providerCardStatus(p, st) === "configured" ? 2 : 3;
   const providers = (d.providers || []).slice()
     .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-  return `<div class="provgrid">` + providers.map(p => providerCard(p, st)).join("") +
-    addProviderCard() + `</div><div id="prov-modal-root"></div>`;
+  const ready = providers.filter(p => providerCardStatus(p, st) !== "unconfigured").length;
+  const cur = providers.find(p => p.key === st.provider);
+  // Landing on this page should show you the provider the loop is actually
+  // running on, not an empty panel.
+  setTimeout(() => paintProviderPane(selProvider || st.provider || ""), 0);
+  return `<div class="mw">
+    <div class="mw-bar">
+      <span class="mw-tally">${providers.length} 家服务商 · 已配置 ${ready}</span>
+      ${cur ? `<span class="mw-tally">当前 <b>${esc(cur.name)}</b></span>` : ""}
+      <button class="save ghost mw-add" onclick="openAddProviderModal()">＋ 新增服务商</button>
+    </div>
+    <div class="mw-list">${providers.map((p, i) => providerRow(p, st, i)).join("")}</div>
+    <div class="mw-detail" id="prov-detail"></div>
+  </div>`;
 }
 
-function providerCard(p, st){
+// One register line. Numbered like a card index — the number is what makes a
+// list read as a register instead of a menu, and it is also how you can say
+// "the third one" out loud.
+function providerRow(p, st, index){
   const status = providerCardStatus(p, st);
   const current = p.key === st.provider;
-  const dot = status === "enabled" ? "var(--good)" : status === "configured" ? "#4c9aff" : "var(--bad)";
-  return `<div class="provcard" data-provider="${esc(p.key)}">
-    ${current ? `<span class="srcpill prov-current" style="background:var(--good-soft);color:var(--good)">当前</span>` : ""}
-    <img class="provlogo" src="/static/logos/${esc(p.key)}.svg" alt="" onerror="this.style.display='none'">
-    <div class="provname">${esc(p.name)}</div>
-    <div class="provstatus"><span class="provdot" style="background:${dot}"></span>${statusZh(status)}</div>
-    <div class="provactions">
-      <button class="save ghost" onclick="openProviderModal('${esc(p.key)}')">编辑</button>
-      ${status === "configured" ? `<button class="save ghost" onclick="toggleProvider('${esc(p.key)}',false)">启用</button>` : ""}
-      ${status === "enabled" && !current ? `<button class="save ghost" onclick="toggleProvider('${esc(p.key)}',true)">禁用</button>` : ""}
-      ${p.custom ? `<button class="save ghost provdel" onclick="removeProvider('${esc(p.key)}')">删除</button>` : ""}
-    </div></div>`;
+  const on = p.key === (selProvider || st.provider || "");
+  const model = current ? (st.model || "") : "";
+  return `<button class="mw-row${on ? " on" : ""}" data-provider="${escAttr(p.key)}"
+      onclick="selectProvider('${escAttr(p.key)}')">
+    <span class="mw-no">${String(index + 1).padStart(2, "0")}</span>
+    <img class="mw-logo" src="/static/logos/${escAttr(p.key)}.svg" alt=""
+         onerror="this.style.display='none'">
+    <span class="mw-name">${esc(p.name)}</span>
+    <span class="mw-model">${esc(model)}</span>
+    ${statusStamp(status, current)}
+  </button>`;
 }
 
-// The last card in the grid: define a provider KnowMe has no entry for. One
-// form, one request; the backend registers it in the same table the built-in
-// providers live in, so afterwards it IS an ordinary provider — same edit
-// modal, same live catalog, same switcher, and the loop can run on it.
-function addProviderCard(){
-  return `<div class="provcard provadd" data-provider="" onclick="openAddProviderModal()">
-    <span class="provplus">＋</span>
-    <div class="provname">添加服务商</div>
-    <div class="provstatus"><span class="meta" style="margin:0">OpenAI 或 Anthropic 兼容接口</span></div>
+// Selecting repaints the sheet and moves the marker — it never re-fetches
+// /api/data. A full refresh() here would blank the whole view on every click.
+function selectProvider(provider){
+  selProvider = provider;
+  document.querySelectorAll(".mw-row").forEach(row =>
+    row.classList.toggle("on", row.dataset.provider === provider));
+  paintProviderPane(provider);
+}
+
+// Paint the sheet. Called after every rebuild of this view (the 5s poll
+// included), so it must NOT call markEditing(): with a sheet always open that
+// would freeze the poll for good. The fields pause the poll the moment you
+// actually touch one — that is what renderModelPicker's onfocus is for.
+function paintProviderPane(provider){
+  const box = document.getElementById("prov-detail");
+  if (!box) return;                      // navigated away before the timer ran
+  const p = ((D && D.providers) || []).find(x => x.key === provider);
+  if (!p){
+    box.innerHTML = `<div class="mw-pane"><div class="mw-empty">左边选一家服务商。</div></div>`;
+    return;
+  }
+  box.innerHTML = providerPane(p);
+  const st = (D && D.settings) || {};
+  // Only the current provider has model pickers, so only its catalog is worth
+  // fetching — and _modalModelsFor is what keeps this off every 5s tick.
+  if (p.key === st.provider && _modalModelsFor !== p.key) loadModalModels(p.key);
+}
+
+// The sheet. Its field ids are the ones the modal used (pm-…), so every
+// save/switch path below is unchanged: only the container moved.
+function providerPane(p){
+  const st = (D && D.settings) || {};
+  const current = p.key === st.provider;
+  const status = providerCardStatus(p, st);
+  const f = (p.fields || [])[0] || {};
+  const baseField = (p.fields || []).find(field => field.name.endsWith("_BASE_URL"));
+  const selectedBaseUrl = current && st.base_url ? st.base_url : (baseField?.value || "");
+  return `<div class="mw-pane">
+    <div class="mw-pane-h">
+      <img class="mw-pane-logo" src="/static/logos/${escAttr(p.key)}.svg" alt=""
+           onerror="this.style.display='none'">
+      <div class="mw-pane-t">
+        <div class="mw-pane-name">${esc(p.name)}</div>
+        <div class="mw-pane-sub">${esc(p.key)}${current && st.model ? " · " + esc(st.model) : ""}</div>
+      </div>
+      ${statusStamp(status, current)}
+    </div>
+    <div class="mw-pane-b">
+      <label class="fld"><span>API 密钥 <span class="meta">(${esc(f.name || "")})</span>
+        ${f.configured ? `<span class="srcpill" style="background:var(--good-soft);color:var(--good)">已设置 ····${esc(f.last4 || "")}</span>`
+                       : `<span class="srcpill apple">未设置</span>`}</span>
+        <input type="password" id="pm-key" placeholder="${f.configured ? "已有密钥——留空即可保留" : "粘贴密钥"}"></label>
+      ${baseField ? (baseField.kind === "choice"
+        ? `<label class="fld"><span>Base URL <span class="meta">（选择 API 密钥所属区域）</span></span>
+        <select id="pm-base-url" onfocus="markEditing()">
+          ${(baseField.options || []).map((url, index) => {
+            const label = (baseField.option_labels || [])[index];
+            return `<option value="${escAttr(url)}" ${url===selectedBaseUrl?"selected":""}>${label?esc(label)+" — ":""}${esc(url)}</option>`;
+          }).join("")}
+        </select></label>`
+        : `<label class="fld"><span>Base URL <span class="meta">（自定义服务商的端点，随时可改）</span></span>
+        <input type="text" id="pm-base-url" value="${escAttr(baseField.value || "")}" autocomplete="off" onfocus="markEditing()"></label>`) : ""}
+      ${current ? `
+      ${renderModelPicker("pm-model", "主模型（运行循环；需要工具调用能力）", st.model || "")}
+      ${renderModelPicker("pm-small-model", "门控 / 摘要模型", st.small_model || "")}` : ""}
+    </div>
+    <div class="mw-pane-f">
+      <button class="save" id="pm-save" onclick="saveProviderModal('${escAttr(p.key)}')">保存</button>
+      ${!current ? `<button class="save ghost" id="pm-make-current" onclick="makeCurrentProvider('${escAttr(p.key)}')">设为当前</button>` : ""}
+      ${status === "configured" ? `<button class="save ghost" onclick="toggleProvider('${escAttr(p.key)}',false)">启用</button>` : ""}
+      ${status === "enabled" && !current ? `<button class="save ghost" onclick="toggleProvider('${escAttr(p.key)}',true)">停用</button>` : ""}
+      ${p.custom ? `<button class="save ghost provdel" onclick="removeProvider('${escAttr(p.key)}')">删除</button>` : ""}
+      <span class="meta" id="pm-msg"></span>
+    </div>
   </div>`;
 }
 
 function openAddProviderModal(){
-  markEditing();   // keep the 5s refresh loop from wiping this modal
-  const root = document.getElementById("prov-modal-root");
-  if (!root) return;
-  // A stale list from the last modal would be read as "this endpoint's catalog"
+  markEditing();   // keep the 5s refresh from wiping a form you are filling in
+  const box = document.getElementById("prov-detail");
+  if (!box) return;
+  // A stale list from the last sheet would be read as "this endpoint's catalog"
   // by the save-time check below — the one thing it must never do.
   _modalModels = [];
-  root.innerHTML = `<div class="provmodal-back" onclick="closeProviderModal()">
-    <div class="provmodal" onclick="event.stopPropagation()">
-      <div class="u" style="display:flex;justify-content:space-between;align-items:center">
-        <b>添加服务商</b><a class="reveal" onclick="closeProviderModal()">✕</a></div>
+  _modalModelsFor = null;
+  // The form is not a provider, so no row is selected while it is open.
+  selProvider = null;
+  document.querySelectorAll(".mw-row.on").forEach(row => row.classList.remove("on"));
+  box.innerHTML = `<div class="mw-pane">
+    <div class="mw-pane-h">
+      <div class="mw-pane-t">
+        <div class="mw-pane-name">添加服务商</div>
+        <div class="mw-pane-sub">OpenAI 或 Anthropic 兼容接口</div>
+      </div>
+    </div>
+    <div class="mw-pane-b">
       <label class="fld"><span>ID <span class="srcpill apple">必填</span>
         <span class="meta">（小写字母、数字、下划线，字母开头——它也是环境变量名的一部分）</span></span>
         <input type="text" id="ap-id" placeholder="例如 my_lab" autocomplete="off" onfocus="markEditing()"></label>
@@ -303,11 +419,12 @@ function openAddProviderModal(){
       ${renderModelPicker("ap-model", "主模型（运行循环，需要工具调用能力）", "")}
       ${renderModelPicker("ap-small-model", "小模型（门控 / 摘要；留空则用主模型）", "")}
       <label class="fld"><span><input type="checkbox" id="ap-activate" checked onfocus="markEditing()"> 保存后设为当前服务商</span></label>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="save" id="ap-save" onclick="submitAddProvider(false)">保存</button>
-      </div>
+    </div>
+    <div class="mw-pane-f">
+      <button class="save" id="ap-save" onclick="submitAddProvider(false)">保存</button>
       <span class="meta" id="ap-msg"></span>
-    </div></div>`;
+    </div>
+  </div>`;
   document.getElementById("ap-id").focus();
 }
 
@@ -333,6 +450,10 @@ async function fetchAddProviderModels(){
   }
   const models = r.models || [];
   setupModelPickers(models, ADD_PROVIDER_PICKERS);
+  // Not any provider's catalog — this endpoint has no key saved yet, so it could
+  // not be fetched from the sheet. Naming it keeps loadModalModels from trusting
+  // this list for a real provider.
+  _modalModelsFor = "__add__";
   setModelPickerMeta("点右边的 ▾ 选一个；也可以直接输入。", ADD_PROVIDER_PICKERS);
   if (msg) msg.textContent = `这个端点有 ${models.length} 个模型。`;
   toggleModelPicker("ap-model");   // choosing one is the obvious next step
@@ -368,7 +489,9 @@ async function submitAddProvider(force, confirmed){
     return;
   }
   editing = false;
-  closeProviderModal();
+  // Land on the provider just added rather than back on whatever was selected
+  // before — you almost always want to look at the thing you just made.
+  selProvider = value("ap-id");
   await refresh();
 }
 
@@ -391,58 +514,15 @@ async function toggleProvider(provider, disabled){
   else { editing = false; await refresh(); }
 }
 
-// --- edit modal: API key (+ main/small model when this provider is current,
-// with a searchable live catalog) and a "set as current" action.
-function openProviderModal(provider){
-  markEditing();   // keep the 5s refresh loop from wiping this modal
-  const st = (D && D.settings) || {};
-  const p = (D.providers || []).find(x => x.key === provider);
-  if (!p) return;
-  const current = provider === st.provider;
-  const f = (p.fields || [])[0] || {};
-  const baseField = (p.fields || []).find(field => field.name.endsWith("_BASE_URL"));
-  const selectedBaseUrl = current && st.base_url ? st.base_url : (baseField?.value || "");
-  const root = document.getElementById("prov-modal-root");
-  root.innerHTML = `<div class="provmodal-back" onclick="closeProviderModal()">
-    <div class="provmodal${current ? " provmodal-models" : ""}" onclick="event.stopPropagation()">
-      <div class="u" style="display:flex;justify-content:space-between;align-items:center">
-        <b>${esc(p.name)}</b><a class="reveal" onclick="closeProviderModal()">✕</a></div>
-      <label class="fld"><span>API 密钥 <span class="meta">(${esc(f.name || "")})</span>
-        ${f.configured ? `<span class="srcpill" style="background:var(--good-soft);color:var(--good)">已设置 ····${esc(f.last4 || "")}</span>`
-                       : `<span class="srcpill apple">未设置</span>`}</span>
-        <input type="password" id="pm-key" placeholder="${f.configured ? "已有密钥——留空即可保留" : "粘贴密钥"}"></label>
-      ${baseField ? (baseField.kind === "choice"
-        ? `<label class="fld"><span>Base URL <span class="meta">（选择 API 密钥所属区域）</span></span>
-        <select id="pm-base-url" onfocus="markEditing()">
-          ${(baseField.options || []).map((url, index) => {
-            const label = (baseField.option_labels || [])[index];
-            return `<option value="${escAttr(url)}" ${url===selectedBaseUrl?"selected":""}>${label?esc(label)+" — ":""}${esc(url)}</option>`;
-          }).join("")}
-        </select></label>`
-        : `<label class="fld"><span>Base URL <span class="meta">（自定义服务商的端点，随时可改）</span></span>
-        <input type="text" id="pm-base-url" value="${escAttr(baseField.value || "")}" autocomplete="off" onfocus="markEditing()"></label>`) : ""}
-      ${current ? `
-      ${renderModelPicker("pm-model", "主模型（运行循环；需要工具调用能力）", st.model || "")}
-      ${renderModelPicker("pm-small-model", "门控 / 摘要模型", st.small_model || "")}` : ""}
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="save" id="pm-save" onclick="saveProviderModal('${esc(provider)}')">保存</button>
-        ${!current ? `<button class="save ghost" id="pm-make-current" onclick="makeCurrentProvider('${esc(provider)}')">设为当前服务商</button>` : ""}
-      </div>
-      <span class="meta" id="pm-msg"></span>
-    </div></div>`;
-  if (current) loadModalModels(provider);
-}
+// There is no provider modal any more — the sheet above IS the editor (see
+// providerPane). The pm-… ids it emits are the ones the modal used, so
+// saveProviderModal / makeCurrentProvider / setProviderModalBusy are unchanged.
 
-function closeProviderModal(){
-  editing = false;
-  const root = document.getElementById("prov-modal-root");
-  if (root) root.innerHTML = "";
-}
-
-// Populate both modal pickers from one request: this provider's live catalog,
+// Populate both sheet pickers from one request: this provider's live catalog,
 // or its defaults when there is no catalog. Manual typing always still works.
 async function loadModalModels(provider){
   setupModelPickers([]);
+  _modalModelsFor = null;   // until the answer lands, _modalModels describes nobody
   setModelPickerMeta("正在加载模型…");
   let data;
   try {
@@ -452,11 +532,14 @@ async function loadModalModels(provider){
   } catch(e){
     data = {models: [], listed: false, error: e.message || String(e)};
   }
-  // A 10-second fetch can outlive the modal it was started for — by then another
-  // modal may be open, and _modalModels belongs to whatever is on screen. Its
-  // pickers are how we know which modal that is.
+  // A 10-second fetch can outlive the sheet it was started for — by then you may
+  // have selected another provider, and _modalModels belongs to whatever sheet
+  // is on screen. Its pickers are how we know which sheet that is.
   if (!document.getElementById("pm-model")) return;
   setupModelPickers(data.models || []);
+  // Recorded on failure too: a provider whose endpoint will not list models must
+  // not be re-fetched on every 5s repaint of the sheet.
+  _modalModelsFor = provider;
   if (!data.listed){
     setModelPickerMeta(data.error && !(data.models || []).length
       ? "无法加载模型目录——你仍可手动输入任意模型 ID。"
@@ -466,8 +549,10 @@ async function loadModalModels(provider){
   }
 }
 
-// Shared model list for the currently open modal. Only setupModelPickers writes
-// it, and every modal open resets it, so it always describes the modal on screen.
+// Shared model list for whichever sheet is on screen, with _modalModelsFor
+// naming its owner. Only setupModelPickers writes the list; this variable is
+// what stops the models sheet, which repaints on every 5s poll, from re-fetching
+// a catalog every 5 seconds.
 let _modalModels = [];
 let _activeModelPicker = null;
 let _outsidePickerListener = false;
@@ -661,7 +746,7 @@ async function submitProviderModal(provider, payload, activeId){
     return;
   }
   editing = false;
-  closeProviderModal();
+  // selProvider is left alone: the sheet stays on the provider you just saved.
   await refresh();
 }
 
