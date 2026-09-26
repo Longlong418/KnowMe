@@ -53,7 +53,15 @@ function graphLayout(wf){
 function graphSVG(wf, opts = {}){
   const {cols, back} = graphLayout(wf);
   const kinds = Object.fromEntries(wf.nodes.map(n => [n.name, n.kind]));
-  const W = 168, H = 52, GX = 74, GY = 22, PAD = 14;
+  // W 和 GX 可以按图改（深度研究那张 6 列的图要用），H/GY/PAD 不动。
+  //
+  // 为什么只调得动这两个：这张图是 SVG，viewBox 里的东西**一起缩放**。塞进
+  // 半栏里被压到 54% 时，把方框画到 200 宽只会让它更宽、然后被缩得更狠 ——
+  // 屏幕上一样大。真正管用的只有整张图的固有宽度：固有宽度 ≤ 容器宽度，
+  // 才是 1:1 显示，里面 14px 的字才真的是 14px。
+  //
+  // 默认值就是 triage/gather 被冻结时的那组数，一个字都别动（有字节锁）。
+  const W = opts.w ?? 168, H = 52, GX = opts.gx ?? 74, GY = 22, PAD = 14;
   // A loop is drawn ABOVE its box (see edgeLine), so a chart that has one has
   // to reserve that much headroom or the arc pokes out of the viewBox and gets
   // clipped. A chart with no back edge reserves nothing — top === PAD and every

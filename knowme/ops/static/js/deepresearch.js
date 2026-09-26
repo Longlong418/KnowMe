@@ -149,6 +149,16 @@ function researchRestore(){
   researchPainted = null;
 }
 
+// 这张图有 6 列。以前它和「每一轮」的卡片挤在 .dr-grid 的左半栏里，那一栏
+// 只有 400 来像素，而 .arch 的 min-width 是 760px —— 整张图被压到 54%，框里的
+// 14px 字渲染出来只有 7.6px，所以看着糊。
+//
+// 现在它单独占整幅宽，并且方框和列距收窄到刚好铺满整幅（1180px 上下）。这样
+// 是 1:1 —— 字就是实打实的 14px，方框在屏幕上比原来大了一倍多。**注意不能靠
+// 把方框画大来解决**：viewBox 里的东西一起缩放，画得越大缩得越狠，屏幕上
+// 一样大，只有固有宽度这一个杠杆。
+const DR_CHART = {w: 152, gx: 48};
+
 function deepResearchView(){
   const wf = researchTopology();
   return `<div class="card">
@@ -167,10 +177,12 @@ function deepResearchView(){
       有就带着已掌握的内容再补一轮，没有就收工写报告。报告同时写进知识库和
       <code>outbox/</code>。</div>
   </div>
+  <section class="dr-chart">
+    <h2>它怎么走 <span id="research-live">${researchLive()}</span></h2>
+    ${wf ? `<div class="card">${graphSVG(wf, DR_CHART)}</div>` : ""}
+  </section>
   <div class="dr-grid">
-    <section><h2>它怎么走 <span id="research-live">${researchLive()}</span></h2>
-      ${wf ? `<div class="card">${graphSVG(wf)}</div>` : ""}
-      <div id="research-cards">${researchCards()}</div></section>
+    <section><h2>每一轮</h2><div id="research-cards">${researchCards()}</div></section>
     <section><h2>报告</h2><div id="research-report">${researchReport()}</div></section>
   </div>`;
 }
