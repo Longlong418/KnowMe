@@ -1,18 +1,72 @@
+/* ===========================================================================
+   主题：牛皮纸档案盒
+   ---------------------------------------------------------------------------
+   底色是档案盒的硬纸板，面板是从盒子里抽出来的索引卡。所以 --panel 必须比
+   --bg 亮，而且两者是同一个暖色系里的一深一浅 —— 白配灰那套是"屏幕上的
+   卡片"，纸配纸才是"放在盒子里的卡片"。这条决定了下面几乎每一个色值。
+
+   三档墨色是打字机色带的颜色，不是纯黑：纯黑在纸上看着像刚印的，不像档案。
+
+   两个强调色分工是硬的：
+     --accent 墨蓝  = 可交互的（链接、选中、主按钮），像用钢笔写的
+     --bad     朱砂  = **只给警报**。全站唯一的红，所以它一冒出来你就知道
+                       出事了 —— 这就是主色不能也用红的原因。老主题的
+                       --accent 是靛蓝、--bad 是砖红，两者本来就分得开，
+                       换皮时这条不能丢。
+   =========================================================================== */
 :root{
     /* let native UI (scrollbars, form controls) follow the active scheme,
        otherwise they stay light even in dark mode */
     color-scheme:light dark;
-    --bg:#fafaf9;--panel:#ffffff;--line:#e7e6e4;--line2:#d9d8d5;
-    --ink:#21201d;--ink2:#6f6e69;--ink3:#a3a29d;
-    --accent:#5e6ad2;--accent-soft:#eef0fb;
-    --good:#1f7a4d;--good-soft:#e8f4ee;--bad:#c0392b;--bad-soft:#faeceb;
-    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+
+    --bg:#e0d6bf;          /* 档案盒硬纸板 */
+    --panel:#f8f3e5;       /* 索引卡 */
+    --card:var(--bg);      /* 嵌在卡片里的控件：比卡片深一档 = 凹进去 */
+    --line:#cabd9c;        /* 卡片的格子线 */
+    --line2:#ac9d7a;       /* 更重的一笔：外框、分隔 */
+
+    --ink:#2e2820;--ink2:#5a5140;--ink3:#786c55;
+    /* --ink3 是 11.5px 的说明文字，压在 --panel 上是 4.7:1，过 AA。
+       压在 --bg 上只有 3.6:1 —— 纸板本身就深，这是这套配色换来的代价，
+       所以说明文字尽量待在卡片里（.meta 绝大多数本来就在卡片里）。 */
+
+    --accent:#2f4361;--accent-soft:#dde1e5;
+    --bad:#a8341f;--bad-soft:#f0dbd3;
+    /* 想让主色更贴"朱砂印"那个味道，把上面 --accent 换成 #b23a2e 即可 ——
+       代价是它和 --bad(#a8341f) 只差一点明度，警报就不再一眼跳出来了。
+       这就是为什么默认选墨蓝：档案盒上最像印章的那点红，得留给出事的时候。 */
+    --good:#3f6b3a;--good-soft:#dde5d5;
+    --warn:#8f6410;--warn-soft:#efe2c6;
+    --on-accent:#fdfaf0;   /* 压在 --accent 上的字：纸白，不是纯白 */
+
+    /* 纸面阴影：短、紧、偏暖。大而软的灰影是"浮起来的卡片"，那是另一套
+       设计语言；纸是**放**在纸上的，阴影只说明边缘压住了下面那张。 */
+    --lift:0 1px 0 rgba(72,58,32,.07),0 1px 3px rgba(72,58,32,.12);
+    --lift-2:0 2px 0 rgba(72,58,32,.09),0 12px 30px rgba(72,58,32,.18);
+    --radius:3px;          /* 纸是裁开的，不是倒过来的角 */
+
+    /* 等宽。Consolas 排在 Courier New 前面是**为可读性让路**：Courier New
+       在 11px 上太细，而这个应用满屏 11px 的等宽标签。想要更纯的打字机味，
+       把 'Courier New' 提到最前面即可 —— 这一行就是那个开关。 */
+    --mono:ui-monospace,Consolas,'Courier New',Courier,monospace;
+    /* 纸面上的正文字体：衬线。中文落到**宋体** —— 这是换皮里最要紧的一步，
+       因为界面 80% 是中文，而中文字符根本不吃 --mono（Consolas 没有汉字，
+       浏览器会回落到系统默认的雅黑，等于没换）。宋体才是"印刷品"的信号，
+       也正因为它，这次换皮不靠字体宽度取胜，靠的是字面本身。
+       SimSun 必须排在任何一个无衬线字体前面，否则雅黑会赢。 */
+    --serif:Georgia,'Songti SC','Source Han Serif SC','Noto Serif CJK SC',
+            SimSun,'宋体',serif;
   }
   @media (prefers-color-scheme:dark){:root{
-    --bg:#101012;--panel:#18181b;--line:#26262a;--line2:#333338;
-    --ink:#ececea;--ink2:#96959f;--ink3:#5f5e66;
-    --accent:#7c8aec;--accent-soft:#20223a;
-    --good:#4cc38a;--good-soft:#12291d;--bad:#e5655a;--bad-soft:#331714;
+    --bg:#17150f;--panel:#211d15;--card:#12100c;
+    --line:#39332a;--line2:#4a4237;
+    --ink:#e9e1cf;--ink2:#a99e88;--ink3:#948a71;
+    --accent:#8aa9d0;--accent-soft:#242b33;
+    --good:#7aa86a;--good-soft:#1c2718;--bad:#e0705a;--bad-soft:#331a14;
+    --warn:#cf9f47;--warn-soft:#2e2617;
+    --on-accent:#12100c;
+    --lift:0 1px 0 rgba(0,0,0,.35),0 1px 3px rgba(0,0,0,.45);
+    --lift-2:0 2px 0 rgba(0,0,0,.4),0 12px 30px rgba(0,0,0,.55);
   }}
   *{box-sizing:border-box;margin:0}
   /* thin theme-colored scrollbars (like the old chat dock's), instead of the
@@ -27,8 +81,26 @@
      380px of every page, including the ones that need width most (a document, a
      file). A conversation is a route now, so it gets the whole pane. */
   body{background:var(--bg);color:var(--ink);
-       font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+       font:14px/1.55 var(--serif);
        display:flex;height:100vh;overflow:hidden}
+  /* --- 纸感：两层固定的覆盖物，都不参与交互 -------------------------------
+     两个伪元素都停在 z-index:1，**故意压在模态框(z-index:60)下面**：弹窗是
+     拿在手里看的一张纸，不该跟着背后的盒子一起起毛。.pagehead 是 z-index:6，
+     所以页头也不起毛 —— 那是一块压在所有东西上面的卡纸。
+
+     ::before 是盒壁。视口四边压暗一点，中间那块"纸"才像是**放进**盒子里的，
+     而不是铺满整个屏幕的。
+     ::after 是纸纤维。feTurbulence 现算的噪点，铺成 180px 的重复贴图，不
+     联网、不加构建步骤。深色下换 screen —— multiply 在近黑底上什么也看不见。 */
+  body::before{content:"";position:fixed;inset:0;z-index:1;pointer-events:none;
+    background:radial-gradient(125% 88% at 50% 42%,transparent 52%,rgba(72,58,32,.14))}
+  body::after{content:"";position:fixed;inset:0;z-index:1;pointer-events:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)'/%3E%3C/svg%3E");
+    mix-blend-mode:multiply;opacity:.20}
+  @media (prefers-color-scheme:dark){
+    body::before{background:radial-gradient(125% 88% at 50% 42%,transparent 45%,rgba(0,0,0,.5))}
+    body::after{mix-blend-mode:screen;opacity:.07}
+  }
   nav{width:var(--nav-w,208px);flex-shrink:0;border-right:1px solid var(--line);padding:20px 12px;
       height:100vh;overflow-y:auto}
   /* drag handle between the sidebar and the pane + elegant hide/show */
@@ -38,11 +110,12 @@
   #nav-toggle{float:right;background:none;border:none;color:var(--ink3);cursor:pointer;font-size:12px;padding:2px 4px;line-height:1}
   #nav-toggle:hover{color:var(--ink)}
   #nav-reopen{display:none;position:fixed;top:12px;left:12px;z-index:25;background:var(--panel);
-    border:1px solid var(--line2);border-radius:8px;color:var(--ink2);width:34px;height:30px;cursor:pointer;font-size:14px}
+    border:1px solid var(--line2);border-radius:var(--radius);color:var(--ink2);width:34px;height:30px;cursor:pointer;font-size:14px}
   body.nav-hidden #nav,body.nav-hidden #nav-resizer{display:none}
   body.nav-hidden #nav-reopen{display:block}
-  .brand{font-weight:650;font-size:15px;padding:0 10px 4px}
-  .brand small{display:block;color:var(--ink3);font-weight:400;font-size:11px;margin-top:2px}
+  .brand{font-weight:700;font-size:16px;padding:0 10px 4px;letter-spacing:.01em}
+  .brand small{display:block;color:var(--ink3);font-weight:400;font-size:11px;margin-top:2px;
+               font-family:var(--mono)}   /* 模型名是机器写的，打字机体 */
   /* Links are indented past their group header, which is what makes the header
      read as a PARENT instead of a line of text dropped between rows. Header and
      links used to share the same 10px left edge, so the sidebar looked like one
@@ -50,12 +123,16 @@
   nav a{display:flex;justify-content:space-between;align-items:center;color:var(--ink2);
         text-decoration:none;padding:6px 10px 6px 20px;border-radius:6px;font-size:13.5px;margin-top:2px}
   nav a:hover{background:var(--panel);color:var(--ink)}
-  nav a.on{background:var(--accent-soft);color:var(--accent);font-weight:550}
+  /* 选中项做成"抽出来的一张"：卡片底色 + 左边一道墨条。比一整块淡色底更
+     像档案盒里立起来的那张分隔卡，也不会在长列表里糊成一片。 */
+  nav a.on{background:var(--panel);color:var(--accent);font-weight:600;
+           box-shadow:inset 3px 0 0 var(--accent)}
   .agent-link{width:100%;display:flex;align-items:center;gap:9px;border:0;background:transparent;
-    color:var(--ink2);padding:7px 10px 7px 14px;border-radius:7px;font:13.5px/1.4 inherit;
+    color:var(--ink2);padding:7px 10px 7px 14px;border-radius:var(--radius);font:13.5px/1.4 inherit;
     text-align:left;cursor:pointer;margin-top:2px}
   .agent-link:hover{background:var(--panel);color:var(--ink)}
-  .agent-link.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .agent-link.on{background:var(--panel);color:var(--accent);font-weight:600;
+                 box-shadow:inset 3px 0 0 var(--accent)}
   .agent-link .agent-icon{width:18px;text-align:center;color:var(--accent);font-size:15px}
   .agent-link i{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--ink3);opacity:.45}
   .agent-link.ready i{background:var(--good);opacity:1}
@@ -63,7 +140,8 @@
   /* Proximity does the rest: a big gap ABOVE the header, a small one below it,
      so each header sits with its own children rather than floating between two
      groups. The rule separates sections without adding another colour. */
-  nav .grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink3);
+  nav .grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--ink3);
+           font-family:var(--mono);
            font-weight:600;padding:8px 10px 5px;margin-top:14px;border-top:1px solid var(--line)}
   /* NOT :first-of-type — that is type-based, and `.brand` is the first div in
      the nav, so the selector silently matched nothing and the top header kept a
@@ -82,7 +160,7 @@
   .subtab.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:550}
   .subtab .n{font-size:11px;color:var(--ink3);margin-left:5px}
   /* long tables scroll within their own box, header pinned */
-  .scrolly{max-height:62vh;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+  .scrolly{max-height:62vh;overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
   .scrolly table{border:none}
   .scrolly th{position:sticky;top:0;background:var(--panel);z-index:1}
   /* aligned schema: the column header IS the indigo chip, so labels line up
@@ -90,26 +168,33 @@
   .scrolly th.dbcol{color:var(--accent);background:var(--accent-soft);font-family:var(--mono);
                     font-size:11px;text-transform:none;letter-spacing:0;font-weight:600;border-bottom:1px solid var(--line)}
   .scrolly th.dbcol small{color:var(--ink3);font-weight:400;margin-left:5px}
-  h1{font-size:17px;font-weight:600;margin-bottom:2px}
+  /* 页头是一份文件的抬头，不是应用标题栏：字号大、字距收紧、下压一条线
+     （线在 .pagehead 上）。宋体的横细竖粗在 20px 上才出得来。 */
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin-bottom:3px}
   .sub{color:var(--ink3);font-size:12px;font-family:var(--mono)}
-  h2{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink2);
-     font-weight:600;margin:28px 0 10px}
+  /* 小节标题是**标签**，不是标题：打字机、大写、拉开字距。同样是 11px 的
+     大写字母，衬线体和等宽体读起来是两件事 —— 后者是"这张卡上印的"。 */
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--ink2);
+     font-family:var(--mono);font-weight:600;margin:28px 0 10px}
   .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:10px}
-  .tile{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
   .tile b{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums;display:block}
   .tile span{color:var(--ink2);font-size:11.5px}
   .map{display:flex;flex-direction:column;gap:10px;margin-top:6px}
   .lane{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
   .lane-label{width:86px;flex-shrink:0;color:var(--ink3);font-size:11px;text-transform:uppercase;
               letter-spacing:.07em;padding-top:14px}
-  .box{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
        padding:10px 14px;cursor:pointer;min-width:118px;transition:border-color .1s}
   .box:hover{border-color:var(--accent)}
   .box b{font-size:13px;font-weight:550;display:block}
   .box span{color:var(--ink2);font-size:11.5px}
   .arrow{align-self:center;color:var(--ink3);padding:0 8px;font-size:13px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
-        padding:14px 16px;margin-bottom:10px;position:relative}
+  /* 索引卡。纸是**裁**开的，所以没有 8px 的倒角，只有 --radius 那一下裁口；
+     顶上那条略重的横线是卡片的印刷头，也是"这一沓里的一张"的信号。 */
+  .card{background:var(--panel);border:1px solid var(--line);border-top-color:var(--line2);
+        border-radius:var(--radius);
+        padding:14px 16px;margin-bottom:10px;position:relative;box-shadow:var(--lift)}
   .badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;
          border:1px solid var(--line2);color:var(--ink2);margin-right:8px}
   .badge.retrieve{border-color:var(--accent);color:var(--accent)}
@@ -145,17 +230,17 @@
                   max-height:calc(100vh - 140px);overflow-y:auto;padding-right:2px}
   .rl-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
   .reader-drop{display:flex;align-items:center;gap:8px;border:1px dashed var(--line2);
-               border-radius:8px;padding:5px 10px;cursor:pointer;font-size:12.5px;font-weight:600}
+               border-radius:var(--radius);padding:5px 10px;cursor:pointer;font-size:12.5px;font-weight:600}
   .reader-drop:hover{border-color:var(--accent);color:var(--accent)}
   .reader-drop input{display:none}
   .reader-url{display:flex;gap:6px}
   .reader-url input,.reader-search{min-width:0;flex:1;padding:7px 10px;font-size:12.5px;
-      border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);outline:none}
+      border:1px solid var(--line);border-radius:var(--radius);background:var(--bg);color:var(--ink);outline:none}
   .reader-url input:focus,.reader-search:focus{border-color:var(--accent)}
   /* min-height keeps the empty state from collapsing into a sliver of blank. */
   .reader-docs{display:flex;flex-direction:column;gap:2px;min-height:80px}
   .rdoc{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 8px;
-        align-items:baseline;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+        align-items:baseline;padding:8px 10px;border-radius:var(--radius);cursor:pointer;border:1px solid transparent}
   .rdoc:hover{background:var(--panel);border-color:var(--line)}
   .rdoc.on{background:var(--accent-soft);border-color:var(--accent)}
   .rdoc-kind{font:600 9.5px/1.5 var(--mono);letter-spacing:.06em;color:var(--accent);
@@ -168,7 +253,7 @@
             cursor:pointer;font-size:14px;line-height:1;opacity:0;padding:0 3px}
   .rdoc:hover .rdoc-del,.rdoc.on .rdoc-del{opacity:1}
   .rdoc-del:hover{color:var(--bad)}
-  .reader-pane{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  .reader-pane{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
                padding:16px 22px;min-height:calc(100vh - 150px)}
   .reader-paper-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
                      border-bottom:1px solid var(--line);padding-bottom:10px;font-weight:600}
@@ -186,7 +271,7 @@
   /* PDF pages: a canvas with pdf.js's text layer on top, so the text in the PDF
      is selectable and can be sent to the agent like any other text. */
   .reader-pdfwrap{display:flex;flex-direction:column;align-items:center;gap:14px;
-                  background:var(--bg);border-radius:8px;padding:14px}
+                  background:var(--bg);border-radius:var(--radius);padding:14px}
   /* Zoomed in, a page is wider than the pane, so the pane scrolls sideways —
      and centring has to go: with overflow, a centred flex item that overflows
      can be scrolled right but never left. The pages are drawn at the pane's
@@ -203,7 +288,7 @@
              cursor:text;transform-origin:0% 0%}
   .textLayer ::selection{background:rgba(79,90,220,.32)}
   .reader-selection{position:sticky;bottom:0;margin-top:12px;padding:10px 14px;background:var(--accent-soft);
-      border:1px solid var(--accent);border-radius:10px;display:none;z-index:4}
+      border:1px solid var(--accent);border-radius:var(--radius);display:none;z-index:4}
   .reader-selection #rc-text{margin:6px 0;color:var(--accent);word-break:break-word;
       max-height:82px;overflow:auto;font-size:12.5px}
   .rs-actions{display:flex;gap:8px;align-items:center}
@@ -211,7 +296,7 @@
   .ask-toggle{margin-left:auto}
   .reader-ask{position:sticky;top:96px;display:flex;flex-direction:column;
               height:calc(100vh - 150px);background:var(--panel);
-              border:1px solid var(--line);border-radius:12px;padding:0 14px}
+              border:1px solid var(--line);border-radius:var(--radius);padding:0 14px}
   .ra-head{display:flex;flex-direction:column;gap:2px;padding:14px 0 10px;
            border-bottom:1px solid var(--line)}
   .ra-head .meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -221,7 +306,7 @@
   .asklog{flex:1;overflow-y:auto;padding:12px 2px;display:flex;flex-direction:column;gap:10px}
   body.no-tele .asklog .tele{display:none}
   .reader-ask .chatbar{border-top:1px solid var(--line)}
-  .chatlog .historical-card{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:10px}.chatlog .tool-output{display:none}
+  .chatlog .historical-card{border:1px solid var(--line);background:var(--panel);border-radius:var(--radius);padding:10px}.chatlog .tool-output{display:none}
   /* rendered markdown in chat replies (blocks handle their own spacing, so
      they read as normal HTML, not pre-wrapped source) */
   .r .mdp,.r .mdh,.r .mdlist,.r .mdtable{white-space:normal}
@@ -235,10 +320,10 @@
   .r .mdtable th{background:var(--bg);font-weight:600;color:var(--ink)}
   /* fenced code blocks */
   .mdcode{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin:10px 0;
-          background:rgba(0,0,0,0.035)}
+          background:rgba(72,58,32,.055)}
   @media(prefers-color-scheme:dark){.mdcode{background:rgba(0,0,0,0.40)}}
   .mdcode-head{display:flex;align-items:center;justify-content:space-between;padding:5px 12px;
-               border-bottom:1px solid var(--line);background:rgba(0,0,0,0.025)}
+               border-bottom:1px solid var(--line);background:rgba(72,58,32,.04)}
   @media(prefers-color-scheme:dark){.mdcode-head{background:rgba(255,255,255,0.04)}}
   .mdcode-lang{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;
                letter-spacing:.08em;color:var(--ink3);font-weight:600}
@@ -249,15 +334,15 @@
 /* Knowledge base (Sapphire) styling */
  .kb-intro{margin-bottom:12px}
  .kb-shell{display:grid;grid-template-columns:270px minmax(0,1fr);gap:16px;min-height:calc(100vh - 170px)}
- .kb-sidebar,.kb-editor{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+ .kb-sidebar,.kb-editor{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
  .kb-sidebar{padding:12px;display:flex;flex-direction:column;gap:10px;min-height:520px}
  .kb-sidebar-head{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding-bottom:10px}
  .kb-sidebar-head .meta{margin:0}
  .kb-sidebar-head .sessbtn{margin-left:auto}
- .kb-search,.kb-folder-filter,.kb-title-input,.kb-folder-input{width:100%;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);padding:8px 10px;outline:none;font:inherit}
+ .kb-search,.kb-folder-filter,.kb-title-input,.kb-folder-input{width:100%;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg);color:var(--ink);padding:8px 10px;outline:none;font:inherit}
  .kb-search:focus,.kb-folder-filter:focus,.kb-title-input:focus,.kb-folder-input:focus{border-color:var(--accent)}
  .kb-note-list{display:flex;flex-direction:column;gap:4px;overflow:auto}
- .kb-note-card{display:grid;grid-template-columns:minmax(0,1fr) auto;text-align:left;gap:2px 8px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--ink);padding:9px;cursor:pointer;font:inherit}
+ .kb-note-card{display:grid;grid-template-columns:minmax(0,1fr) auto;text-align:left;gap:2px 8px;border:1px solid transparent;border-radius:var(--radius);background:transparent;color:var(--ink);padding:9px;cursor:pointer;font:inherit}
  .kb-note-card:hover{background:var(--bg);border-color:var(--line)}
  .kb-note-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .kb-note-tags{display:flex;align-items:center;gap:5px;justify-self:end}
@@ -273,7 +358,7 @@
  .kb-create-editor{text-align:left;margin-top:4vh}
  .kb-create-editor h2{margin:4px 0 18px;color:var(--ink);font-size:20px;text-transform:none;letter-spacing:0}
  .kb-create-editor .kb-title-input,.kb-create-editor .kb-folder-input{margin-bottom:10px}
- .kb-editor-text{width:100%;min-height:260px;resize:vertical;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);padding:12px;font:13px/1.7 var(--mono);outline:none;margin-bottom:12px}
+ .kb-editor-text{width:100%;min-height:260px;resize:vertical;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg);color:var(--ink);padding:12px;font:13px/1.7 var(--mono);outline:none;margin-bottom:12px}
  .kb-editor-text:focus{border-color:var(--accent)}
  .kb-detail-head{display:flex;align-items:flex-end;gap:12px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:10px}
  .kb-detail-head>div:first-child{flex:1;min-width:0}
@@ -282,7 +367,7 @@
  .kb-delete{color:var(--bad);border-color:var(--bad)}
  .kb-folder-input{max-width:240px;margin-bottom:10px}
  .kb-preview-label{color:var(--ink3);font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;margin:12px 0 6px}
- .kb-preview{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:14px;min-height:90px}
+ .kb-preview{border:1px solid var(--line);border-radius:var(--radius);background:var(--bg);padding:14px;min-height:90px}
  .kb-preview .mdp{margin:0 0 8px}.kb-preview .mdh{color:var(--ink);font-weight:650;margin:10px 0 5px}
  .kb-links-box{border-top:1px solid var(--line);margin-top:16px;padding-top:12px;font-size:12px}
  .kb-backlink{display:inline-block;margin:8px 8px 0 0;padding:3px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);text-decoration:none}
@@ -291,7 +376,7 @@
  .kb-link:hover{background:var(--accent);color:var(--panel)}
  /* Knowledge note list tiles */
  .kb-note{border:1px solid var(--line);border-radius:6px;padding:12px;transition:box-shadow .15s}
- .kb-note:hover{box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer}
+ .kb-note:hover{box-shadow:var(--lift);cursor:pointer}
  @media(max-width:900px){.kb-shell{grid-template-columns:1fr}.kb-sidebar{min-height:240px}.kb-editor{min-height:560px}}
   .mdcode-copy.copied{color:var(--good);border-color:var(--good);background:var(--good-soft)}
   .mdcode pre{margin:0;padding:12px 14px;overflow-x:auto;font-family:var(--mono);
@@ -308,12 +393,12 @@
   .msg-copy:hover{color:var(--accent);border-color:var(--accent)}
   .msg-copy.copied{color:var(--good);border-color:var(--good)}
   .meta{color:var(--ink3);font-size:11.5px;margin-top:8px;font-variant-numeric:tabular-nums}
-  .tool{border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px;background:var(--bg)}
+  .tool{border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;margin-top:8px;background:var(--bg)}
   .tool.error{border-color:var(--bad);background:var(--bad-soft)}
   .tool.warn{border-color:var(--line2)}
   .tool-head{display:flex;align-items:center;gap:8px;font-size:12.5px}
   .dot{width:7px;height:7px;border-radius:99px;flex-shrink:0;background:var(--good)}
-  .dot.error{background:var(--bad)} .dot.warn{background:#c8951f}
+  .dot.error{background:var(--bad)} .dot.warn{background:var(--warn)}
   .tool code{border:none;background:transparent;padding:0;color:var(--ink)}
   .tool details{margin-top:6px}
   .tool summary{font-size:11px;color:var(--ink3);cursor:pointer;list-style:none}
@@ -335,15 +420,22 @@
   @keyframes blink{50%{opacity:0}}
   @media (prefers-reduced-motion:reduce){.caret{animation:none}}
   .splitbar{display:flex;height:26px;border-radius:6px;overflow:hidden;border:1px solid var(--line);margin-top:2px}
-  .splitbar div{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#fff;min-width:0;overflow:hidden;white-space:nowrap}
-  .seg-skip{background:var(--accent)} .seg-ret{background:#c8951f}
+  .splitbar div{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--on-accent);min-width:0;overflow:hidden;white-space:nowrap}
+  .seg-skip{background:var(--accent)} .seg-ret{background:var(--warn)}
   .tile b.money{color:var(--good)}
-  .arch{width:100%;min-width:760px;height:auto;font-family:-apple-system,system-ui,sans-serif}
+  /* 拓扑图坐在一块**凹进去的纸板**上。这不是装饰：节点框填的是 --panel，
+     而图外面那张 .card 也是 --panel —— 同色，方框就只剩一根细线可看，暗色
+     下几乎整个消失。垫一层 --bg，方框就重新立起来了，两种配色下都成立。
+     图的标签换成 --serif，跟页面其余的字一套。 */
+  .arch{width:100%;min-width:760px;height:auto;font-family:var(--serif);
+        background:var(--bg);border-radius:var(--radius)}
   .arch .container{fill:none;stroke:var(--line2);stroke-dasharray:5 4}
   /* LLM Ops is a SEPARATE system (offline, improves the agent) — a solid
      tinted panel so it never reads as part of the ephemeral Harness. */
   .arch .container.ops{fill:var(--accent-soft);opacity:.5;stroke:var(--accent);stroke-width:1.6;stroke-dasharray:none}
-  .arch .bx{fill:var(--panel);stroke:var(--line);stroke-width:1}
+  /* 描边用 --line2 而不是 --line：框现在压在一块纸板上，--line 那个浅度
+     在纸板上只剩个影子。 */
+  .arch .bx{fill:var(--panel);stroke:var(--line2);stroke-width:1}
   .arch .node{cursor:pointer}
   .arch .node:hover .bx{stroke:var(--accent);stroke-width:1.5}
   .arch .loopbox{fill:none;stroke:var(--accent);stroke-width:1.5}
@@ -375,7 +467,7 @@
                background:var(--accent);margin-right:5px;vertical-align:middle;animation:pulse 1s ease-in-out infinite}
   @media (prefers-reduced-motion:reduce){.arch .flow.live{animation:none}.arch-status .live-dot{animation:none}}
   .convo{display:flex;flex-direction:column;gap:8px}
-  .msg{border:1px solid var(--line);border-radius:9px;padding:10px 13px;max-width:78%}
+  .msg{border:1px solid var(--line);border-radius:var(--radius);padding:10px 13px;max-width:78%}
   .msg.user{align-self:flex-end;background:var(--accent-soft);border-color:transparent}
   .msg.assistant{align-self:flex-start;background:var(--panel)}
   .msg .who{font-size:11px;color:var(--ink3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
@@ -389,16 +481,16 @@
   .reveal{color:var(--accent);cursor:pointer;font-weight:500;border-bottom:1px dashed var(--accent);padding-bottom:1px}
   .reveal:hover{border-bottom-style:solid}
   .reveal.del{color:var(--bad);border-color:var(--bad)}
-  .editor{width:100%;min-height:120px;background:var(--bg);border:1px solid var(--line2);border-radius:8px;
+  .editor{width:100%;min-height:120px;background:var(--bg);border:1px solid var(--line2);border-radius:var(--radius);
           padding:10px 12px;color:var(--ink);font:13px/1.5 var(--mono);resize:vertical;outline:none}
   .editor:focus{border-color:var(--accent)}
   tr .editor{min-height:52px}
-  .save{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer}
+  .save{background:var(--accent);color:var(--on-accent);border:none;border-radius:var(--radius);padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer}
   /* dirty-state: a save button is muted until there's an unsaved change */
   .save:disabled{opacity:.4;cursor:default}
   .save.ghost{background:transparent;color:var(--ink2);border:1px solid var(--line2)}
   /* Tools tab: capability cards grouped by origin */
-  .toolcard{border:1px solid var(--line);border-radius:8px;padding:10px 13px;margin-bottom:8px;background:var(--panel)}
+  .toolcard{border:1px solid var(--line);border-radius:var(--radius);padding:10px 13px;margin-bottom:8px;background:var(--panel)}
   .toolcard .tn{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink)}
   .toolcard .td{color:var(--ink2);font-size:12px;margin-top:3px}
   .srcpill{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
@@ -407,7 +499,7 @@
   .srcpill.apple{background:#0000;border:1px solid var(--line2);color:var(--ink2)}
   /* read-only SQL console (the Supabase-editor idea, scoped down) */
   .sqlbox{width:100%;min-height:70px;background:#0b0b0d;color:#d6d7de;border:1px solid var(--line2);
-          border-radius:8px;padding:11px 13px;font:12.5px/1.5 var(--mono);resize:vertical;outline:none}
+          border-radius:var(--radius);padding:11px 13px;font:12.5px/1.5 var(--mono);resize:vertical;outline:none}
   @media (prefers-color-scheme:light){.sqlbox{background:#1c1c20;color:#e6e6ea}}
   .sqlbox:focus{border-color:var(--accent)}
   .qexample{font-family:var(--mono);font-size:11.5px;color:var(--accent);cursor:pointer;border-bottom:1px dashed var(--accent)}
@@ -417,14 +509,14 @@
      without it a flex child refuses to shrink below its content and the row
      overflows even when it IS allowed to wrap. */
   .sesshead{display:flex;align-items:center;gap:8px;margin:10px 0 14px;flex-wrap:wrap;min-width:0}
-  .sessbtn{background:var(--panel);border:1px solid var(--line2);border-radius:7px;color:var(--ink2);
+  .sessbtn{background:var(--panel);border:1px solid var(--line2);border-radius:var(--radius);color:var(--ink2);
            padding:5px 11px;font-size:12.5px;cursor:pointer;white-space:nowrap}
   .sessbtn:hover{border-color:var(--accent);color:var(--accent)}
   .teletoggle.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
   /* per-turn stats (gate/seconds/iters/tools) hide together when toggled off */
   body.no-tele .chatlog .tele{display:none}
-  .sessmenu{position:absolute;z-index:30;background:var(--panel);border:1px solid var(--line2);border-radius:10px;
-            box-shadow:0 8px 30px rgba(0,0,0,.28);width:300px;max-height:340px;overflow-y:auto;padding:6px}
+  .sessmenu{position:absolute;z-index:30;background:var(--panel);border:1px solid var(--line2);border-radius:var(--radius);
+            box-shadow:var(--lift-2);width:300px;max-height:340px;overflow-y:auto;padding:6px}
   /* mini model switcher: a pill in the chat header + its dropdown */
   /* margin-left:auto parks the chip on the right — which, in a row too narrow to
      hold it, parked it past the right edge of the window. It may shrink now. */
@@ -450,19 +542,19 @@
                      padding:0 5px;margin-left:6px;vertical-align:1px}
   .pinrow{display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:12.5px;border-bottom:1px solid var(--line)}
   .pinrow:last-of-type{border-bottom:none}
-  .pinrow.on{background:var(--accent-soft);border-radius:7px;padding-left:8px;padding-right:8px}
+  .pinrow.on{background:var(--accent-soft);border-radius:var(--radius);padding-left:8px;padding-right:8px}
   .pinrow .mm-prov{font-size:9.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;min-width:64px}
   .pinstar{cursor:pointer;color:var(--ink3);font-size:15px;line-height:1;text-decoration:none;flex-shrink:0}
   .pinstar.on{color:var(--accent)}
   .pinstar:hover{color:var(--accent)}
   .addmodel{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
-  .addmodel select{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;
+  .addmodel select{background:var(--bg);border:1px solid var(--line2);border-radius:var(--radius);padding:8px 10px;
           color:var(--ink);font-size:13px;outline:none;max-width:100%}
   .addmodel #add-model{flex:1;min-width:180px}
-  .addmodel input{flex:1;min-width:180px;background:var(--bg);border:1px solid var(--line2);border-radius:8px;
+  .addmodel input{flex:1;min-width:180px;background:var(--bg);border:1px solid var(--line2);border-radius:var(--radius);
           padding:8px 12px;color:var(--ink);font-size:13px;outline:none}
   .addmodel select:focus,.addmodel input:focus{border-color:var(--accent)}
-  .sessitem{padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12.5px}
+  .sessitem{padding:8px 10px;border-radius:var(--radius);cursor:pointer;font-size:12.5px}
   .sessitem:hover{background:var(--accent-soft)}
   .sessitem.on{background:var(--accent-soft);color:var(--accent)}
   .sessitem .sm{color:var(--ink3);font-size:11px;margin-top:2px}
@@ -475,23 +567,23 @@
   .sessitem:hover .sess-del,.toolcard:hover .sess-del{opacity:1}
   .sess-del:hover{color:var(--bad)}
   .fld{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12.5px;color:var(--ink2)}
-  .fld input,.fld select{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:9px 12px;
+  .fld input,.fld select{background:var(--bg);border:1px solid var(--line2);border-radius:var(--radius);padding:9px 12px;
           color:var(--ink);font-size:13.5px;outline:none}
   .fld input:focus,.fld select:focus{border-color:var(--accent)}
   .cat-controls{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
   .cat-controls input[type=text]{flex:1;min-width:160px;background:var(--bg);border:1px solid var(--line2);
-          border-radius:8px;padding:8px 12px;color:var(--ink);font-size:13.5px;outline:none}
+          border-radius:var(--radius);padding:8px 12px;color:var(--ink);font-size:13.5px;outline:none}
   .cat-controls input[type=text]:focus{border-color:var(--accent)}
   .cat-controls input[type=checkbox],#catalog input[type=checkbox]{accent-color:var(--accent)}
   details.adv{margin:2px 0 10px}
   details.adv>summary{cursor:pointer;font-size:12.5px;color:var(--ink2)}
   details.adv[open]>summary{margin-bottom:8px}
   .watchhead{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink2);font-weight:600;margin-bottom:8px}
-  .chat-arch{max-width:600px;margin:0 auto 16px;border:1px solid var(--line);border-radius:12px;
+  .chat-arch{max-width:600px;margin:0 auto 16px;border:1px solid var(--line);border-radius:var(--radius);
              padding:8px;background:var(--panel);position:sticky;top:96px;z-index:3}
   .chat-arch svg{min-width:0;width:100%;height:auto}
   .chatlog{display:flex;flex-direction:column;gap:10px}
-  .bubble{align-self:flex-end;background:var(--accent);color:#fff;padding:8px 13px;
+  .bubble{align-self:flex-end;background:var(--accent);color:var(--on-accent);padding:8px 13px;
           border-radius:14px 14px 3px 14px;max-width:75%;font-size:13.5px}
   .chatbar{display:flex;gap:10px;padding:12px 0 16px;border-top:1px solid var(--line);
            background:var(--bg);position:sticky;bottom:0;min-width:0}
@@ -515,7 +607,7 @@
   .cb-path code{font-family:var(--mono);font-size:12.5px;color:var(--ink2);word-break:break-all}
   .cb-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .cb-switch{display:flex;align-items:center;gap:8px;padding:6px 11px;border:1px solid var(--line2);
-    border-radius:9px;cursor:pointer;background:var(--bg);transition:border-color .15s}
+    border-radius:var(--radius);cursor:pointer;background:var(--bg);transition:border-color .15s}
   .cb-switch:hover{border-color:var(--accent)}
   .cb-switch.on{border-color:var(--good);background:var(--good-soft)}
   .cb-switch input{accent-color:var(--good);margin:0}
@@ -530,7 +622,7 @@
   .ctc-actions{display:flex;align-items:center;gap:14px;margin-top:10px;flex-wrap:wrap}
   .ctc-actions .meta{margin:0;flex:1;min-width:140px}
   .fld-inline{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)}
-  .fld-inline select,.fld-inline input[type=text]{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;color:var(--ink);font-size:13px}
+  .fld-inline select,.fld-inline input[type=text]{background:var(--bg);border:1px solid var(--line2);border-radius:var(--radius);padding:8px 10px;color:var(--ink);font-size:13px}
   .coding-verify-row{margin-top:10px}
   .coding-verify-row input{flex:1;min-width:200px;font-family:var(--mono);font-size:12.5px}
   .coding-config{margin-bottom:16px;padding:0 14px}
@@ -540,7 +632,7 @@
   .coding-backends{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
   .coding-execution{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:12.5px;color:var(--ink2)}
   .coding-execution input{accent-color:var(--accent)}
-  .coding-backend{display:flex;align-items:flex-start;gap:9px;padding:10px;border:1px solid var(--line2);border-radius:9px;cursor:pointer;background:var(--bg)}
+  .coding-backend{display:flex;align-items:flex-start;gap:9px;padding:10px;border:1px solid var(--line2);border-radius:var(--radius);cursor:pointer;background:var(--bg)}
   .coding-backend:hover{border-color:var(--accent)}
   .coding-backend.unavailable{opacity:.55;cursor:not-allowed}
   .coding-backend input{margin-top:3px;accent-color:var(--accent)}
@@ -570,7 +662,7 @@
   /* The receipt: one row per change, and the patch behind it. */
   .coding-runs{padding:6px;margin-bottom:12px}
   .cr-row{display:grid;grid-template-columns:44px 62px minmax(0,1fr) auto 14px;gap:10px;
-    align-items:center;padding:7px 9px;border-radius:7px;font-size:12.5px}
+    align-items:center;padding:7px 9px;border-radius:var(--radius);font-size:12.5px}
   .cr-row.on{background:var(--accent-soft)}
   .cr-row:not(.flat){cursor:pointer}
   .cr-row:not(.flat):hover{background:var(--accent-soft)}
@@ -596,7 +688,7 @@
   .coding-diff .dl-f{color:var(--ink3);display:block}
   /* The one-line strip on the Coding Agent's own thread (chat.js). */
   .coding-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;
-    padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:12px}
+    padding:7px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);font-size:12px}
   .coding-strip .cs-root{font-family:var(--mono);font-size:11.5px;color:var(--ink2);
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
   .cs-flag{color:var(--ink3)}
@@ -609,7 +701,7 @@
   .dr-grid{display:grid;grid-template-columns:minmax(260px,0.85fr) minmax(0,1.6fr);gap:16px}
   .dr-grid section{min-width:0}   /* 不加 min-width:0 的话里面那张 SVG 会把栅格撑破 */
   .dr-row{display:flex;gap:8px;margin:10px 0}
-  .dr-row input{flex:1;min-width:0;border:1px solid var(--line);border-radius:7px;
+  .dr-row input{flex:1;min-width:0;border:1px solid var(--line);border-radius:var(--radius);
     background:var(--bg);color:var(--ink);padding:8px 10px;outline:none;font:inherit}
   .dr-row input:focus{border-color:var(--accent)}
   .dr-grid .live-dot{display:inline-block;width:7px;height:7px;border-radius:99px;
@@ -623,16 +715,16 @@
          padding:1px 6px;border-radius:99px;vertical-align:middle;margin-left:6px;
          border:1px solid var(--line2);color:var(--ink2)}
   .gwtag.dashboard{color:var(--accent);border-color:var(--accent)}
-  .gwtag.brief{color:#b0870f;border-color:#b0870f}
+  .gwtag.brief{color:var(--warn);border-color:var(--warn)}
   /* min-width:0 is what actually makes `flex:1` shrink. flex:1 sets the basis
      to 0, but a flex item's default min-width is `auto` — its intrinsic content
      width — so the input refused to go below that and pushed Send off the edge
      of the pane. The button then gets flex-shrink:0 so the input absorbs the
      squeeze instead of the control turning into a sliver. */
-  .chatbar input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line2);border-radius:8px;
+  .chatbar input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line2);border-radius:var(--radius);
                  padding:10px 14px;color:var(--ink);font-size:14px;outline:none}
   .chatbar input:focus{border-color:var(--accent)}
-  .chatbar button{background:var(--accent);color:#fff;border:none;border-radius:8px;
+  .chatbar button{background:var(--accent);color:var(--on-accent);border:none;border-radius:var(--radius);
                   padding:0 18px;font-weight:600;font-size:13.5px;cursor:pointer;flex-shrink:0}
   .chatbar button:disabled{opacity:.5;cursor:default}
   /* Attached pictures: a strip of thumbnails above the input while you compose,
@@ -642,7 +734,7 @@
   .attpreview{display:flex;gap:8px;flex-wrap:wrap;padding:8px 0 0}
   .attchip{position:relative;display:inline-block}
   .attchip img{display:block;width:56px;height:56px;object-fit:cover;
-               border-radius:8px;border:1px solid var(--line2)}
+               border-radius:var(--radius);border:1px solid var(--line2)}
   .attchip button{position:absolute;top:-6px;right:-6px;width:18px;height:18px;padding:0;
                   border-radius:99px;background:var(--ink3);color:var(--bg);border:none;
                   font-size:12px;line-height:1;cursor:pointer}
@@ -653,7 +745,7 @@
      the strip instead of sitting beside the last chip. */
   .attnote{flex-basis:100%;font-size:12px;line-height:1.5;color:var(--ink3)}
   .bubble-att{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
-  .bubble-att img{display:block;max-width:160px;max-height:160px;border-radius:8px}
+  .bubble-att img{display:block;max-width:160px;max-height:160px;border-radius:var(--radius)}
   .stages{display:flex;gap:6px;margin:2px 0 4px}
   .stage{font-size:11px;padding:2px 9px;border-radius:99px;border:1px solid var(--line2);color:var(--ink3)}
   .stage.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
@@ -700,7 +792,7 @@
        padding:1px 5px;border-radius:4px}
   /* Model arena (Compare tab): message + model picks, then a scrolling row of
      one result column per model. */
-  .cmp-input{width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:8px;
+  .cmp-input{width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:var(--radius);
        padding:10px 12px;color:var(--ink);font-size:13.5px;font-family:inherit;outline:none;resize:vertical}
   .cmp-input:focus{border-color:var(--accent)}
   .cmp-picks{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}
@@ -723,7 +815,7 @@
   /* Responsive: as many ~300px columns as fit, then wrap to the next row. */
   .cmp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
        gap:12px;margin-top:12px;align-items:start}
-  .cmp-col{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  .cmp-col{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
        padding:12px 14px;display:flex;flex-direction:column;gap:8px}
   .cmp-col.err{border-color:var(--bad)}
   /* One wave's nodes all start together, so every bar shares a left edge and
@@ -750,17 +842,17 @@
     font-weight:600;letter-spacing:.02em;white-space:nowrap;vertical-align:middle}
   .cmp-score.pass{background:var(--good-soft);color:var(--good)}
   .cmp-score.fail{background:var(--bad-soft);color:var(--bad)}
-  .cmp-score.part{background:#c8951f22;color:#c8951f}
+  .cmp-score.part{background:var(--warn-soft);color:var(--warn)}
   .cmp-col.solved{box-shadow:inset 3px 0 0 var(--good)}
   .cmp-col.failed{box-shadow:inset 3px 0 0 var(--bad)}
   .cmp-q{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;
     font-weight:600;white-space:nowrap;vertical-align:middle}
   .cmp-q.hi{background:var(--good-soft);color:var(--good)}
-  .cmp-q.mid{background:#c8951f22;color:#c8951f}
+  .cmp-q.mid{background:var(--warn-soft);color:var(--warn)}
   .cmp-q.lo{background:var(--bad-soft);color:var(--bad)}
   .cmp-grade1{margin-left:auto;font-size:11px;white-space:nowrap;flex-shrink:0}
   .cmp-judge{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink3);
-    cursor:pointer;white-space:nowrap;padding:4px 8px;border-radius:8px;border:1px solid var(--line)}
+    cursor:pointer;white-space:nowrap;padding:4px 8px;border-radius:var(--radius);border:1px solid var(--line)}
   .cmp-judge.on{color:var(--accent);border-color:var(--accent)}
   .cmp-judge input{margin:0}
   .cmp-judge select{font:inherit;font-size:12px;color:var(--ink);background:var(--card);
@@ -777,11 +869,11 @@
   .scatter .sc-yhit{fill:transparent;cursor:help;pointer-events:all}
   .sc-tip{position:fixed;display:none;z-index:9999;pointer-events:none;max-width:340px;
     white-space:pre-line;background:var(--panel);color:var(--ink);border:1px solid var(--line);
-    border-radius:8px;padding:8px 11px;font-size:12px;line-height:1.45;
-    box-shadow:0 8px 30px rgba(0,0,0,.28)}
+    border-radius:var(--radius);padding:8px 11px;font-size:12px;line-height:1.45;
+    box-shadow:var(--lift-2)}
   .scatter .sc-lbl{fill:var(--ink2);font-size:10.5px}
   .scatter .sc-dot.hi{fill:var(--good)}
-  .scatter .sc-dot.mid{fill:#c8951f}
+  .scatter .sc-dot.mid{fill:var(--warn)}
   .scatter .sc-dot.lo{fill:var(--bad)}
   .cmp-sortbar{display:flex;align-items:center;gap:6px;margin:2px 0 12px;font-size:12px;color:var(--ink3)}
   .cmp-sortbtn{cursor:pointer;font-size:12px;color:var(--ink2);background:var(--bg);
@@ -791,7 +883,7 @@
 
 /* Sub-agent receipt (Arena cards): pi working inside a card. Live = small
    terminal window; finished = one quiet row, expandable. */
-.subterm{ margin:6px 0; border:1px solid var(--line); border-radius:8px;
+.subterm{ margin:6px 0; border:1px solid var(--line); border-radius:var(--radius);
   background:var(--bg); font-size:11.5px; overflow:hidden; }
 .subterm.live{ border-color:var(--accent); background:var(--accent-soft); }
 .subterm-h{ display:flex; align-items:center; gap:7px; padding:4px 8px;
@@ -814,19 +906,19 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 
 /* Models page: provider card grid + edit modal. */
 .provgrid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:12px; }
-.provcard{ background:var(--panel); border:1px solid var(--line); border-radius:10px;
+.provcard{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
   padding:16px 14px 12px; display:flex; flex-direction:column; align-items:flex-start;
   gap:6px; position:relative; }
 .provcard .prov-current{ position:absolute; top:10px; right:10px; }
-.provlogo{ width:44px; height:44px; border-radius:10px; }
+.provlogo{ width:44px; height:44px; border-radius:var(--radius); }
 .provname{ font-weight:700; font-size:14px; }
 .provstatus{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink2); }
 .provdot{ width:9px; height:9px; border-radius:99px; flex-shrink:0; }
 .provactions{ display:flex; gap:8px; margin-top:4px; }
 .provactions .save{ padding:5px 12px; font-size:12px; }
-.provmodal-back{ position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:60;
+.provmodal-back{ position:fixed; inset:0; background:rgba(40,30,15,.5); z-index:60;
   display:flex; align-items:center; justify-content:center; }
-.provmodal{ background:var(--panel); border:1px solid var(--line); border-radius:12px;
+.provmodal{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
   padding:20px; width:min(520px, 92vw); max-height:90vh; overflow-y:auto; }
 .provmodal-models{ width:min(640px, 92vw); min-height:min(430px, 90vh); padding:24px; }
 /* The "add provider" card: same footprint as a provider card, dashed so it
@@ -843,7 +935,7 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 .model-picker-toggle{ width:34px; border:1px solid var(--line2); border-radius:0 8px 8px 0; background:var(--bg); color:var(--ink2); cursor:pointer; }
 .model-picker-toggle:hover{ background:var(--panel); color:var(--ink); }
 .model-picker-toggle:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
-.model-picker-list{ display:none; position:absolute; top:100%; left:0; right:0; margin-top:4px; background:var(--panel); border:1px solid var(--line2); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.15); z-index:10; max-height:240px; overflow:auto; }
+.model-picker-list{ display:none; position:absolute; top:100%; left:0; right:0; margin-top:4px; background:var(--panel); border:1px solid var(--line2); border-radius:var(--radius); box-shadow:var(--lift-2); z-index:10; max-height:240px; overflow:auto; }
 .model-picker-list.open{ display:block; }
 .model-picker-search{ position:sticky; top:0; padding:8px 10px; border:none; border-bottom:1px solid var(--line2); background:var(--panel); width:100%; outline:none; }
 .model-picker-search:focus{ border-bottom-color:var(--accent); }
@@ -858,7 +950,7 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 .connsection + .connsection h2{margin-top:30px}
 .conngrid{align-items:stretch}
 .conncard{min-height:190px;transition:border-color .12s ease,box-shadow .12s ease}
-.conncard:hover{border-color:var(--line2);box-shadow:0 5px 18px rgba(33,32,29,.05)}
+.conncard:hover{border-color:var(--line2);box-shadow:var(--lift)}
 .connlogo{object-fit:contain}
 .connstatus{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink2)}
 .conndot{width:9px;height:9px;border-radius:99px;background:var(--ink3);flex-shrink:0}
@@ -866,8 +958,8 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 .connstatus.connected .conndot{background:var(--good)}
 .connstatus.error{color:var(--bad)}
 .connstatus.error .conndot{background:var(--bad)}
-.connstatus.needs-setup{color:#a87312}
-.connstatus.needs-setup .conndot{background:#c8951f}
+.connstatus.needs-setup{color:var(--warn)}
+.connstatus.needs-setup .conndot{background:var(--warn)}
 /* Configured but unproven: deliberately calm. Amber here would read as a
    warning about something that is merely untested, which is the whole bug
    this state exists to fix. Accent, not alarm. */
@@ -880,23 +972,23 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 .conncard .conndesc{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
   overflow:hidden;min-height:36px}
 .connactions{margin-top:auto}
-.connmodal-back{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);
+.connmodal-back{position:fixed;inset:0;z-index:60;background:rgba(40,30,15,.5);
   display:flex;align-items:center;justify-content:center;padding:24px}
-.connmodal{background:var(--panel);border:1px solid var(--line);border-radius:14px;
-  box-shadow:0 24px 70px rgba(0,0,0,.25);width:min(560px,100%);max-height:88vh;
+.connmodal{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--lift-2);width:min(560px,100%);max-height:88vh;
   overflow-y:auto;padding:20px;outline:none}
 .connmodal-head{display:flex;align-items:center;gap:12px}
 .connmodal-title{min-width:0;flex:1}
 .connmodal-title h3{font-size:16px;line-height:1.3;margin-bottom:3px}
 .connmodal-close{align-self:flex-start;background:transparent;border:1px solid var(--line2);
-  border-radius:7px;color:var(--ink2);cursor:pointer;font-size:12px;padding:5px 9px}
+  border-radius:var(--radius);color:var(--ink2);cursor:pointer;font-size:12px;padding:5px 9px}
 .connmodal-close:hover,.connmodal-close:focus-visible{border-color:var(--accent);color:var(--accent)}
 .connmodal-desc{margin:14px 0 0;font-size:13px}
 .connmodal-meta{display:flex;flex-wrap:wrap;gap:4px 12px;min-height:18px;margin-top:6px;
   color:var(--ink3);font-size:11.5px;font-variant-numeric:tabular-nums}
 .connsetup{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
   margin-top:14px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);
-  border-radius:8px;font-size:12px}
+  border-radius:var(--radius);font-size:12px}
 .connsetup code{overflow-wrap:anywhere}
 .connsetup a{color:var(--accent);font-weight:550;text-decoration:none}
 .connsetup a:hover{text-decoration:underline}
@@ -917,10 +1009,10 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 .connmodal-message{flex:1;min-width:160px;color:var(--ink3);font-size:11.5px}
 .conn-force{margin-left:6px}
 .connmodal :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-@media (prefers-color-scheme:dark){
-  .conncard:hover{box-shadow:0 5px 18px rgba(0,0,0,.25)}
-  .connstatus.needs-setup{color:#d9a441}
-}
+/* 这里原来有一整块深色覆盖（conncard 的 hover 阴影 + needs-setup 的琥珀色）。
+   两块现在都不需要了：--lift 和 --warn 各自跟着配色方案走，在外面再写一遍
+   就是同一件事的两个决定点，迟早分歧。 */
+
 @media (max-width:720px){
   .conngrid{grid-template-columns:1fr}
   .connmodal-back{padding:10px}
@@ -930,9 +1022,14 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
   .connmodal-message{flex-basis:100%}
 }
 
-/* Modern enhancements: subtle hover lifts and smooth transitions */
-.card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); transition: transform 0.15s ease, box-shadow 0.15s ease; }
-.tile:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+/* 悬停。这一段原来写的是 `transform:translateY(-1px)` 外加一层大灰影 ——
+   "卡片浮起来"是屏幕卡片那套语言，跟"纸放在纸上"是打架的：纸不会因为你看了
+   它一眼就离地。而且 .card 在这个应用里到处都是，连一份一万字的报告都是
+   一张 .card，把整份报告抬起来更是没道理。抬升去掉，只把边线收紧一档。 */
+.card:hover,.tile:hover{border-color:var(--line2)}
+@media (prefers-reduced-motion:no-preference){
+  .card,.tile{transition:border-color .15s ease}
+}
 
 /* Smooth scrolling for the entire app */
 html { scroll-behavior: smooth; }
@@ -946,7 +1043,7 @@ html { scroll-behavior: smooth; }
 .ma-legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:10px;font-size:12px}
 .ma-o{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--line2)}
 .ma-pass{color:var(--good);border-color:var(--good)}
-.ma-stale{color:#a87312;border-color:#c8951f}
+.ma-stale{color:var(--warn);border-color:var(--warn)}
 /* invented is the headline failure — a confident answer to something it was
    never told. It gets the alarm colour; miss, an honest gap, deliberately does not. */
 .ma-invented{color:var(--bad);border-color:var(--bad)}
