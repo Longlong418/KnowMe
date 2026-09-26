@@ -20,6 +20,21 @@ WHAT IT MAY TOUCH
     knowledge writes, no filesystem. The only writes in the whole run are the
     report itself: one knowledge note and one markdown file in the outbox.
 
+ONE SUB-AGENT PER SUB-QUESTION, IN PARALLEL
+    A round does not hand the whole plan to one agent. The plan is DATA
+    (state["subquestions"]) and each entry gets its own agent, its own budget,
+    and its own thread. The reason is a budget failure that was observed in a
+    real report: with one agent covering four sub-questions in one 8-iteration
+    turn, the searches ate the budget and the pages were never opened — the
+    agent then honestly wrote "the pages could not be read", which reads like a
+    gap in the world rather than a gap in this run.
+
+    The fan-out lives HERE, inside the round's own node, and that is forced by
+    the engine: a node can only be re-entered through a router jump and the
+    dependency rule requires runs[n] == 0 (engine.py:126-137), so a round split
+    across several graph nodes could never run a second round. Keeping it inside
+    the node leaves the topology — and the byte-frozen chart — untouched.
+
 WHY EACH ROUND TAKES agent_lock
     A model call raises llm events and a tool call raises tool events, and
     data.py files every llm/tool event that arrives while a turn is open under
@@ -29,11 +44,18 @@ WHY EACH ROUND TAKES agent_lock
     run is emitting — otherwise a two-minute research round would show up as
     tool calls the user's chat message never made. Per ROUND, not per run: a
     chat message should not be blocked for two minutes waiting for research.
+
+    The lock is taken ONCE around the whole wave, never inside a worker:
+    agent_lock is a plain threading.Lock and therefore NOT reentrant, so a child
+    thread acquiring what its parent already holds is a deadlock, not a wait.
+    Fanning out inside one round also helps this guarantee rather than straining
+    it — a round now takes max(sub-agents) instead of sum(them).
 """
 
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
@@ -44,6 +66,7 @@ from knowme.core.loop import run_loop
 from knowme.graph import run_graph
 from knowme.graph.workflows.deep_research import (
     PLAN_PROMPT,
+    SUBAGENT_PROMPT,
     SYNTH_PROMPT,
     build_deep_research_graph,
     sources_from_tool_calls,
@@ -54,22 +77,32 @@ from knowme.tools.knowledge import create_note
 # The allowlist. An invariant a reviewer can check by eye, and one the tests
 # assert against this file's source.
 SUBAGENT_TOOLS = frozenset({"search_web", "read_webpage"})
-# Eight iterations is four or five searches plus the pages they lead to. The
-# window in read_webpage is what keeps this affordable; the loop resends the
-# whole message list every iteration (see that tool's docstring).
+# PER SUB-AGENT, not per round. Each agent owns exactly one sub-question, so this
+# is roughly two or three searches plus the four or five pages they lead to —
+# which is what it was always meant to be. The window in read_webpage is what
+# keeps it affordable; the loop resends the whole message list every iteration
+# (see that tool's docstring).
 MAX_ITERATIONS = 8
+
+# Prefixed to the notes of a sub-agent that ran out of iterations. The synthesizer
+# is told (SYNTH_PROMPT) to name the sub-question this appears under, because a
+# gap in THIS RUN and a gap in the EVIDENCE are different claims and only one of
+# them tells the reader what to do next.
+BUDGET_SPENT = ("（这个子问题**没查完**：子 agent 的模型往返预算用尽了，"
+                "下面只是它已经拿到的部分。）")
 
 USAGE = ("`/deep_research` needs a topic to research, not just the command.\n\n"
          "Try `/deep_research 固态电池的产业化进度` — it will plan sub-questions, "
          "search, read, and write you a cited report.")
 
-SYSTEM = """You are a research agent. You are given a topic and a set of
-sub-questions, and you have exactly two tools: search_web and read_webpage.
+SYSTEM = """You are a research agent. You are given a topic and ONE sub-question
+of it — another agent is working the other sub-questions at the same time — and
+you have exactly two tools: search_web and read_webpage.
 
 How to work:
 - Search first, then OPEN the pages that look substantive. A snippet is a
   pointer, not evidence, and you may not cite what you did not read.
-- Cover the sub-questions, but follow what the sources actually say: if they
+- Answer YOUR sub-question, but follow what the sources actually say: if they
   point somewhere more interesting and relevant, go there.
 - Write down the URL for every fact as you go. A finding without a source is
   not usable in the report.
@@ -95,6 +128,64 @@ def _one_shot(knowme: KnowMe, model: str, prompt: str, max_tokens: int) -> str:
     return "".join(b.text for b in response.content if getattr(b, "type", "") == "text")
 
 
+def _one_subagent(*, client, model: str, tools, brief: str, subquestion: str,
+                  round_no: int, notify) -> dict:
+    """One sub-agent: one sub-question, its own budget, its own loop turn.
+
+    THIS FUNCTION NEVER RAISES. Its result is read with `f.result()`, which
+    re-raises whatever the worker raised; a sub-agent that blows up must cost its
+    own sub-question and nothing else. The other agents in this wave have already
+    paid for their searches, and the round still has to hand the synthesizer
+    something — same posture as `_try` in the workflow.
+    """
+    def told(kind: str, ev: dict) -> None:
+        # Tag the event with the sub-question it belongs to. Without this every
+        # agent in the wave writes `node: research` and the trace cannot say
+        # WHICH question ran out of budget — which is the whole point of
+        # reporting the gap honestly. `notify` is the engine's notifier, already
+        # wrapped in a lock (engine.py:108-113), so concurrent writes stay
+        # whole-line; this only adds keys to the dict it is handed.
+        if notify:
+            notify(kind, {**ev, "subquestion": subquestion, "round": round_no})
+
+    try:
+        result = run_loop(
+            client=client, model=model, system=SYSTEM,
+            messages=[{"role": "user", "content": SUBAGENT_PROMPT.format(
+                brief=brief, subquestion=subquestion)}],
+            tools=tools, max_iterations=MAX_ITERATIONS, max_tokens=2048,
+            observer=told)
+    except Exception as exc:  # noqa: BLE001 — one agent's failure is not the round's
+        return {"subquestion": subquestion,
+                "reply": f"(这个子问题失败了：{type(exc).__name__}: {exc})",
+                "tool_calls": [], "hit_limit": False}
+    return {"subquestion": subquestion, "reply": result.reply,
+            "tool_calls": result.tool_calls, "hit_limit": result.hit_limit}
+
+
+def _merge(outs: list[dict]) -> dict:
+    """The round's reply and sources, out of one answer per sub-question.
+
+    The sources are counted ONCE over the concatenated tool records, so
+    `sources_from_tool_calls` stays the single authority on what a round touched
+    (rule 1 in the workflow's docstring) and its de-duplication also covers the
+    case where two sub-agents read the same page — which the router would
+    otherwise count twice as "new".
+
+    A starved sub-agent gets BUDGET_SPENT in front of its notes: its reply is
+    loop.py's canned apology, not a finding, and SYNTH_PROMPT is told to name it.
+    """
+    parts = []
+    for out in outs:
+        body = (out.get("reply") or "").strip() or "(没有写出任何笔记)"
+        if out.get("hit_limit"):
+            body = f"{BUDGET_SPENT}\n\n{body}"
+        parts.append(f"### {out.get('subquestion', '')}\n\n{body}")
+    return {"reply": "\n\n".join(parts),
+            "sources": sources_from_tool_calls(
+                [c for out in outs for c in (out.get("tool_calls") or [])])}
+
+
 def build_bound_graph(knowme: KnowMe):
     """The pure workflow, wired to this machine."""
     plan_model, work_model = _settings_model(knowme)
@@ -105,18 +196,40 @@ def build_bound_graph(knowme: KnowMe):
                          PLAN_PROMPT.format(topic=state.get("topic", ""), n=4), 500)
 
     def research_fn(state: dict) -> dict:
-        """One round: a real loop turn with the two web tools and nothing else."""
+        """One round: one sub-agent PER sub-question, in parallel, merged.
+
+        The fan-out is here, inside the round's single node, because the engine
+        can only re-enter a node through a router jump (see the module
+        docstring): splitting a round across several graph nodes would cost the
+        second round. The topology is unchanged; the width is a runtime decision.
+        """
+        questions = [str(q).strip() for q in (state.get("subquestions") or [])
+                     if str(q).strip()]
+        if not questions:   # a planner that failed still has the topic to search
+            questions = [str(state.get("topic") or "").strip()]
+        # ONE subset call, shared by every worker. Built here rather than inside
+        # the worker because the registry is a read-only lookup once built
+        # (core/tools.py:75-96) and the tools are stateless functions — and
+        # because building it per worker would be N identical registries.
         tools = knowme.tools.subset(SUBAGENT_TOOLS)
-        with agent_lock:   # see the module docstring — not a performance choice
-            result = run_loop(
-                client=knowme.client, model=work_model, system=SYSTEM,
-                messages=[{"role": "user", "content": state.get("message") or ""}],
-                tools=tools, max_iterations=MAX_ITERATIONS, max_tokens=2048,
-                observer=state.get("_notify"))
-        # The sources come off the tool RECORDS, not the reply's prose — this is
-        # what the router counts (rule 1 in the workflow's docstring).
-        return {"reply": result.reply,
-                "sources": sources_from_tool_calls(result.tool_calls)}
+        brief = state.get("message") or ""
+        round_no = (state.get("round") or 0) + 1
+        notify = state.get("_notify")
+        # ONE lock for the whole wave, never inside a worker: agent_lock is a
+        # plain threading.Lock and NOT reentrant, so a child acquiring what its
+        # parent holds deadlocks instead of waiting. Same scope as before — per
+        # round, not per run (see the module docstring). Lock first, then pool,
+        # because the combined `with` exits in reverse: the pool drains (its
+        # __exit__ waits for every worker) before the lock is released.
+        with agent_lock, ThreadPoolExecutor(max_workers=len(questions)) as pool:
+            futures = [pool.submit(
+                _one_subagent, client=knowme.client, model=work_model,
+                tools=tools, brief=brief, subquestion=q, round_no=round_no,
+                notify=notify) for q in questions]
+            # Read in sub-question order, so the merged notes read in the order
+            # the plan listed them rather than in completion order.
+            outs = [f.result() for f in futures]
+        return _merge(outs)
 
     def synth_fn(state: dict) -> str:
         return _one_shot(knowme, work_model, SYNTH_PROMPT.format(

@@ -71,21 +71,35 @@ Reply with ONLY a JSON array of strings, nothing else:
 
 ["first sub-question", "second sub-question"]"""
 
-# What a round is told. Note what is NOT here: any instruction to report how
-# confident it is or what is still missing. The round reports what it FOUND; the
-# router counts URLs. See rule 1.
-ROUND_PROMPT = """{topic}
+# What ONE sub-agent is told. A round fans this out — one sub-agent per
+# sub-question, each with its own iteration budget — so it is written for a
+# SINGLE question and says so in as many words. The alternative (hand the list
+# to one agent and hope it gets through all of them) is what starved the round
+# this exists to fix: the budget went on searching and the pages never got read.
+#
+# Note what is NOT here: any instruction to report confidence or what is still
+# missing. A sub-agent reports what it FOUND; the router counts URLs. See rule 1.
+SUBAGENT_PROMPT = """{brief}
+Your sub-question — this one, and only this one:
 
-The sub-questions to cover:
-{subquestions}
+{subquestion}
 
-{covered}Search the web for these, and open the pages that look substantive.
+Search for it, and open the pages that look substantive.
 
 Rules:
 - Search before you conclude anything is missing. Snippets are not evidence.
 - Cite the URL you got each fact from, inline.
 - If two sources disagree, say so rather than picking one.
 - Be concise. Notes, not prose: what you found, and where you found it."""
+
+# The part every sub-agent in a round shares: what is being researched, and what
+# earlier rounds already covered. The binder adds the one sub-question each agent
+# owns. Kept separate so the shared part is written once, not once per agent.
+BRIEF = """The topic being researched:
+
+{topic}
+
+{covered}"""
 
 COVERED = """What earlier rounds already established (do not re-research this,
 build on it):
@@ -110,6 +124,11 @@ Write it in Markdown, in the language of the topic. Requirements:
 - Where the sources disagree or the evidence is thin, say so plainly instead of
   smoothing it over. A report that admits a gap is worth more than one that
   hides it.
+- When the notes say a sub-question ran out of its budget, name that
+  sub-question and say it is unanswered HERE — that is a gap in this run, not a
+  gap in the evidence, and the two need different words. A reader who is told
+  which question to go and ask somewhere else can act; "evidence is thin" they
+  cannot.
 - End with a "Sources" list of the URLs actually used.
 Do not invent a URL, a title, or a number that is not in the material above."""
 
@@ -202,14 +221,16 @@ def stop_reason(state: dict) -> str:
 
 
 def _next_prompt(state: dict) -> str:
-    """What the next round is told: the plan, plus what is already covered."""
+    """The BRIEF every sub-agent in the next round shares: the topic, plus what
+    earlier rounds already covered.
+
+    The one sub-question each agent owns is added by the binder, not here — this
+    module has no idea how many agents there will be, and it should not: the
+    fan-out is a runtime decision, and the topology stays one node either way.
+    """
     findings = (state.get("findings") or "").strip()
     covered = COVERED.format(findings=findings[-3000:]) if findings else ""
-    return ROUND_PROMPT.format(
-        topic=state.get("topic", ""),
-        subquestions="\n".join(f"- {q}" for q in (state.get("subquestions") or [])),
-        covered=covered,
-    )
+    return BRIEF.format(topic=state.get("topic", ""), covered=covered)
 
 
 def _start(state: dict, plan_fn: Callable[[dict], str]) -> dict:
@@ -222,8 +243,10 @@ def _start(state: dict, plan_fn: Callable[[dict], str]) -> dict:
     """
     text = _try(lambda: {"plan_text": plan_fn(state)}, {"plan_text": ""})["plan_text"]
     plan = parse_plan(text or "", state.get("topic", ""))
-    return {"subquestions": plan,
-            "message": _next_prompt({**state, "subquestions": plan})}
+    # The plan is DATA (state["subquestions"]) — the binder reads it and fans out
+    # one sub-agent per entry. It is not pasted into the brief: the brief is the
+    # part all of them share.
+    return {"subquestions": plan, "message": _next_prompt(state)}
 
 
 def _round(state: dict, research_fn: Callable[[dict], dict]) -> dict:

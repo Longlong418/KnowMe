@@ -33,6 +33,14 @@ class LoopResult:
     reply: str
     tool_calls: list[LoopEvent] = field(default_factory=list)
     iterations: int = 0
+    # True when guardrail 2 fired: the loop ran out of iterations and `reply` is
+    # the canned apology below, NOT something the model said. Callers that fold
+    # the reply into a bigger document (deep_research's rounds) need to know the
+    # difference — otherwise "the budget ran out" is indistinguishable from "the
+    # model had nothing more to say", and the report quietly claims the second.
+    # `iterations == max_iterations` is NOT a substitute: a model that answers
+    # cleanly on its last allowed iteration also ends at that number.
+    hit_limit: bool = False
     # What the runtime knows about the turn beyond its text: meta.steps (the
     # timeline the conversation view draws), gate/graph, latency, model. The
     # plain loop never fills this in — run_loop has no steps to report — but a
@@ -117,5 +125,6 @@ def run_loop(
         messages.append({"role": "user", "content": tool_results})
 
     # ---- guardrail 2: ran out of iterations
+    result.hit_limit = True
     result.reply = "(I hit my iteration limit before finishing — try breaking the request into smaller steps.)"
     return result
