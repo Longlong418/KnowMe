@@ -6,7 +6,13 @@
 #
 # PY picks the project venv automatically so you never need to remember
 # `source .venv/bin/activate` — both work, this is just fewer steps.
-PY := $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
+#
+# Both venv layouts, because they differ per platform: .venv/bin/python on
+# macOS/Linux, .venv/Scripts/python.exe on Windows. Testing only the first and
+# falling back to a bare `python` silently ran whatever was on PATH — on Windows
+# that is often a 3.9, and this project needs 3.11+. Measured: `make lint` with
+# the old line printed "No module named ruff" from Python39.
+PY := $(firstword $(wildcard .venv/bin/python .venv/Scripts/python.exe) python)
 
 .PHONY: run brief web trace eval eval-judge gate lint
 
