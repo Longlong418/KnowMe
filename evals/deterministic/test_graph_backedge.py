@@ -290,6 +290,25 @@ const drive = (workflow, events) => {
          "the previous run's detail leaked into the next run's card");
 }
 
+// --- the RUN's own stream lights the edge, not just the replay -----------
+//
+// The trace replay plays one event per 620ms and a fanned-out round now produces
+// three times the events, so it trails a whole run — measured on the deep
+// research page: the self-loop's flash arrived AFTER the run had finished. The
+// run's own stream is live, so graphApplyEvent lights the edge itself.
+// Only this harness can notice a broken version of it: runGraph's frame loop
+// catches every throw, so a bad selector would just draw nothing, silently.
+lit.length = 0;
+G.graphResetRun("deep_research");
+G.graphApplyEvent({kind: "route", workflow: "deep_research", router: "research",
+                   target: "research", reason: "还要再来一轮"});
+assert(lit.some(h => h.sel === '[data-edge="g-deep_research-research-research"]'
+                     && h.cls === "live" && h.ms === 1400),
+       "a route frame off the run's stream lights the edge itself — lit: "
+       + JSON.stringify(lit));
+assert(G.graphState().route.target === "research",
+       "and the route still lands in the run's state, not only on the chart");
+
 // --- a route lights the EDGE, never the target node ---------------------
 lit.length = 0;
 G.animateGraphStage({type: "route", workflow: "deep_research",

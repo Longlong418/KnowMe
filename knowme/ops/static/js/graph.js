@@ -329,6 +329,15 @@ function graphApplyEvent(ev){
     R.detail[graphKey(ev.node, R.visit[ev.node] || 1)] = {agents: ev.agents || []};
   } else if (k === "route"){
     R.route = {target: ev.target, reason: ev.reason};
+    // Light the edge HERE, off the run's own stream — do not wait for the trace
+    // replay to do it. The replay (diagram.js's playNext) plays one event per
+    // 620ms so the stages light up in sequence, and one sub-agent per
+    // sub-question tripled a round's event count: the queue now falls a whole
+    // run behind, so the self-loop's flash arrived AFTER the run had finished.
+    // Measured, not guessed — that is exactly what the deep research trip showed.
+    // Same selector animateGraphStage uses, and the same 1400ms: `route` frames
+    // carry workflow/router/target on both paths (engine.py:191).
+    hot(`[data-edge="g-${ev.workflow || ""}-${ev.router}-${ev.target}"]`, "live", 1400);
   } else if (k === "graph_end"){
     R.running = false; R.totalMs = ev.ms;
   } else if (k === "done"){
