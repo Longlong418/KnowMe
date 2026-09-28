@@ -19,6 +19,8 @@
 
 let researchTopic = "";        // 输到一半的主题，切走再切回来不丢
 let researchPainted = null;    // 已经画过的报告原文，免得每 100ms 重渲染一遍
+let researchHistPainted = null; // 同上，已经画过的那份记录列表
+let researchPick = "";         // 你在记录列表上点的那一份；空 = 跟着最新那份走
 
 const RESEARCH_WORKFLOW = "deep_research";
 
@@ -34,20 +36,56 @@ function researchTopology(){
   return wfs.find(w => w && w.name === RESEARCH_WORKFLOW) || null;
 }
 
-// 刷新页面之后 SSE 那条流早就没了，而 /api/data 里的图工作流 runs 只有元数据
-// （没有正文）。真正留着全文的是知识库那条笔记 —— knowledge_info() 每次轮询都
-// 带全文。所以这一页只需要认得**最新那份深度研究报告**。
+// 知识库里所有深度研究留下的笔记，最新的一趟在最前面 —— 服务端就是按 updated_at
+// 倒序给的（tools/knowledge.py 的 _select），所以"最新"这件事不用这一页自己排。
+// 这一页的记录列表就是它。
+function researchNotes(){
+  const notes = ((D || {}).knowledge_info || {}).notes || [];
+  return notes.filter(n => String(n.title || "").startsWith(RESEARCH_NOTE_PREFIX));
+}
+
+// 这一页该显示哪一份报告，按这个顺序定：
+//   1. 刚跑完的这一趟 —— 正文在 digest 里，列表里那条笔记正是它自己写的，认它；
+//   2. 你在记录列表上点的那一份 —— 就算正在跑，那也是你点名要看的；
+//   3. 谁也没点，就跟着最新那份走（刷新页面之后靠的就是它）。
+//
+// 第 3 条**在跑的时候必须闭嘴**：这一趟的报告还没落库，"最新"是上一趟的，画出来
+// 会像是这一趟已经跑完了。
 //
 // 不按记下来的 note_id 找：那个 id 是**跑完之后**才写进浏览器的，跑到一半刷新、
-// 或者换台机器打开，手里就什么都没有 —— 而报告明明躺在知识库里。列表本身就是
-// updated_at 倒序（tools/knowledge.py 的 list_notes），所以第一个匹配的就是最新的
-// 那一趟；这一趟跑完了，它自然就成了新的第一个。
+// 或者换台机器打开，手里就什么都没有 —— 而报告明明躺在知识库里。
 function researchNote(){
-  // 正在跑的这一趟还没落库：这时候"最新"是上一趟的报告，画出来会像是这一趟已经
-  // 跑完了。报告栏那句"还没有报告"才是实话。
+  const notes = researchNotes();
+  if (graphRun.digest) return notes[0] || null;
+  const picked = researchPick ? notes.find(n => n.id === researchPick) : null;
+  if (picked) return picked;
   if (graphRun.running) return null;
-  const notes = ((D || {}).knowledge_info || {}).notes || [];
-  return notes.find(n => String(n.title || "").startsWith(RESEARCH_NOTE_PREFIX)) || null;
+  return notes[0] || null;
+}
+
+// 以前的报告，一行一份（最新的在最前面）。在这之前这一页只认最新那份，想回头看
+// 上周那一趟得去知识库里翻。
+//
+// 只有一份的时候不画：那时候"之前的记录"没有意义，一行孤零零的按钮只是噪音。
+function researchHistory(){
+  const notes = researchNotes();
+  if (notes.length < 2) return "";
+  const shown = researchNote();
+  return `<div class="dr-hist">${notes.map(n => {
+    // 标题是 ops/deep_research.py 的 _note_title 写的「深度研究：主题 · 日期」。
+    // 这一行已经待在深度研究页里了，再把那个前缀带一遍是重复的。
+    const label = String(n.title || "").slice(RESEARCH_NOTE_PREFIX.length + 1);
+    const on = shown && shown.id === n.id ? " on" : "";
+    return `<button class="dr-hist-row${on}" title="${esc(n.title)}"
+      onclick="researchPickNote('${esc(n.id)}')">${esc(label)}</button>`;
+  }).join("")}</div>`;
+}
+
+// 点一下记录：报告换成那一份；再点一下取消，回到跟着最新那份走。
+// 这一页在 render() 里是**跳过重建**的（见文件头），所以换完得自己重画一次。
+function researchPickNote(id){
+  researchPick = (researchPick === id) ? "" : id;
+  repaintResearch();
 }
 
 function researchReportText(){
@@ -101,13 +139,27 @@ function researchLive(){
 //
 // 比较的是**正文**而不是 digest：刷新回来时 digest 是空的，正文是从知识库那条
 // 笔记读的，只认 digest 的话报告永远画不出来（空 == 空）。
+//
+// 正文后面还挂着"这是知识库里哪一条"（那句「也存了一份：《…》」）。它也得算进
+// 签名里：一趟跑完的头几秒，它写进知识库的那条笔记还没跟着 5 秒一次的轮询走到
+// 这一页，那时候正文已经是新的了，只比正文的话那句名字会一直停在**上一条**报告
+// 上，再也不重画。
 function repaintResearch(){
   const cards = document.getElementById("research-cards");
   if (cards) cards.innerHTML = researchCards();
+  // 记录列表和报告各自判各自的重画。拿整段 HTML 当签名：多了一条记录、或者换了
+  // 选中，列表都会跟着变，而这两件事都不一定会改到报告正文。
+  const hist = document.getElementById("research-history");
+  const histHtml = researchHistory();
+  if (hist && histHtml !== researchHistPainted){
+    researchHistPainted = histHtml;
+    hist.innerHTML = histHtml;
+  }
   const report = document.getElementById("research-report");
   const text = researchReportText();
-  if (report && text !== researchPainted){
-    researchPainted = text;
+  const mark = text + "\u0000" + (((researchNote() || {}).id) || "");
+  if (report && mark !== researchPainted){
+    researchPainted = mark;
     report.innerHTML = researchReport();
   }
   const btn = document.getElementById("research-go");
@@ -189,6 +241,9 @@ async function startResearch(){
   if (!topic) return;
   researchTopic = topic;
   localStorage.setItem("knowme_research_topic", topic);
+  // 新的一趟开跑，报告栏回到"这一趟还没有报告"：记录列表里那些是以前的，选的还
+  // 停在上一份上就会看着像这一趟已经出结果了。
+  researchPick = "";
   // 预算跟着这一趟走，跟主题是同一条路：服务端只把它交给声明了 budget 形参的 runner，
   // 也就是只有深度研究会收到。
   await runGraph(RESEARCH_WORKFLOW, topic, repaintResearch, researchBudgetOut());
@@ -252,7 +307,9 @@ function deepResearchView(){
   </section>
   <div class="dr-grid">
     <section><h2>每一轮</h2><div id="research-cards">${researchCards()}</div></section>
-    <section><h2>报告</h2><div id="research-report">${researchReport()}</div></section>
+    <section><h2>报告</h2>
+      <div id="research-history">${researchHistory()}</div>
+      <div id="research-report">${researchReport()}</div></section>
   </div>`;
 }
 
