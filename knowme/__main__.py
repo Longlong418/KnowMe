@@ -17,12 +17,10 @@ import sys
 def main() -> None:
     args = sys.argv[1:]
     if not args:
-        from knowme.gateway.cli import main as cli_main
-
-        cli_main()
+        from knowme.ops.web import main as web_main
+        web_main()
     elif args[0] == "web":
         from knowme.ops.web import main as web_main
-
         web_main()
     elif args[0] == "connections":
         from knowme.integrations import cli_main
