@@ -1,5 +1,183 @@
 # KnowMe 开发文档
 
+## Phase 47：门控查了什么、查到没查到，页面上看得见（2026-09-28）
+
+### 一、你要的
+
+> 现在门控是否触发能看到，但 query 的关键词、和命中结果还不透明。我希望再透明一些
+> 运维里的这个检索门控——哪些对话使用了记忆 也要详细
+
+你定的两条显示口径：
+
+- **检索词写在那一行上**（不点开就看得见），**命中的那几条折进「详情」**；
+- 运维页那张「检索门控——哪些对话使用了记忆」表**也要详细**。
+
+### 二、这一轮不是加新能力，是捡回两个被扔掉的东西
+
+我先把链路查清楚了再动手。`retrieval_gate.should_retrieve()` 本来就返回
+**三元组** `(retrieve, query, reason)` —— 检索词是**算出来了的**，只是在
+`memory/__init__.py` 那一行只把 `decision` 和 `reason` 放进事件，`query` 就死在
+那儿了。命中的那几条更远：`facts.search()` / `episodes.search()` 的结果被
+`"\n".join()` 成一段字符串直接喂给模型，**从头到尾没有第二个人看过它**。
+
+所以这一轮没有新的模型调用、没有新的存储、也没有新的接口 —— 只是把已经存在但被
+丢掉的两个信息**接到页面上**。
+
+一句话说清那个差别：以前页面能告诉你「门控工作了」，现在能告诉你「**门控为你干了
+什么**」。
+
+### 三、改法：一个 notify 多带两个键
+
+改动只有一个真正的数据源，`knowme/memory/__init__.py` 的 `gated_retrieve`：
+
+```python
+retrieve, query, reason = retrieval_gate.should_retrieve(...)
+if not retrieve:                       # 没查，就没有命中可言
+    notify("gate", {"decision": "skip", "reason": reason, "query": query})
+    return ""
+facts = self.facts.search(query, self.settings.retrieval_top_k)
+episodes = self.episodes.search(query, top_k=3)
+notify("gate", {"decision": "retrieve", "reason": reason, "query": query,
+                "hits": [{"kind": "事实", "text": h} for h in facts]
+                      + [{"kind": "经历", "text": h} for h in episodes]})
+return "\n".join(facts + episodes)     # ← 喂给模型的那段字符串，一个字节都没变
+```
+
+三个要点，每一条都有测试钉着：
+
+1. **喂给模型的那段文本逐字节不变**。这是最要紧的一条：「透明化」顺手改掉模型的
+   输入，是这一轮最可能犯、也最难发现的错。所以 `test_gate_transparency.py` 里
+   把改造前的算法（两个 store 各自拿出来拼一段）独立写了一遍，要求两边相等 ——
+   而且**先断言这条查询真的查到了东西**，否则比的是两个空串，"相等"毫无意义。
+2. **retrieve 那一支的 notify 从"查之前"挪到了"查之后"** —— 不挪就没法报命中。
+   skip 那一支原地不动（它本来也没什么可报的）。挪动的唯一代价：搜索本身抛异常时
+   这条事件不会留下 —— 那种情况下整轮本来就挂了。
+3. **`hits` 带上来源标签**（`事实` / `经历`）。"这条是你长期的事实、那条是某一天的
+   经历"本身就是透明的一部分，而两个 store 的字符串形状不一样（一个 `[主题] 正文`、
+   一个 `(日期) 摘要`），不标就只能靠猜。
+
+为什么把 `hits` 塞进事件是安全的（这条是**量出来的**，不是估的）：三处转发都是
+**整份 event 原样抄**（`ops/tracing.py` 写轨迹、`ops/web/data.py` 给 `/api/data`、
+`ops/web/runtime.py` 发 SSE），所以新键自动就流到了。代价方面，`/api/data` 本来
+就在为最近 50 轮**每轮带全部工具输出**，而实测本机 24 条事实平均 73 字、9 条经历
+平均 159 字，一次完整检索 7 条约 800 字 —— 相对之下是零头。我一开始担心 5 秒轮询
+被撑大，读了真实 `state.db` 才确定不是问题。
+
+### 四、文案：两处实现，逐字节相同
+
+规矩跟 Phase 28 一样：**直播那一步是浏览器自己拼的**（`render.js` 收到 SSE 就记一步，
+因为服务端存好的那份要等这一轮跑完才到），**回看读的是 `meta.steps`**
+（`core/runtime.py`）。所以同一句话要在 `core/runtime.py` 的 `gate_label/gate_detail`
+和 `static/js/trace.js` 的 `stepLabel/stepDetail` 里**各写一份**，由
+`evals/deterministic/test_trace_wording.py` 那个现成的 node harness 跑真 JS，
+把两边**逐字节**钉在一起。
+
+画出来长这样：
+
+```
+那一行（不点开就看得见）：门控 · 要查记忆 ·「钠离子」 · 命中 4 条
+
+详情（默认折起来）：
+  问的是以前聊过的事          ← 那句 reason，还在第一行
+  检索词：钠离子
+  命中 4 条：
+  1. 事实 · [钠离子] 钠离子电池的正极路线还没定…
+  2. 事实 · [钠离子] 电池的成本目标是每千瓦时低于 300 元
+  3. 事实 · [钠离子] 产业化在 2026 年提速，中试线已经跑通
+  4. 经历 · (2026-09-01) 上次聊过钠离子电池装车的时间表
+  …还有 2 条没显示              ← 只在超过 5 条时才出现
+```
+
+**为什么是 24 / 40 / 5 这三个数**：它们是按 `core/runtime.py` 的
+`_STEP_DETAIL_MAX = 400` 凑出来的。最坏情况（最长 reason + 最长检索词 + 7 条命中、
+每条都顶到截断）约 347 字，进得去。写死这个 fit 是有原因的 —— 详情被
+`record_step` **静默**切掉尾巴时，页面上没有任何痕迹，你会以为"就查到这几条"。
+截断比看不见更糟。（所以那条测试断言的是 `len(detail) <= 400`，不是"看起来挺短"。）
+
+### 五、旧记录一字不改
+
+新增的字段全部**在缺少时退回今天的渲染**：
+
+- 事件里没有 `query` / `hits` ⇒ 那一行还是光秃秃的「要查记忆」，详情还是只写那句
+  `reason`；
+- 所以**上线之前跑过的对话、以及所有旧 trace 文件，渲染出来和现在逐字节一样**。
+  不迁移、不回填，也不会出现"历史突然变了个样"。
+
+这跟 Phase 43/44/45 处理旧数据的方式是一条线：数据不在，就**如实**按不在的样子显示。
+
+### 六、动了哪些地方
+
+后端 3 处、前端 3 处、CLI 2 处：
+
+| 文件 | 改什么 |
+|---|---|
+| `knowme/memory/__init__.py` | 上面那段（唯一的数据来源） |
+| `knowme/core/runtime.py` | 新增 `gate_label()` / `gate_detail()` 两个模块级函数；`captured["gate"]` 多两个键；`_step` 改用这两个函数 |
+| `knowme/ops/web/runtime.py` | SSE 的 `done` payload 也带上 query/hits（见下面「量出来的一件事」） |
+| `knowme/ops/static/js/trace.js` | `stepLabel` 的 gate 分支加后缀；**新增** `stepDetail` 的 gate 分支；新增 `gateHitsCell()` 给运维页那一格 |
+| `knowme/ops/static/js/render.js` | 直播分支留住 `query`/`hits`，并改用 `stepDetail("gate", ev)`（以前它直接传 `ev.reason`，绕过了共享表） |
+| `knowme/ops/static/js/views.js` | 运维页那张表加「检索词」「命中」两列 |
+| `knowme/ops/static/style.css` | `.gate-hits` 那一族的样式（那一格在 `<td>` 里，不给宽度上限，一条长命中会把整张表撑歪、把「原因」列挤出屏幕） |
+| `knowme/gateway/cli.py`、`knowme/ops/show_trace.py` | 事件带 query 时跟着多说一句（**必须写成"有才加"**，否则 `test_show_trace.py` 那条精确行断言会红） |
+
+**运维页那一格刻意复用 `stepDetail`**（掐掉第一行的 reason —— 它旁边那一列已经有
+了），所以那张表和时间线**不可能各说各的**：以后改文案只有一处会漏。
+
+### 七、量出来的一件事：`done` payload 那一行，其实不是为了直播卡片
+
+我原本的理由是这样的：`render.js` 的 `done` 分支做 `Object.assign(pending, ev)`，
+会把 `pending.gate` **整个换掉** —— 所以如果 `web/runtime.py` 只白名单两个键，你刚
+在直播里看到的命中会在跑完那一刻当场消失。
+
+**我把那一行改回两键，探针照样 27/27 全绿。** 原因是同一个 `done` payload 里还带着
+`steps`，而时间线画的正是 `steps` —— 它一起被换了，所以卡片看起来完全正确。
+
+那还留着它干什么？留着是因为**非流式的 `/api/chat` 那一扇门**（脚本、curl 用的）
+拿到的就是这个 payload，它是那条路上对"这一轮门控干了什么"的**唯一**描述，而
+`decision`/`reason` 本来就在里面。所以注释写的是"这条路也该答得出查了什么"，不是
+"它救了直播卡片"。**一句话写错的注释比没有注释更坏** —— 下一个人会照着它去改代码。
+
+### 八、验证
+
+- `evals/deterministic`：**854 passed / 62 skipped / 0 failed**（基线 847/62，
+  这一轮 +7 条）。新增 `test_gate_transparency.py` 六条：payload 带 query 和带来源
+  标签的 hits；喂给模型的字符串逐字节没变；没有 query/hits 的事件渲染和从前一样；
+  skip 不报 hits；最坏情况塞得进 400；一个真回合的 `meta.gate` 和 `meta.steps[0]`。
+- `ruff check knowme evals`：仍然只剩 `knowme/__main__.py:19` 那条 `SIM114`
+  （那是你自己 `9e6f13a` 留下的，不是这一轮的），没有新增。
+- 真 Chrome 探针 `.claude/probe_gate.py`：**27/27**（临时 home + 随机端口 + 假模型
+  端点，**绝不碰真实 `.knowme`**）。四节：3 条事实 + 1 条经历 ⇒ 那一行出现检索词和
+  「命中 4 条」、详情 4 行前 3 条标「事实」、最后一条标「经历」、默认折着；**直播
+  过程中就读得到**（下详）；运维页那张表里查得到同一份；换一个库里没有的词 ⇒
+  「命中 0 条」+「没有命中任何记忆」；手工塞一条旧形状的 gate meta、真 `reload()`，
+  那一行仍是光秃秃的「要查记忆」。全程零 JS 报错。
+- **反向验证**（这是唯一能证明测试真的在测东西的一步）：
+  - `git stash push -- knowme/memory/__init__.py` ⇒ 新测试 3 条红、既有断言 3 条红；
+  - `git stash push -- render.js views.js` ⇒ 探针 5 条红。
+
+**探针里那条"只在直播窗口里才看得见"的检查，是这次唯一一个第一遍假绿的地方。**
+第一版探针跑完之后才读页面 —— 那时候 `done` 已经把整张卡片换成服务端存的
+`steps` 了，所以 `render.js` 那半份实现**删掉都不影响结果**（stash 掉它，探针照样
+全绿）。修法是让假模型**在第一个字之前停 3 秒**，在这 3 秒里采一次样：卡片有
+`.steps` 但还没有 `.meta.tele` 页脚 = 这一轮还没跑完，这时候读到的字只可能来自浏览器
+那一份实现。改完再 stash `render.js`，那条红了 —— 这才叫测到了。
+
+同样的坑还有一个小的：`send()` 原本用 `#dsend` 的 `disabled` 当"这一轮跑完了"的
+信号，而那个按钮**从头到尾都不禁用** ⇒ 它立刻返回，后面读到的还是上一轮的卡片
+（五条假红）。现在等的是服务端的轮数（`/api/data` 的 `turns` 是按当天轨迹重建的，
+落进轨迹就是这一轮结束了）。
+
+### 九、这一轮我差点写错的地方（留给下一个人）
+
+- **`.chatlog` 是"这个会话的全部轮次"的容器**，一轮一张 `.card`。`read_steps`
+  第一版取的是"最后一个 `.chatlog` 里的 `.step`[0]" —— 在只有两轮的时候它就是第一
+  轮的第一步，所以新那一轮根本读不到。要按"最后一个含 `.step` 的 `.card`"取。
+- **`gate_label` 拼出来的那截只是 label**，页面上那一行还有渲染器加的前缀
+  （`门控 · `，来自 `STEP_TITLES`）。拿存下来的 label 和页面上的整行做相等比较，
+  必然不等 —— 要么比整行，要么两边都掐掉前缀。
+- 探针里那条断言我第一版写成 `old["label"] == "要查记忆"`，红了之后**先怀疑代码**；
+  其实红的是断言。量出来的东西和写死的东西对不上时，先看哪一个才是真相。
+
 ## Phase 46：两个"打杂的模型"可以住在别人家（2026-09-28）
 
 ### 一、你问的
