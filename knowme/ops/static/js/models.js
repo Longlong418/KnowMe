@@ -50,7 +50,9 @@ async function loadModelList(){
 let catFilter = {q: "", free: false, tools: false};
 
 function modelRow(m, st){
-  const cur = m.id === st.model, curGate = m.id === st.small_model;
+  // "Is this the gate" now asks the role, not the small model — they stopped
+  // being the same thing the moment the gate could name its own provider.
+  const cur = m.id === st.model, curGate = m.id === ((st.roles || {}).gate || {}).effective_model;
   const isPinned = (st.pinned || []).some(p => p.provider === st.provider && p.model === m.id);
   const price = m.free ? "免费" : (m.price_out != null ? `$${m.price_in}/$${m.price_out} / 百万 Token` : "");
   const tags = [price, m.context ? Math.round(m.context/1000) + "k 上下文" : ""]
@@ -138,16 +140,18 @@ function renderCatalogList(){
   list.innerHTML = h;
 }
 
-// One-click model switch: posts to /api/providers so the provider/model pair
-// is validated and applied by the integrations layer. Keeps the other slot
-// (main vs gate) as-is. Live for the next turn.
+// One-click model switch. The two slots go to DIFFERENT endpoints on purpose:
+// the main model is a field of the active provider (/api/providers), while the
+// gate is a global setting that points at a provider (/api/settings) — the one
+// place the 角色模型 card writes. Two writers for one concept is how they drift.
 async function switchModel(id, asGate){
   const st = (D && D.settings) || {};
   const msg = document.getElementById("free-switch-msg");
   if (msg) msg.textContent = "正在切换…";
-  const payload = {provider: st.provider,
-    model: asGate ? st.model : id, small_model: asGate ? id : st.small_model};
-  const r = await postJSON("/api/providers", payload);
+  const r = asGate
+    ? await postJSON("/api/settings", {gate_provider: st.provider, gate_model: id})
+    : await postJSON("/api/providers",
+        {provider: st.provider, model: id, small_model: st.small_model});
   if (!r.error){ editing = false; modelCatalog = null; await refresh(); }
   if (msg) msg.textContent = r.error ? ("错误：" + r.error)
                                      : (asGate ? "门控模型现为 " : "主模型现为 ") + id + "。从下一条消息开始生效。";
@@ -280,7 +284,7 @@ function modelsGrid(d){
     </div>
     <div class="mw-list">${providers.map((p, i) => providerRow(p, st, i)).join("")}</div>
     <div class="mw-detail" id="prov-detail"></div>
-  </div>`;
+  </div>` + rolesCard(st);
 }
 
 // One register line. Numbered like a card index — the number is what makes a
@@ -365,8 +369,7 @@ function providerPane(p){
         : `<label class="fld"><span>Base URL <span class="meta">（自定义服务商的端点，随时可改）</span></span>
         <input type="text" id="pm-base-url" value="${escAttr(baseField.value || "")}" autocomplete="off" onfocus="markEditing()"></label>`) : ""}
       ${current ? `
-      ${renderModelPicker("pm-model", "主模型（运行循环；需要工具调用能力）", st.model || "")}
-      ${renderModelPicker("pm-small-model", "门控 / 摘要模型", st.small_model || "")}` : ""}
+      ${renderModelPicker("pm-model", "主模型（运行循环；需要工具调用能力）", st.model || "")}` : ""}
     </div>
     <div class="mw-pane-f">
       <button class="save" id="pm-save" onclick="saveProviderModal('${escAttr(p.key)}')">保存</button>
@@ -557,8 +560,9 @@ let _modalModels = [];
 let _activeModelPicker = null;
 let _outsidePickerListener = false;
 
-// The model fields of whichever modal is open.
-const PROVIDER_PICKERS = ["pm-model", "pm-small-model"];
+// The model fields of whichever sheet is open. Only the main model: the gate
+// and summary models live in their own card, which does not use this picker.
+const PROVIDER_PICKERS = ["pm-model"];
 const ADD_PROVIDER_PICKERS = ["ap-model", "ap-small-model"];
 
 // A model id that is NOT in this endpoint's own catalog is how `zhiyao` ended up
@@ -584,7 +588,7 @@ function unlistedModelNotice(bad, retryCall){
   const names = _modalModels.map(m => m.id);
   const shown = names.slice(0, 8).join("、") + (names.length > 8 ? " 等" : "");
   return `这个端点的模型列表里没有 <b>${esc(bad.value)}</b>，它有的是：${esc(shown)}。`
-    + `填错了的话，门控（走小模型）每一轮都会报错。`
+    + `填错了的话，用到它的那些轮次都会报错。`
     + ` <button class="save ghost conn-force" onclick="${retryCall}">确实存在，仍然保存</button>`;
 }
 
@@ -765,8 +769,12 @@ async function saveProviderModal(provider, confirmed){
         return;
       }
     }
+    // Only the main model. The gate/summary models are NOT a property of a
+    // provider — they are their own card (角色模型 below the grid), so this
+    // dialog must not send small_model at all: `?? ""` on a field that no
+    // longer exists would clear the roles' fallback every time you re-saved
+    // the provider you are on.
     payload.model = document.getElementById("pm-model")?.value ?? "";
-    payload.small_model = document.getElementById("pm-small-model")?.value ?? "";
   }
   await submitProviderModal(provider, payload, "pm-save");
 }
@@ -775,4 +783,169 @@ async function saveProviderModal(provider, confirmed){
 // models when none are passed (keeps the key field if one was just typed).
 async function makeCurrentProvider(provider){
   await submitProviderModal(provider, modalKeyPayload(provider), "pm-make-current");
+}
+
+// ── 角色模型：门控和摘要各自的服务商 + 模型 ──────────────────────────────────
+// The gate ("does this turn need memory at all?") and the summariser ("compress
+// this conversation, and distil finished ones into facts") are two side jobs
+// that may each run on a provider and a model of their own — the rule, including
+// what an empty choice falls back to, is core/models.py:role_runs_on.
+//
+// They are NOT a property of a provider, which is why they get a card of their
+// own under the grid instead of a field in the sheet, and why they are saved
+// through /api/settings (a global setting that POINTS AT a provider) rather
+// than /api/providers (that provider's own fields).
+const ROLE_ROWS = [
+  ["gate", "门控", "每一轮先判断这轮要不要翻记忆"],
+  ["summary", "摘要", "对话太长要压缩、聊天沉淀成长期记忆"],
+];
+
+// A provider's model list, fetched once. This card is painted on every 5s poll
+// and a paint must cost nothing — the same job _modalModelsFor does for the
+// sheet. An endpoint that will not list is remembered as an empty list, so we
+// stop asking it every 5 seconds.
+let _roleModels = {};
+let _roleModelsBusy = {};
+
+function rolesCard(st){
+  const roles = st.roles || {};
+  const rows = ROLE_ROWS.map(([key, label, hint]) =>
+    roleRow(key, label, hint, st, roles[key] || {})).join("");
+  // Fill the model <select>s from the providers they point at — off the paint
+  // path, and only for a provider whose list we do not have yet.
+  const wanted = ROLE_ROWS
+    .map(([key]) => roles[key] || {})
+    .map(info => info.provider || info.effective_provider || st.provider || "")
+    .filter(Boolean);
+  setTimeout(() => wanted.forEach(loadRoleModels), 0);
+  return `<h2>角色模型 <span class="meta" style="font-weight:400">——这两件事可以用和主模型不同的服务商</span></h2>
+    <div class="card">
+      ${rows}
+      <div class="mw-pane-f">
+        <button class="save" id="roles-save" onclick="saveRoles()">保存</button>
+        <span class="meta" id="roles-msg"></span>
+      </div>
+    </div>`;
+}
+
+// One role: which provider, which model, and — the part you cannot guess from
+// the two boxes — what that currently means in practice.
+function roleRow(key, label, hint, st, info){
+  const rawProvider = info.provider || "";
+  const rawModel = info.model || "";
+  // Where "follow" lands today. Empty provider = the active one; empty model =
+  // that provider's own cheap default.
+  const modelProvider = rawProvider || st.provider || "";
+  const fell = info.degraded
+    ? ` <span class="srcpill apple">你选的这家现在用不了（没配密钥，或名字不对）——实际跑的是上面这家</span>`
+    : "";
+  return `<div class="role-row">
+    <div class="role-head">
+      <span class="role-name">${esc(label)}模型</span>
+      <select id="role-${key}-provider" onfocus="markEditing()"
+        onchange="roleProviderChanged('${key}')">${roleProviderOptions(st, rawProvider)}</select>
+      <select id="role-${key}-model" data-built="${escAttr(rawModel)}"
+        onfocus="markEditing()">${roleModelOptions(modelProvider, rawModel)}</select>
+    </div>
+    <div class="role-now">现在是 ${esc(info.effective_provider || "")} · ${esc(info.effective_model || "")}
+      —— ${esc(hint)}。${fell}</div>
+  </div>`;
+}
+
+// The provider list: usable ones, plus whatever is already saved — an option
+// list that cannot represent the current value turns the next save into a
+// silent edit of a setting the page could not show.
+function roleProviderOptions(st, raw){
+  const all = (D && D.providers) || [];
+  const usable = all.filter(p => providerCardStatus(p, st) === "enabled").map(p => p.key);
+  if (raw && !usable.includes(raw)) usable.unshift(raw);
+  const follow = `<option value=""${raw ? "" : " selected"}>跟随当前服务商（${esc(st.provider || "")}）</option>`;
+  return follow + usable.map(key => {
+    const p = all.find(x => x.key === key);
+    const bad = !p || providerCardStatus(p, st) !== "enabled" ? "（不可用）" : "";
+    return `<option value="${escAttr(key)}"${key === raw ? " selected" : ""}>${esc(key)}${bad}</option>`;
+  }).join("");
+}
+
+// The model list of ONE provider. The first entry is 「跟随」, which is a real
+// setting and not a placeholder: an empty model means "that provider's own
+// default", and it is what makes four empty variables behave exactly as before.
+function roleModelOptions(provider, raw){
+  const known = _roleModels[provider] || [];
+  const opts = [`<option value=""${raw ? "" : " selected"}>跟随该服务商的默认小模型</option>`];
+  known.forEach(m => {
+    const id = m.id || "";
+    if (id) opts.push(`<option value="${escAttr(id)}"${id === raw ? " selected" : ""}>${esc(id)}</option>`);
+  });
+  // An id this endpoint does not list — hand-written, or simply not advertised.
+  // Keeping it on screen is the difference between "I see what is set" and
+  // "saving quietly replaced it with 跟随".
+  if (raw && !known.some(m => (m.id || "") === raw)){
+    opts.push(`<option value="${escAttr(raw)}" selected>${esc(raw)}（不在目录里）</option>`);
+  }
+  return opts.join("");
+}
+
+async function loadRoleModels(provider){
+  if (!provider || _roleModels[provider] || _roleModelsBusy[provider]) return;
+  _roleModelsBusy[provider] = true;
+  try {
+    const r = await (await fetch("/api/models?provider=" + encodeURIComponent(provider))).json();
+    _roleModels[provider] = r.models || [];
+  } catch(e){
+    _roleModels[provider] = [];
+  }
+  _roleModelsBusy[provider] = false;
+  fillRoleModels(provider);
+}
+
+// The list arrived; put it in the boxes that are waiting for it. Only those:
+// a row pointing at another provider is untouched, and so is a box you already
+// picked in — a 10-second fetch must not overwrite what you did meanwhile.
+function fillRoleModels(provider){
+  ROLE_ROWS.forEach(([key]) => {
+    const pSel = document.getElementById(`role-${key}-provider`);
+    const mSel = document.getElementById(`role-${key}-model`);
+    if (!pSel || !mSel || (pSel.value || "") !== provider) return;
+    const built = mSel.dataset.built || "";
+    if (mSel.value !== built) return;
+    mSel.innerHTML = roleModelOptions(provider, built);
+    mSel.value = built;
+  });
+}
+
+// Switching a row's provider starts its model choice over. Carrying an id across
+// is how `claude-*` gets sent to xAI — and the gate fails OPEN, so the mistake
+// would show up as "memory is searched on every single turn", not as an error.
+function roleProviderChanged(key){
+  const pSel = document.getElementById(`role-${key}-provider`);
+  const mSel = document.getElementById(`role-${key}-model`);
+  if (!pSel || !mSel) return;
+  const st = (D && D.settings) || {};
+  const provider = pSel.value || st.provider || "";
+  if (_roleModels[provider]){
+    mSel.dataset.built = "";
+    mSel.innerHTML = roleModelOptions(provider, "");
+    mSel.value = "";
+    return;
+  }
+  mSel.dataset.built = "";
+  mSel.innerHTML = `<option value="">正在加载模型…</option>`;
+  loadRoleModels(provider);
+}
+
+async function saveRoles(){
+  const msg = document.getElementById("roles-msg");
+  const payload = {};
+  ROLE_ROWS.forEach(([key]) => {
+    payload[`${key}_provider`] = document.getElementById(`role-${key}-provider`)?.value ?? "";
+    payload[`${key}_model`] = document.getElementById(`role-${key}-model`)?.value ?? "";
+  });
+  if (msg) msg.textContent = "正在保存…";
+  const r = await postJSON("/api/settings", payload);
+  if (r.error){ if (msg) msg.textContent = "错误：" + r.error; return; }
+  editing = false;
+  await refresh();
+  const after = document.getElementById("roles-msg");
+  if (after) after.textContent = "已保存。从下一条消息开始生效。";
 }

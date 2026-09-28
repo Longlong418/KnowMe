@@ -17,6 +17,7 @@ from pathlib import Path
 import anthropic
 
 from knowme.config import Settings
+from knowme.core.models import Roles
 from knowme.memory import consolidation, retrieval_gate
 from knowme.memory.episodic.store import SqliteEpisodeStore
 from knowme.memory.procedural.loader import SkillLoader
@@ -43,7 +44,7 @@ def bundled_skill_dirs() -> list[Path]:
 
 class Memory:
     def __init__(self, conn: sqlite3.Connection, settings: Settings, client: anthropic.Anthropic,
-                 episode_store=None, agent_id: str = "default"):
+                 episode_store=None, agent_id: str = "default", roles: Roles | None = None):
         # episode_store: inject an already-built store (the dashboard caches ONE
         # NotionEpisodeStore process-wide — its constructor hits the network,
         # so building one per Memory would re-query Notion on every poll).
@@ -56,6 +57,12 @@ class Memory:
         self.settings = settings
         self.client = client
         self.agent_id = agent_id
+        # The gate and the summariser may each run on another provider (see
+        # core/models.py:roles_for). Not given any, both stay exactly what they
+        # always were — this client and this small model — which is what every
+        # caller that builds a Memory without a live turn gets, including the
+        # dashboard's display-only one that passes client=None on purpose.
+        self.roles = roles or Roles(client, settings.small_model, client, settings.small_model)
         self.facts = self._make_fact_store(conn, settings, agent_id)
         self.episodes = episode_store if episode_store is not None else self._make_episode_store(conn, settings, agent_id)
         self.skills = SkillLoader([*bundled_skill_dirs(), settings.home / "skills"])
@@ -105,7 +112,7 @@ class Memory:
     # ---- retrieval (gated — see retrieval_gate.py for why)
     def gated_retrieve(self, message: str, notify=None) -> str:
         retrieve, query, reason = retrieval_gate.should_retrieve(
-            self.client, self.settings.small_model, message
+            self.roles.gate_client, self.roles.gate_model, message
         )
         if notify:
             notify("gate", {"decision": "retrieve" if retrieve else "skip", "reason": reason})
@@ -220,8 +227,8 @@ class Memory:
     def maybe_consolidate(self, notify=None) -> None:
         new_facts = consolidation.consolidate_if_due(
             self.conn,
-            self.client,
-            self.settings.small_model,
+            self.roles.summary_client,
+            self.roles.summary_model,
             self.settings.consolidate_every,
             self.facts,
             self.episodes,

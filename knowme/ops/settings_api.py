@@ -13,8 +13,13 @@ import shutil
 from knowme import integrations
 from knowme.config import load_settings
 from knowme.core import custom_providers
-from knowme.core.models import PROVIDERS
+from knowme.core.models import PROVIDERS, role_runs_on
 from knowme.ops import catalog
+
+# The two side jobs that may each run on their own provider and model.
+# NOT triage: that one is not a role here, it keeps using KNOWME_SMALL_MODEL
+# (it is off unless KNOWME_GRAPH_WORKFLOWS is on).
+ROLES = ("gate", "summary")
 
 
 def custom_provider_action(payload: dict) -> dict:
@@ -102,6 +107,35 @@ def pin_action(payload: dict) -> dict:
     return {"ok": True, **settings_info()}
 
 
+def roles_info(s) -> dict:
+    """What each role runs on: the raw choice, and where it actually lands.
+
+    Both halves are needed by the page. The raw value is what the role's two
+    <select>s must show, because "" means 「跟随当前服务商」 — showing the
+    effective model there instead would turn "follow" into a pinned choice the
+    moment anyone presses save without touching it. The effective pair is what
+    the line under them prints, so the page can say what "follow" currently
+    means rather than leaving the user to guess.
+
+    `degraded` is the honest bit, and it comes from the SAME function the turn
+    uses (core/models.py:role_runs_on) — a role whose provider has no key is not
+    what will run; it quietly falls back to the main provider, because that path
+    must never raise from inside a turn. Computed here by a second copy of that
+    rule, the page would eventually print a provider the turns do not use.
+    """
+    out = {}
+    for role in ROLES:
+        name, model, degraded = role_runs_on(s, role)
+        out[role] = {
+            "provider": getattr(s, f"{role}_provider", ""),
+            "model": getattr(s, f"{role}_model", ""),
+            "effective_provider": name,
+            "effective_model": model,
+            "degraded": degraded,
+        }
+    return out
+
+
 def settings_info() -> dict:
     """Current provider/model + which keys are set — masked to last-4, never
     the full key. `pinned` is the user's curated model shortlist (the chat
@@ -135,6 +169,8 @@ def settings_info() -> dict:
         "provider": s.provider,
         "model": s.model or (prov.model if prov else ""),
         "small_model": s.small_model or (prov.small_model if prov else ""),
+        # gate/summary: each may be its own provider+model (see roles_info).
+        "roles": roles_info(s),
         "base_url": s.base_url or "",
         "custom_key_set": bool(s.api_key),
         # Ids of providers the user disabled in the Models grid; the frontend
@@ -155,10 +191,12 @@ def settings_info() -> dict:
 
 
 def apply_settings(payload: dict) -> dict:
-    """Save the remaining Settings concerns: the experimental and graph-workflows
-    toggles.
+    """Save the global Settings: the two toggles, and the two role models.
 
-    Connection fields and provider changes deliberately live in integrations.
+    Connection fields and provider changes deliberately live in integrations —
+    but the roles do NOT belong there. A role is not a property of a provider;
+    it is a global setting that POINTS AT one (that is why the same four field
+    names work no matter who is active), so it is saved here.
     """
     import os
 
@@ -167,8 +205,9 @@ def apply_settings(payload: dict) -> dict:
     if "episodic_store" in payload:
         return {"error": "episodic_store is managed in Connections"}
     env_path = find_dotenv(usecwd=True) or ".env"
-    # NOT `if toggle:` — turning it OFF sends "", which is falsy. Absent (None)
-    # means "don't touch"; "" means "switch it off".
+    # NOT `if value:` — clearing a field sends "", which is falsy. Absent (None)
+    # means "don't touch"; "" means "clear it" (toggle off, or a role back to
+    # following the active provider). Same rule for both blocks below.
     toggles = (("experimental", "KNOWME_EXPERIMENTAL"), ("graph_workflows", "KNOWME_GRAPH_WORKFLOWS"))
     for field, env_name in toggles:
         value = payload.get(field)
@@ -176,4 +215,30 @@ def apply_settings(payload: dict) -> dict:
             value = "1" if str(value).strip() else ""
             set_key(env_path, env_name, value)
             os.environ[env_name] = value
+    # The role pairs (gate/summary × provider/model). Both halves are optional;
+    # what an empty half falls back to is decided in ONE place, by the pure
+    # function that also reads them back: core/models.py:role_target.
+    for role in ROLES:
+        for half in ("provider", "model"):
+            field = f"{role}_{half}"
+            if field not in payload:
+                continue
+            value = str(payload.get(field) or "").strip()
+            env_name = f"KNOWME_{field.upper()}"
+            set_key(env_path, env_name, value)
+            os.environ[env_name] = value
+    # ...and now make it true for the agent that is already running. KnowMe keeps
+    # a Settings snapshot from construction and resolves role clients ONCE
+    # (app.py:41), so writing os.environ takes effect at the next restart unless
+    # the agent is rebuilt — and "生效于下一条消息" would simply be false.
+    # Only when one already exists: a CLI-only process must not have an agent
+    # conjured up by a settings save (same guard as integrations.apply_provider).
+    from knowme.ops import browser_agent
+
+    live = browser_agent.current() is not None or browser_agent.current_agents()
+    # A failed rebuild does NOT undo the write, so this must not be reported as
+    # "save failed" — the user would go looking for a problem in the value they
+    # just set. Say what is actually true: saved, restart needed.
+    if live and (error := browser_agent.rebuild()):
+        return {"ok": False, "error": f"已保存，但重建失败，要重启才生效：{error}"}
     return {"ok": True, **settings_info()}

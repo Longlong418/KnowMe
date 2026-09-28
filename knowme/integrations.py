@@ -676,6 +676,12 @@ def apply_provider(provider: str, *, key: str | None = None, model: str | None =
     if small_model is not None:
         updates["KNOWME_SMALL_MODEL"] = small_model
     elif switching:
+        # Still meaningful now that the gate and the summariser are their own
+        # roles: KNOWME_SMALL_MODEL is what a role FOLLOWING the active provider
+        # falls back to, so a model id belonging to the provider you just left
+        # would otherwise still be sitting there. Clearing it re-points those
+        # roles at the new provider's own default. A role that names a provider
+        # of its own is untouched — that is the point of naming one.
         updates["KNOWME_SMALL_MODEL"] = ""
     if key:
         updates[selected.key_env] = key

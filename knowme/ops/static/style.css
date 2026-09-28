@@ -1035,6 +1035,18 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 .mw-pane-f .meta{ margin:0 0 0 auto; }
 .mw-empty{ padding:40px 20px; text-align:center; font-size:13px; color:var(--ink3); }
 
+/* 角色模型：门控 / 摘要各一行——两个下拉 + 一行「现在跑在哪」的灰字。
+   The line under the boxes is not decoration: 「跟随当前服务商」 is a real
+   setting, so what it currently resolves to has to be readable somewhere. */
+.role-row{ display:flex; flex-direction:column; gap:5px; padding:11px 0; border-top:1px solid var(--line); }
+.role-row:first-child{ border-top:none; padding-top:2px; }
+.role-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink2); }
+.role-head .role-name{ min-width:64px; color:var(--ink); }
+.role-row select{ background:var(--bg); border:1px solid var(--line2); border-radius:var(--radius);
+  padding:8px 10px; color:var(--ink); font-size:13px; outline:none; max-width:280px; }
+.role-row select:focus{ border-color:var(--accent); }
+.role-now{ font-size:11.5px; color:var(--ink3); }
+
 /* Below this the two columns stop fitting side by side; stack them and let the
    sheet scroll with the page instead of sticking inside a short viewport. */
 @media (max-width: 980px){

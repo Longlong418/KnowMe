@@ -269,7 +269,16 @@ def resolve_models(settings: Settings) -> tuple[str, str]:
     explicitly is kept, because that is a choice, not a leak. The two are
     distinguishable exactly when the setting still equals the env string.
     """
-    provider = PROVIDERS[settings.provider]
+    provider = PROVIDERS.get(settings.provider)
+    if provider is None:
+        # Nothing to resolve against. A provider that is not (or is no longer) in
+        # the table has no default to fill a blank in with and no model families
+        # to compare against, so the only honest answer is "what settings says".
+        # Raising here is what this used to do, and it is the wrong shape for a
+        # pure helper: the ONE caller that must refuse an unknown provider is
+        # get_client — and it does, through client_for, in a message that names
+        # the choices.
+        return settings.model, settings.small_model
     chosen = {}
     for attr in ("model", "small_model"):
         value = getattr(settings, attr)
@@ -280,19 +289,51 @@ def resolve_models(settings: Settings) -> tuple[str, str]:
     return chosen["model"], chosen["small_model"]
 
 
-def get_client(settings: Settings):
-    """Build the client for settings.provider and fill in default model ids.
-    Returns anything with .messages.create(...) in the Anthropic shape."""
-    provider = PROVIDERS.get(settings.provider)
+def provider_key(provider_name: str, settings: Settings) -> str:
+    """The key that will be used for this provider — one rule, one place.
+
+    KNOWME_API_KEY (and KNOWME_BASE_URL, handled in client_for) is a single pair
+    belonging to the ACTIVE provider, because that is how the Models page writes
+    them. It applies only when asked about that provider; a second provider uses
+    its own key env. Empty string means "no key", including for a provider that
+    does not exist.
+    """
+    provider = PROVIDERS.get(provider_name)
     if provider is None:
-        raise SystemExit(f"Unknown KNOWME_PROVIDER '{settings.provider}'. "
+        return ""
+    active = provider_name == settings.provider
+    return ((settings.api_key if active else "") or os.getenv(provider.key_env, "")).strip()
+
+
+def client_for(provider_name: str, settings: Settings):
+    """Build a client for ANY provider — not only the one that is active.
+
+    The roles below (see Roles / roles_for) may run on a second provider, so
+    this takes the provider as an argument instead of reading settings.provider.
+    Nothing has to be copied or re-entered for that to work: credentials were
+    already per-provider, because every provider declares its own key_env and
+    its own endpoint.
+
+    The two explicit overrides — KNOWME_API_KEY and KNOWME_BASE_URL — are a
+    single pair belonging to the ACTIVE provider (that is how the Models page
+    writes them), so they apply only when THIS is that provider. Handing them to
+    a second one would post one lab's endpoint another lab's key.
+
+    Raises SystemExit when the provider is unknown or has no key, which is what
+    get_client always did. Callers that must not die — a turn's gate, say —
+    should go through roles_for, the one place that decides what to fall back to.
+    """
+    provider = PROVIDERS.get(provider_name)
+    if provider is None:
+        raise SystemExit(f"Unknown KNOWME_PROVIDER '{provider_name}'. "
                          f"Pick one of: {', '.join(PROVIDERS)}")
 
+    active = provider_name == settings.provider
     # .strip() so a trailing newline/space from a copy-paste doesn't corrupt the
     # auth header (headers are latin-1; a stray non-ASCII char errors cryptically).
-    api_key = (settings.api_key or os.getenv(provider.key_env, "")).strip()
+    api_key = provider_key(provider_name, settings)
     if not api_key:
-        raise SystemExit(_no_key_message(settings.provider, provider.key_env))
+        raise SystemExit(_no_key_message(provider_name, provider.key_env))
     try:
         api_key.encode("latin-1")
     except UnicodeEncodeError:
@@ -301,6 +342,24 @@ def get_client(settings: Settings):
             f"or arrow from a bad paste). Re-paste the key with no spaces or line breaks."
         )
 
+    base_url = (settings.base_url if active else None) or provider.configured_base_url()
+
+    # a hung network call must never freeze a turn silently
+    timeout = float(os.getenv("KNOWME_LLM_TIMEOUT", "120"))
+
+    if provider.kind == "anthropic":
+        import anthropic
+
+        kwargs: dict = {"api_key": api_key, "timeout": timeout}
+        if base_url:
+            kwargs["base_url"] = base_url
+        return anthropic.Anthropic(**kwargs)
+    return OpenAICompatClient(api_key=api_key, base_url=base_url, timeout=timeout)
+
+
+def get_client(settings: Settings):
+    """Build the client for settings.provider and fill in default model ids.
+    Returns anything with .messages.create(...) in the Anthropic shape."""
     # A model name belongs to the provider it was configured FOR. KNOWME_MODEL and
     # KNOWME_SMALL_MODEL are global, so code that switches provider could carry
     # anthropic's gate model to xAI, which answers
@@ -319,19 +378,107 @@ def get_client(settings: Settings):
     # own model through resolve_models() and two agents on two models stop
     # overwriting each other's choice.
     settings.model, settings.small_model = resolve_models(settings)
-    base_url = settings.base_url or provider.configured_base_url()
+    return client_for(settings.provider, settings)
 
-    # a hung network call must never freeze a turn silently
-    timeout = float(os.getenv("KNOWME_LLM_TIMEOUT", "120"))
 
-    if provider.kind == "anthropic":
-        import anthropic
+def role_target(settings: Settings, role: str) -> tuple[str, str]:
+    """The (provider, model) a role actually runs on. Pure — no client, no I/O.
 
-        kwargs: dict = {"api_key": api_key, "timeout": timeout}
-        if base_url:
-            kwargs["base_url"] = base_url
-        return anthropic.Anthropic(**kwargs)
-    return OpenAICompatClient(api_key=api_key, base_url=base_url, timeout=timeout)
+    `role` is "gate" or "summary". Both halves of the pair are optional, and
+    they fall back in this order: an empty provider follows the active one; an
+    empty model follows that provider's own cheap default (which, for the active
+    provider, is the resolved KNOWME_SMALL_MODEL — so all four variables empty is
+    one provider doing everything, exactly how it worked before roles existed).
+
+    An unknown provider degrades instead of raising. Roles are resolved on every
+    agent rebuild, so a typo in .env or a custom provider that was since removed
+    must not take the process down.
+    """
+    name = (getattr(settings, f"{role}_provider", "") or "").strip() or settings.provider
+    provider = PROVIDERS.get(name)
+    if provider is None:
+        return settings.provider, resolve_models(settings)[1]
+    model = (getattr(settings, f"{role}_model", "") or "").strip()
+    # Same guard, same reason, as resolve_models: a model id belongs to the
+    # provider it was configured FOR, and the gate FAILS OPEN — the wrong
+    # provider's id comes back as a 400, which the gate reads as "the decision
+    # failed, retrieve anyway" and reports as a normal retrieve. A silent
+    # permanent failure in the costume of a healthy decision. This now matters
+    # for a role that FOLLOWS the active provider: switch to kimi and a leftover
+    # KNOWME_GATE_MODEL=claude-haiku-* would land exactly there.
+    if model and _belongs_elsewhere(model, name):
+        model = ""
+    if model:
+        return name, model
+    if name == settings.provider:
+        return name, resolve_models(settings)[1]
+    return name, provider.small_model or provider.model
+
+
+def role_runs_on(settings: Settings, role: str) -> tuple[str, str, bool]:
+    """What a role ACTUALLY runs on — (provider, model) — and whether it fell back.
+
+    role_target is the ideal; this is the truth, degradation included, and it is
+    the truth the Models page finally shows. Without it the page would print the
+    provider you named even when that provider has no key and the turn really
+    ran on the main client — the choice would look applied and do nothing.
+
+    Two callers, one rule: roles_for (which then builds the client) and
+    roles_info (which renders it). Neither can drift from the other.
+
+    Never raises: it is reached from inside a turn, and inside a page render.
+    """
+    name, model = role_target(settings, role)
+    if name == settings.provider or provider_key(name, settings):
+        return name, model, False
+    # That provider has no key (or never existed). roles_for must not raise —
+    # SystemExit is a BaseException, so the gate's own `except Exception` would
+    # let it walk straight through and kill every message instead of failing
+    # open — so the role degrades to what it ran on before roles existed.
+    return settings.provider, resolve_models(settings)[1], True
+
+
+@dataclass(frozen=True)
+class Roles:
+    """What the two side jobs run on — a (client, model) pair each.
+
+    The loop's own model is settings.model on the active provider. These two are
+    separate because they are separate jobs, and because they are cheap: the gate
+    decides whether a turn needs memory at all, and the summariser compresses a
+    conversation that got too long and distils finished chats into durable facts.
+    Either may live on a DIFFERENT provider than the loop.
+    """
+    gate_client: object
+    gate_model: str
+    summary_client: object
+    summary_model: str
+
+
+def roles_for(settings: Settings, client) -> Roles:
+    """Decide what the gate and the summariser run on — the ONE place that does.
+
+    `client` is the active provider's client (injected by an eval, or built by
+    get_client). A role that follows the active provider reuses it verbatim:
+    building a second one would mean a ScriptedClient could not serve the gate,
+    and every eval that injects a model would silently talk to the network.
+    """
+    built: dict[str, tuple] = {}
+    for role in ("gate", "summary"):
+        name, model, _ = role_runs_on(settings, role)
+        if name == settings.provider:
+            built[role] = (client, model)
+            continue
+        try:
+            built[role] = (client_for(name, settings), model)
+        except (SystemExit, Exception):
+            # role_runs_on already handled "that provider has no key" by name.
+            # This is the last resort for everything it cannot see from here —
+            # a key with a bad character, an import that will not load — and it
+            # must not raise either, for the same reason: SystemExit is a
+            # BaseException and would kill every message instead of failing open.
+            built[role] = (client, resolve_models(settings)[1])
+    gate, summary = built["gate"], built["summary"]
+    return Roles(gate[0], gate[1], summary[0], summary[1])
 
 
 class OpenAICompatClient:

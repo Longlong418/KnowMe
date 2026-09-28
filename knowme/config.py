@@ -51,7 +51,22 @@ class Settings:
     base_url: str | None = field(default_factory=lambda: os.getenv("KNOWME_BASE_URL") or None)
     model: str = field(default_factory=lambda: os.getenv("KNOWME_MODEL", ""))
     # Cheap model used by the retrieval gate and the consolidation summarizer.
+    # The fallback cheap model for the two ROLES below. It used to be the single
+    # small model the gate and the summariser shared; now each role can name its
+    # own provider and model, and this is what fills in when one does not.
     small_model: str = field(default_factory=lambda: os.getenv("KNOWME_SMALL_MODEL", ""))
+    # Two roles may run somewhere else entirely: a cheap gateway for the gate, a
+    # summariser from whichever provider does summaries best. Each role is a
+    # (provider, model) pair and both halves are optional — an empty provider
+    # follows KNOWME_PROVIDER, an empty model follows that provider's own cheap
+    # default. All four empty = one provider for everything, i.e. exactly how it
+    # worked before. Resolution, and every fallback, lives in ONE place:
+    # core/models.py:roles_for.
+    gate_provider: str = field(default_factory=lambda: os.getenv("KNOWME_GATE_PROVIDER", ""))
+    gate_model: str = field(default_factory=lambda: os.getenv("KNOWME_GATE_MODEL", ""))
+    summary_provider: str = field(
+        default_factory=lambda: os.getenv("KNOWME_SUMMARY_PROVIDER", ""))
+    summary_model: str = field(default_factory=lambda: os.getenv("KNOWME_SUMMARY_MODEL", ""))
     # Providers the user turned off in the web client (comma-separated ids).
     # Disabled providers are hidden from pickers/switchers; the ACTIVE provider
     # can't be disabled (guarded in integrations.apply_provider_disabled).

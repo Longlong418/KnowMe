@@ -15,7 +15,7 @@ from __future__ import annotations
 from knowme.config import Settings, load_settings
 from knowme.core.events import Observer
 from knowme.core.loop import LoopResult
-from knowme.core.models import get_client
+from knowme.core.models import get_client, roles_for
 from knowme.core.runtime import AgentRuntime
 from knowme.core.session import Session
 from knowme.core.spec import DEFAULT_SPEC, AgentSpec
@@ -34,6 +34,11 @@ class KnowMe:
         self.settings.ensure_home()
         self.conn = conn or connect(self.settings.home)
         self.client = client or get_client(self.settings)
+        # What the gate and the summariser run on — each may name a different
+        # provider than the loop (core/models.py:roles_for). Resolved ONCE here,
+        # for the whole agent, so two turns cannot disagree about it and so an
+        # injected client (every eval) serves those roles too.
+        self.roles = roles_for(self.settings, self.client)
         self.spec = spec
         # One name per agent — it tags facts, episodes and chat_log rows with the
         # agent that created them. The memory pool itself is shared across agents;
@@ -45,7 +50,8 @@ class KnowMe:
         # Memory first: the memory-management tools need it.
         from knowme.memory import Memory
 
-        self.memory = Memory(self.conn, self.settings, self.client, agent_id=self.agent_id)
+        self.memory = Memory(self.conn, self.settings, self.client,
+                             agent_id=self.agent_id, roles=self.roles)
         # The session is built BEFORE the tools, because the coding tools stamp
         # every change with the thread it happened in. They read the id at CALL
         # time (Session holds no tools, so nothing here depends on the order) —
@@ -59,7 +65,8 @@ class KnowMe:
         self.tracer = Tracer(self.settings)
         self.runtime = AgentRuntime(
             self.settings, client=self.client, conn=self.conn, memory=self.memory,
-            tools=self.tools, tracer=self.tracer, context_for=context_for)
+            tools=self.tools, tracer=self.tracer, context_for=context_for,
+            roles=self.roles)
 
     def close(self) -> None:
         """Release external resources (MCP subprocesses). Called when the

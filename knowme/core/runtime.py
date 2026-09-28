@@ -38,6 +38,7 @@ from knowme.config import Settings
 from knowme.core.context.policy import FitContext
 from knowme.core.events import Observer, compose
 from knowme.core.loop import LoopResult, run_loop
+from knowme.core.models import Roles
 from knowme.core.session import Session
 from knowme.core.spec import AgentSpec, resolve
 from knowme.core.tools import ToolRegistry
@@ -156,7 +157,7 @@ def record_step(steps: list, t0: float, kind: str, label: str, detail,
 
 class AgentRuntime:
     def __init__(self, settings: Settings, *, client, conn, memory, tools: ToolRegistry,
-                 tracer, context_for: ContextFor):
+                 tracer, context_for: ContextFor, roles: Roles | None = None):
         self.settings = settings
         self.client = client
         self.conn = conn
@@ -164,6 +165,9 @@ class AgentRuntime:
         self.tools = tools
         self.tracer = tracer
         self.context_for = context_for
+        # Only the summariser role is used here (see the FitContext below). Not
+        # given one, it stays what it always was: this client, this small model.
+        self.roles = roles or Roles(client, settings.small_model, client, settings.small_model)
 
     def run_turn(self, spec: AgentSpec, session: Session, user_message: str, *,
                  observer: Observer | None = None, source: str = "cli",
@@ -381,7 +385,12 @@ class AgentRuntime:
         fit = resolved.context_policy.fit(session.history, FitContext(
             system=system, prompt=prompt, full_history=session.history,
             home=self.settings.home, conn=self.conn, session_id=session.session_id,
-            client=self.client, small_model=resolved.small_model, settings=self.settings,
+            # The summariser's own client and model. These two fields mean
+            # exactly that — they are just filled from the summary ROLE now
+            # instead of always being the loop's client and the shared small
+            # model, which is why nothing in context/policy.py had to change.
+            client=self.roles.summary_client, small_model=self.roles.summary_model,
+            settings=self.settings,
             limit=self.context_for(self.settings.provider, resolved.model),
             trigger=self.settings.context_trigger,
         ))
