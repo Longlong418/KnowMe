@@ -272,8 +272,9 @@ def gate_results():
     The gate is stateless (it decides from the message alone), so
     caching is safe.
     """
-    from knowme.config import load_settings
     from knowme.loop.models import PROVIDERS, get_client
+
+    from knowme.config import load_settings
 
     settings = load_settings()
     client = get_client(settings)

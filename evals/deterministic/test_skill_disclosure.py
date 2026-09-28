@@ -18,9 +18,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from knowme.runtime.session import Session
+
 from knowme.config import Settings
 from knowme.memory.procedural.loader import SkillLoader
-from knowme.runtime.session import Session
 from knowme.tools.memory_admin import make_skill_tool
 
 DESCRIPTION = "how to run the weekly review"

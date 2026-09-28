@@ -15,8 +15,6 @@ Three things have to hold, in order of how much they matter:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from knowme.ops.pricing import MODEL_CONTEXT, context_for, remember_context
 from knowme.runtime import micro_compact as mc
 from knowme.runtime import tool_budget
@@ -125,7 +123,7 @@ def test_a_pointer_is_never_wrapped_in_another_pointer(tmp_path):
     twice = mc.compact(once, tmp_path, KEEP, min_chars=0)
 
     assert twice == once, "a second pass nested one pointer inside another"
-    line = [e for e in mc.entries_of(twice[1]["content"]) if "read_tool_result" in e][0]
+    line = next(e for e in mc.entries_of(twice[1]["content"]) if "read_tool_result" in e)
     assert line.count("read_tool_result") == 1
 
 
@@ -137,7 +135,7 @@ def test_every_replacement_is_reversible(tmp_path):
 
     out = mc.compact(history, tmp_path, KEEP, MIN)
 
-    line = [e for e in mc.entries_of(out[1]["content"]) if "read_tool_result" in e][0]
+    line = next(e for e in mc.entries_of(out[1]["content"]) if "read_tool_result" in e)
     stored_id = line.split(tool_budget.STORED_DIR + "/")[1].split()[0]
     assert make_tool(tmp_path).fn(id=stored_id) == original, "the pointer did not open"
 

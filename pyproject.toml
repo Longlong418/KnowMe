@@ -133,3 +133,12 @@ ignore = [
     # on costs contributors a red CI they can't explain. Contributors win.
     "RUF100",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# A test that drives a subprocess and then asserts on `returncode` is doing the
+# OPPOSITE of what PLW1510 asks for: `check=True` would raise on a non-zero exit
+# and throw away the captured stderr, which is exactly what the assertion message
+# needs. Eleven explicit `check=False` keywords would say the same thing less
+# clearly. (These files were invisible to ruff until Phase 49: .gitignore ignored
+# evals/* and ruff respects .gitignore, so it never looked at them.)
+"evals/**" = ["PLW1510"]

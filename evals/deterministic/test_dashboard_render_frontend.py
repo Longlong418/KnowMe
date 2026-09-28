@@ -424,7 +424,7 @@ def test_the_render_slice_is_still_findable():
     src = MAIN_JS.read_text(encoding="utf-8")
     assert "function setCount(" in src, "render()'s counter helper kept its name"
     assert "\nlet lastFetch" in src, "the slice's end marker is still there"
-    assert re.search(r"^function render\(\)\{", src, re.M), "render() is still a function"
+    assert re.search(r"^function render\(\)\{", src, re.MULTILINE), "render() is still a function"
 
 
 def test_the_tool_block_slice_is_still_findable():

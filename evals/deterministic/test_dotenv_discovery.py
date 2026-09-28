@@ -27,8 +27,9 @@ import subprocess
 import sys
 import textwrap
 
-from knowme import config
 from knowme.loop import models
+
+from knowme import config
 
 
 def test_dotenv_is_found_from_the_working_directory():

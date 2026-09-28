@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import anthropic
 import pytest
+from knowme.loop.models import PROVIDERS, OpenAICompatClient, get_client
 
 from knowme.config import Settings
-from knowme.loop.models import PROVIDERS, OpenAICompatClient, get_client
 
 
 @pytest.fixture(autouse=True)
@@ -190,8 +190,9 @@ def test_every_priced_model_has_a_knowledge_cutoff():
 # arena. These pin the rule that stops it.
 
 def test_env_model_names_do_not_leak_into_another_provider(monkeypatch):
-    from knowme.config import Settings
     from knowme.loop.models import get_client
+
+    from knowme.config import Settings
 
     monkeypatch.setenv("KNOWME_PROVIDER", "anthropic")
     monkeypatch.setenv("KNOWME_MODEL", "claude-fable-5")
@@ -211,8 +212,9 @@ def test_env_model_names_do_not_leak_into_another_provider(monkeypatch):
 def test_an_explicit_model_survives_the_provider_switch(monkeypatch):
     """The rule drops INHERITED env values, not deliberate ones. Without this
     the fix would quietly override the arena's own model picker."""
-    from knowme.config import Settings
     from knowme.loop.models import get_client
+
+    from knowme.config import Settings
 
     monkeypatch.setenv("KNOWME_PROVIDER", "anthropic")
     monkeypatch.setenv("KNOWME_MODEL", "claude-fable-5")
@@ -227,8 +229,9 @@ def test_an_explicit_model_survives_the_provider_switch(monkeypatch):
 def test_the_env_still_wins_for_its_own_provider(monkeypatch):
     """The whole point of KNOWME_MODEL is to override the default — the fix must
     not break the ordinary single-provider case."""
-    from knowme.config import Settings
     from knowme.loop.models import get_client
+
+    from knowme.config import Settings
 
     monkeypatch.setenv("KNOWME_PROVIDER", "anthropic")
     monkeypatch.setenv("KNOWME_MODEL", "claude-fable-5")
@@ -256,8 +259,9 @@ def test_the_env_still_wins_for_its_own_deepseek_provider(monkeypatch):
     cost number afterwards priced a model that wasn't running. Found 2026-09-19
     on a `KNOWME_PROVIDER=deepseek` + `KNOWME_MODEL=deepseek-flash` .env.
     """
-    from knowme.config import Settings
     from knowme.loop.models import get_client
+
+    from knowme.config import Settings
 
     monkeypatch.setenv("KNOWME_PROVIDER", "deepseek")
     monkeypatch.setenv("KNOWME_MODEL", "deepseek-flash")
@@ -278,8 +282,9 @@ def test_an_aggregator_may_still_use_the_family_it_resells(monkeypatch):
     """The other half of the same rule. Guarding against the naive fix — simply
     dropping aggregators from the owner map — which would turn around and drop
     opencode's own default model, a deepseek id."""
-    from knowme.config import Settings
     from knowme.loop.models import get_client
+
+    from knowme.config import Settings
 
     monkeypatch.setenv("KNOWME_PROVIDER", "opencode_go")
     monkeypatch.setenv("KNOWME_MODEL", "deepseek-v4-flash")
@@ -294,8 +299,9 @@ def test_an_aggregator_may_still_use_the_family_it_resells(monkeypatch):
 def test_a_foreign_model_is_still_dropped_for_an_aggregator(monkeypatch):
     """And the short-circuit opens no hole: opencode resells deepseek ids, not
     anthropic ones, so the leak this rule exists to stop must still be stopped."""
-    from knowme.config import Settings
     from knowme.loop.models import get_client
+
+    from knowme.config import Settings
 
     monkeypatch.setenv("KNOWME_PROVIDER", "opencode_go")
     monkeypatch.setenv("KNOWME_SMALL_MODEL", "claude-haiku-4-5-20251001")
@@ -312,8 +318,9 @@ def test_a_foreign_gate_model_is_dropped_even_when_the_env_names_the_provider(mo
     KNOWME_SMALL_MODEL still holding anthropic's gate model. Scoping by "did the
     caller switch provider" missed this one — the env agreed with itself and was
     still wrong."""
-    from knowme.config import Settings
     from knowme.loop.models import get_client
+
+    from knowme.config import Settings
 
     monkeypatch.setenv("KNOWME_PROVIDER", "xai")
     monkeypatch.setenv("KNOWME_SMALL_MODEL", "claude-haiku-4-5-20251001")
@@ -329,8 +336,9 @@ def test_an_unfamiliar_model_name_is_left_alone(monkeypatch):
     """The check asks "is this positively someone else's?", not "does it look
     like ours?". The second question would silently downgrade any id we don't
     recognise — a preview name, a model released after this code was written."""
-    from knowme.config import Settings
     from knowme.loop.models import get_client
+
+    from knowme.config import Settings
 
     monkeypatch.setenv("KNOWME_PROVIDER", "kimi")
     monkeypatch.setenv("KNOWME_SMALL_MODEL", "moonshot-v1-8k")

@@ -14,10 +14,10 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from knowme.loop.models import PROVIDERS, Roles, role_runs_on, roles_for
 
 from evals.helpers import ScriptedClient, make_knowme, response, text_block
 from knowme.config import Settings
-from knowme.loop.models import PROVIDERS, Roles, roles_for, role_runs_on
 
 ROLES = ("gate", "summary")
 
@@ -265,7 +265,7 @@ def test_saving_settings_does_not_conjure_an_agent(tmp_path, monkeypatch):
     """rebuild() BUILDS a default agent when none is live (its documented
     historical behaviour). Without the guard, saving a toggle in a CLI process
     would open a database and an MCP bridge as a side effect."""
-    from knowme.ops import settings_api, browser_agent
+    from knowme.ops import browser_agent, settings_api
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(browser_agent, "rebuild",

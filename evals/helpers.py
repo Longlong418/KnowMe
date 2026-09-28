@@ -13,8 +13,9 @@ def _has_key() -> bool:
     """True when the ACTIVE provider (KNOWME_PROVIDER) has its key set, so live
     evals run on whatever the user actually configured (anthropic, openrouter,
     gemini, ...), not only on ANTHROPIC_API_KEY."""
-    from knowme.config import load_settings
     from knowme.loop.models import PROVIDERS
+
+    from knowme.config import load_settings
 
     settings = load_settings()
     provider = PROVIDERS.get(settings.provider)

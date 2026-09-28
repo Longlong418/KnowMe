@@ -16,8 +16,6 @@ Hermetic：模型是脚本化的（evals/helpers.ScriptedClient），验收跑�
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from evals.helpers import ScriptedClient, make_knowme, response, text_block, tool_block

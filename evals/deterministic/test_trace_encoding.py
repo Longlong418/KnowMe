@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from knowme.config import Settings
-from knowme.ops.web import collect, events_since
 from knowme.ops.tracing import TraceEncodingError, Tracer
+from knowme.ops.web import collect, events_since
 
 MESSAGE = "处理中文日程 " + chr(0x1F680)
 

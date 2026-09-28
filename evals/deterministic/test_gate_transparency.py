@@ -116,7 +116,10 @@ def test_the_worst_case_detail_still_fits_in_one_step():
     「还有 N 条没显示」那行是唯一允许消失的东西，所以最坏情况要连它一起算进去。
     """
     from knowme.core.runtime import (
-        _GATE_CLIP, _GATE_MAX_HITS, _STEP_DETAIL_MAX, gate_detail,
+        _GATE_CLIP,
+        _GATE_MAX_HITS,
+        _STEP_DETAIL_MAX,
+        gate_detail,
     )
 
     ev = {
@@ -128,7 +131,7 @@ def test_the_worst_case_detail_still_fits_in_one_step():
     }
     detail = gate_detail(ev)
 
-    assert f"…还有 2 条没显示" in detail          # 超过 5 条要自己说出来
+    assert "…还有 2 条没显示" in detail          # 超过 5 条要自己说出来
     assert len(detail) <= _STEP_DETAIL_MAX, (
         f"最坏情况 {len(detail)} 字，超了 {_STEP_DETAIL_MAX} —— 会被静默截断"
     )

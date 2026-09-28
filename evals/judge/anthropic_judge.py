@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 
 from deepeval.models import DeepEvalBaseLLM
+from knowme.loop.models import get_client
 
 from knowme.config import load_settings
-from knowme.loop.models import get_client
 
 
 class AnthropicJudge(DeepEvalBaseLLM):

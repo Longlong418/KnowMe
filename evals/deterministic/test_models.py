@@ -2,10 +2,10 @@ import os
 from types import SimpleNamespace
 
 import pytest
+from knowme.loop import models
 
 from evals.helpers import HAS_KEY
 from knowme.config import Settings
-from knowme.loop import models
 
 RUN_LIVE_EVALS = os.getenv("KNOWME_RUN_LIVE_EVALS") == "1"
 
@@ -72,7 +72,6 @@ def test_openai_defaults_still_resolve_live():
     Off by default; `make gate` with KNOWME_RUN_LIVE_EVALS=1 is where this bites.
     """
     import openai
-
     from knowme.loop.models import PROVIDERS
 
     key = os.getenv("OPENAI_API_KEY")

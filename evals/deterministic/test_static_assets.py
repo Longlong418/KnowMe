@@ -176,7 +176,7 @@ def _css_rules() -> str:
     """style.css with its comments stripped: a comment QUOTING a selector is not
     a rule, and matching one would fail these tests for the wrong reason."""
     css = (STATIC / "style.css").read_text(encoding="utf-8")
-    return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
 
 
 def test_every_sidebar_entry_except_the_deep_pages_is_visible():

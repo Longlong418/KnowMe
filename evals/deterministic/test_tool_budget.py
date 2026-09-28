@@ -18,9 +18,11 @@ The rules, in the order they matter:
 
 from __future__ import annotations
 
-from knowme.config import Settings
-from knowme.runtime import tool_budget, tool_entries as te
 from knowme.runtime.session import Session
+
+from knowme.config import Settings
+from knowme.runtime import tool_budget
+from knowme.runtime import tool_entries as te
 from knowme.tools.tool_results import make_tool
 
 BUDGET = 4000

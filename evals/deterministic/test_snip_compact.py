@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import json
 
+from knowme.runtime.session import Session
+
 from knowme.config import Settings
 from knowme.db import connect
 from knowme.runtime import snip_compact as sc
-from knowme.runtime.session import Session
 
 HEAD, TAIL = 3, 46
 AT = HEAD + 1 + TAIL          # 50
@@ -184,7 +185,7 @@ def test_the_marker_reports_the_total_missing_not_the_last_snip(tmp_path):
         history = sc.snip(history + _flat(2), tmp_path, conn, "s", HEAD, TAIL)
 
     total = sc.archived_count(conn, "s")
-    marker_text = [m["content"] for m in history if sc.is_marker(m)][0]
+    marker_text = next(m["content"] for m in history if sc.is_marker(m))
 
     assert total > 2, "nothing accumulated across the snips"
     assert f"{total} earlier messages" in marker_text, (

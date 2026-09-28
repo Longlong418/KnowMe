@@ -88,7 +88,7 @@ def test_the_replacement_is_one_message_and_the_list_can_still_start(tmp_path):
 def test_the_marker_names_where_the_transcript_went(tmp_path):
     out = _run(tmp_path, _history(20))
 
-    archive = [p for p in (tmp_path / "archives").iterdir()][0]
+    archive = next(iter((tmp_path / "archives").iterdir()))
     assert str(archive) in out[0]["content"], "the marker does not say where it went"
     assert SUMMARY in out[0]["content"]
 
@@ -105,7 +105,7 @@ def test_the_COMPLETE_history_is_archived_not_the_fitted_copy(tmp_path):
     _run(tmp_path, history, fitted=fitted)
 
     import json
-    archive = [p for p in (tmp_path / "archives").iterdir()][0]
+    archive = next(iter((tmp_path / "archives").iterdir()))
     stored = [json.loads(line) for line in archive.read_text(encoding="utf-8").splitlines()]
     assert stored == history, "the archive holds the fitted copy, not the record"
     assert "x" * 5000 in archive.read_text(encoding="utf-8")

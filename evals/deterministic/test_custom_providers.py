@@ -44,7 +44,7 @@ def home(monkeypatch, tmp_path):
 
     monkeypatch.setattr(browser_agent, "rebuild", lambda: None)
     monkeypatch.setattr(browser_agent, "current", lambda: None)
-    monkeypatch.setattr(browser_agent, "current_agents", lambda: {})
+    monkeypatch.setattr(browser_agent, "current_agents", dict)
     return load_settings().ensure_home()
 
 

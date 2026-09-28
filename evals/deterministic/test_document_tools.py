@@ -8,8 +8,6 @@ unaffordable (the whole thing in context every turn).
 
 import re
 
-import pytest
-
 from knowme.applications.library import list_documents, save_document
 from knowme.applications.reader import ReaderError
 from knowme.db import connect
@@ -56,7 +54,7 @@ def test_no_window_is_longer_than_the_budget(tmp_path):
 
 
 def test_a_bad_id_points_at_the_tools_that_would_find_one(tmp_path):
-    conn, tools = _tools(tmp_path)
+    _, tools = _tools(tmp_path)
     msg = tools["open_document"].fn("not-an-id")
     assert "not-an-id" in msg
     assert "list_documents" in msg          # tells the model how to recover
@@ -81,7 +79,7 @@ def test_search_and_list_are_usable_without_opening_anything(tmp_path):
 
 
 def test_an_empty_library_says_so_rather_than_failing(tmp_path):
-    conn, tools = _tools(tmp_path)
+    _, tools = _tools(tmp_path)
     assert "空的" in tools["list_documents"].fn()
     assert "没有找到" in tools["search_documents"].fn("anything")
 

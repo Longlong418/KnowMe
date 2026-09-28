@@ -147,7 +147,7 @@ def test_a_real_pdf_round_trips_through_the_stored_bytes(tmp_path):
     pypdf = pytest.importorskip("pypdf")
     writer = pypdf.PdfWriter()
     writer.add_blank_page(width=300, height=300)
-    page = writer.add_blank_page(width=300, height=300)
+    writer.add_blank_page(width=300, height=300)   # a second page, on purpose
     buffer = io.BytesIO()
     writer.write(buffer)
 

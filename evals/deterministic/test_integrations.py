@@ -6,10 +6,10 @@ import os
 import socket
 
 import pytest
+from knowme.loop.models import PROVIDERS
 
 from knowme import integrations
 from knowme.integrations import IntegrationState, IntegrationStatus
-from knowme.loop.models import PROVIDERS
 from knowme.ops import browser_agent
 from knowme.tools import apple, calendar
 

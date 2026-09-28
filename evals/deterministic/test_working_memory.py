@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import re
 
-from knowme.config import load_settings
 from knowme.runtime.session import Session
+
+from knowme.config import load_settings
 
 
 def test_the_turn_carries_the_current_time():

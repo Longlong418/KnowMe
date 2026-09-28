@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from knowme.loop.models import PROVIDERS
+
 from knowme import integrations
 from knowme.config import Settings
-from knowme.loop.models import PROVIDERS
 
 
 def _isolate(monkeypatch, tmp_path):

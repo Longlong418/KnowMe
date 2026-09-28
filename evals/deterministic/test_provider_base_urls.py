@@ -9,11 +9,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from knowme.loop import models
+from knowme.loop.models import PROVIDERS
 
 from knowme import integrations
 from knowme.config import Settings
-from knowme.loop import models
-from knowme.loop.models import PROVIDERS
 from knowme.ops import catalog
 
 EXPECTED_ENDPOINTS = {
