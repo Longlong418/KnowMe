@@ -24,15 +24,72 @@ async function saveFact(id){
   await postJSON("/api/memory", {action:"update_fact", id, content:v, agent_id:ACTIVE_AGENT});
   editing = false; refresh();
 }
-async function mergeFact(sourceId){
-  const targetId = prompt("把这条事实合并到哪个事实 ID？");
-  if (!targetId || !/^\d+$/.test(targetId) || Number(targetId) === Number(sourceId)) return;
-  if (!confirm(`确认把事实 #${sourceId} 合并到 #${targetId} 吗？`)) return;
+// 「合并」要挑一条目标事实。以前这里弹一个 prompt 让人输目标的事实 ID —— 但事实 ID
+// 从来不露在页面上，除了翻数据库没人知道它是几。所以改成：先弹出这张列表，
+// 让人直接看着事实本身去挑，界面上只出现主题和正文，ID 一个字都不出现。
+// 后端的接口没变，它收的仍然是两个 ID（merge_fact），只是这两个 ID 由行本身带过来。
+function mergeFact(sourceId){
+  const root = document.getElementById("memory-modal-root");
+  const facts = (D && D.facts) || [];
+  const src = facts.find(f => f.id === sourceId);
+  if (!root || !src) return;
+  markEditing();   // 打开期间别让 5 秒轮询把这张列表刷掉（和连接弹窗同一套）
+  const others = facts.filter(f => f.id !== sourceId);
+  root.innerHTML = `<div class="connmodal-back" onclick="closeMemoryModal()" onkeydown="memoryModalKeydown(event)">
+    <section class="connmodal" role="dialog" aria-modal="true" aria-labelledby="memory-modal-title" onclick="event.stopPropagation()">
+      <header class="connmodal-head">
+        <div class="connmodal-title">
+          <h3 id="memory-modal-title">把这一条合并到哪一条？</h3>
+          <div class="meta">合并后，上面这条的正文会接到目标的后面，本条不再单独存在。</div>
+        </div>
+        <button class="connmodal-close" type="button" onclick="closeMemoryModal()" aria-label="关闭">关闭</button>
+      </header>
+      <div class="memfact src">
+        <div class="memfact-sub">${esc(src.subject)}</div>
+        <div class="memfact-body">${esc(src.content)}</div>
+      </div>
+      <div class="memtargets">${ others.map(f =>
+        `<button class="memtarget" type="button" onclick="mergeFactInto(${sourceId}, ${f.id})">
+          <span class="memfact-sub">${esc(f.subject)}</span>
+          <span class="memfact-body">${esc(f.content)}</span>
+        </button>`).join("") || `<div class="meta">没有别的事实可以合并。</div>` }</div>
+    </section>
+  </div>`;
+  setTimeout(() => { const b = root.querySelector(".connmodal-close"); if (b) b.focus(); }, 0);
+}
+// 真正动手的那一步。说的是人话：哪一条并到哪一条、合并之后留下的是什么——
+// 因为 store.merge() 确实是「目标的正文接上来源的正文 + 删掉来源那一行」，两件事都要说。
+async function mergeFactInto(sourceId, targetId){
+  const facts = (D && D.facts) || [];
+  const src = facts.find(f => f.id === sourceId);
+  const dst = facts.find(f => f.id === targetId);
+  if (!src || !dst) return;
+  const s = shortSubject(src.subject, 14), t = shortSubject(dst.subject, 14);
+  if (!confirm(`把「${s}」合并进「${t}」？\n\n`
+    + `合并后留下「${t}」一条，它的正文后面接上「${s}」的正文；`
+    + `「${s}」这一条会被删掉。\n此操作无法撤销。`)) return;
   const r = await postJSON("/api/memory", {
-    action:"merge_fact", id:sourceId, target_id:Number(targetId), agent_id:ACTIVE_AGENT
+    action:"merge_fact", id:sourceId, target_id:targetId, agent_id:ACTIVE_AGENT
   });
-  if (!r.ok) alert(r.error || "合并失败");
+  // 失败就把列表留着（多半是内容不对，而不是目标选错了），人可以重挑一条；
+  // 成功才关掉，并让页面重新拉一次数据。
+  if (!r.ok){ alert(r.error || "合并失败"); return; }
+  closeMemoryModal();
   refresh();
+}
+// 弹窗里的主题名可能很长，塞进 confirm 里一行装不下——按字数截断，末尾省略号。
+function shortSubject(s, n){
+  s = String(s == null ? "" : s);
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+function closeMemoryModal(){
+  editing = false;   // 不解开这个，5 秒轮询就被永久冻住了（见 models.js 的 markEditing）
+  const root = document.getElementById("memory-modal-root");
+  if (root) root.innerHTML = "";
+  if (activeView === "memory") render();
+}
+function memoryModalKeydown(event){
+  if (event.key === "Escape") closeMemoryModal();
 }
 async function delMem(action, id){
   if(!confirm("确定要从记忆中删除吗？")) return;

@@ -1155,6 +1155,29 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
   .connmodal-message{flex-basis:100%}
 }
 
+/* 记忆页的「合并」挑选弹窗。外框复用连接弹窗那套 .connmodal-back/.connmodal
+   （半透明底 + 居中面板 + 关闭按钮），因为那就是「盖住页面、选一件事、关掉」，
+   和连接页要的是同一样东西；这里只补列表本身。 */
+.memfact{margin-top:14px;padding:10px 12px;border:1px solid var(--line2);
+  border-radius:var(--radius);background:var(--bg)}
+.memfact.src{border-color:var(--accent);background:var(--accent-soft)}
+.memfact-sub{display:block;font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--accent);
+  overflow-wrap:anywhere}
+.memfact-body{display:block;margin-top:4px;font-size:12.5px;line-height:1.5;color:var(--ink2);
+  overflow-wrap:anywhere}
+/* 候选列表自己滚，页面别滚：这样上面那条「要合并的那条事实」一直在眼前。 */
+.memtargets{margin-top:14px;max-height:44vh;overflow-y:auto;
+  border:1px solid var(--line);border-radius:var(--radius)}
+.memtarget{display:block;width:100%;text-align:left;cursor:pointer;background:transparent;
+  border:0;border-bottom:1px solid var(--line);padding:10px 12px;
+  font-family:inherit;color:var(--ink)}
+.memtarget:last-child{border-bottom:0}
+.memtarget:hover,.memtarget:focus-visible{background:var(--accent-soft)}
+.memtarget .memfact-sub{color:var(--ink2)}
+.memtarget:hover .memfact-sub,.memtarget:focus-visible .memfact-sub{color:var(--accent)}
+.memtarget .memfact-body{color:var(--ink3);display:-webkit-box;-webkit-box-orient:vertical;
+  -webkit-line-clamp:2;overflow:hidden}
+
 /* 悬停。这一段原来写的是 `transform:translateY(-1px)` 外加一层大灰影 ——
    "卡片浮起来"是屏幕卡片那套语言，跟"纸放在纸上"是打架的：纸不会因为你看了
    它一眼就离地。而且 .card 在这个应用里到处都是，连一份一万字的报告都是

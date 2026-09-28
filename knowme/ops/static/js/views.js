@@ -115,6 +115,9 @@ function memSemantic(d){
       <td>${memAgentTag(f.agent_id)}</td>
       <td style="white-space:nowrap"><a class="reveal" onclick="editFact(${f.id})">编辑</a> · <a class="reveal" onclick="mergeFact(${f.id})">合并</a> · <a class="reveal del" onclick="delMem('delete_fact',${f.id})">删除</a></td>
     </tr>`).join("")}</table></div>`;
+  // 「合并」要挑一条目标事实才能做，挑选的界面挂在视图里这个空盒子上（memory.js）。
+  // 盒子和表格一样只在语义记忆这一页存在，所以别的页上 mergeFact 打不开也没关系。
+  h += `<div id="memory-modal-root"></div>`;
   return h;
 }
 function memEpisodic(d){
