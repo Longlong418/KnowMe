@@ -95,6 +95,62 @@ def _zh(mapping: dict, key) -> str:
     return mapping.get(str(key), str(key or ""))
 
 
+# What the gate searched for and what it found, as the timeline shows it.
+# These three numbers are sized against _STEP_DETAIL_MAX above: the worst case
+# (longest reason + longest query + the maximum number of hits, each at the
+# clip) comes to ~347 characters, so a full list always FITS instead of being
+# silently cut by record_step — a truncated list reads as "that is all there
+# was", which is worse than not showing it at all.
+_GATE_QUERY_IN_LABEL = 24      # how much of the query fits on the one-line label
+_GATE_CLIP = 40                # per line, in the expanded detail
+_GATE_MAX_HITS = 5             # beyond this, the detail says how many are hidden
+
+# js/trace.js has the same two functions (stepLabel/stepDetail) because the LIVE
+# timeline is assembled in the browser before the server's copy arrives. Every
+# branch below exists twice, and test_trace_wording.py runs the real JS in node
+# to compare the two byte for byte.
+
+
+def gate_label(ev: dict) -> str:
+    """「要查记忆 ·「钠离子 产业化」· 命中 3 条」.
+
+    An event WITHOUT a query renders exactly as it did before this existed —
+    every trace file and every chat_log row written earlier goes down that path,
+    so history does not change shape under you.
+    """
+    base = _zh(_GATE_ZH, ev.get("decision"))
+    query = str(ev.get("query") or "")
+    if ev.get("decision") != "retrieve" or not query:
+        return base
+    return (f"{base} ·「{query[:_GATE_QUERY_IN_LABEL]}」"
+            f" · 命中 {len(ev.get('hits') or [])} 条")
+
+
+def gate_detail(ev: dict) -> str:
+    """The reason, then the search terms, then what came back — one line each.
+
+    Hits are clipped per line rather than the whole block being cut off, so
+    「…还有 2 条没显示」 is the only thing that ever goes missing, and it says so.
+    """
+    lines = [str(ev.get("reason") or "")]
+    query = str(ev.get("query") or "")
+    if ev.get("decision") != "retrieve" or not query:
+        return lines[0]                      # 旧记录：详情就是那句 reason
+
+    lines.append(f"检索词：{query[:_GATE_CLIP]}")
+    hits = ev.get("hits") or []
+    if not hits:
+        lines.append("没有命中任何记忆")
+        return "\n".join(lines)
+
+    lines.append(f"命中 {len(hits)} 条：")
+    for i, hit in enumerate(hits[:_GATE_MAX_HITS], 1):
+        lines.append(f"{i}. {hit.get('kind', '')} · {str(hit.get('text', ''))[:_GATE_CLIP]}")
+    if len(hits) > _GATE_MAX_HITS:
+        lines.append(f"…还有 {len(hits) - _GATE_MAX_HITS} 条没显示")
+    return "\n".join(lines)
+
+
 @dataclass
 class TurnResult:
     reply: str
@@ -212,9 +268,12 @@ class AgentRuntime:
                            *[f"压缩：{_zh(_COMPACT_ZH, c)}"
                              for c in ev.get("compaction") or []]])})
             if kind == "gate":
-                captured["gate"] = {"decision": ev.get("decision"), "reason": ev.get("reason")}
-                _step("gate", _zh(_GATE_ZH, ev.get("decision")),
-                      {"_detail": ev.get("reason") or ""})
+                # query/hits are copied through as well: the turn card's whole
+                # point is "what did the gate actually do", and a persisted turn
+                # that kept only the verdict could not answer it later.
+                captured["gate"] = {"decision": ev.get("decision"), "reason": ev.get("reason"),
+                                    "query": ev.get("query"), "hits": ev.get("hits") or []}
+                _step("gate", gate_label(ev), {"_detail": gate_detail(ev)})
             if kind == "route":
                 captured["graph_route"] = {"target": ev.get("target"), "reason": ev.get("reason")}
                 _step("route",

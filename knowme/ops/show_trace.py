@@ -45,7 +45,13 @@ def _event_summary(event: dict) -> str:
         return f"tool · {event.get('tool', '?')}({_short(event.get('args', {}))}) → {_short(event.get('output', ''))}"
     if kind == "gate":
         reason = event.get("reason")
-        return f"gate · {event.get('decision', '?')}" + (f" — {_short(reason)}" if reason else "")
+        line = f"gate · {event.get('decision', '?')}" + (f" — {_short(reason)}" if reason else "")
+        # Only when the event HAS one: every line printed for an older trace
+        # file must stay exactly as it was.
+        if event.get("query") and event.get("decision") == "retrieve":
+            line += (f" · 检索词「{_short(event['query'])}」"
+                     f" · 命中 {len(event.get('hits') or [])} 条")
+        return line
     if kind == "consolidation":
         return f"memory · consolidated {event.get('new_facts', 0)} fact(s)"
 

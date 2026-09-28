@@ -153,7 +153,18 @@ def chat_stream(message: str, emit, agent_id: str = "default", images=None) -> N
             "sent_messages": context.get("sent_messages", 0),
             "compaction": context.get("compaction", []),
         } if context else None),
-        "gate": {"decision": gate["decision"], "reason": gate.get("reason")} if gate else None,
+        # query/hits ride along, same as they already do on the trace and on
+        # /api/data — this is the only description of the turn a caller of the
+        # non-streaming /api/chat door ever sees, and "did it search, for what,
+        # and did anything come back" is not a second request's worth of detail.
+        #
+        # (`render.js`'s `done` handler does `Object.assign(pending, ev)`, so a
+        # two-key gate here would also leave the card's OWN gate object short of
+        # its own steps. That is invisible today only because the timeline paints
+        # from `steps`, which this same payload carries — measured, by reverting
+        # this line and watching the browser probe stay green.)
+        "gate": {"decision": gate["decision"], "reason": gate.get("reason"),
+                 "query": gate.get("query"), "hits": gate.get("hits") or []} if gate else None,
         "graph": ({"workflow": route.get("workflow", "triage"),
                    "route": "quick" if quick else "full",
                    "reason": (triage or {}).get("reason", "")} if route else None),

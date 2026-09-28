@@ -37,7 +37,10 @@ def test_turn_meta_is_saved_with_gate_and_iterations(tmp_path):
     # "tokens 19→132"，用户看不懂（docs/DEVELOPMENT.md Phase 28）。
     steps = meta["steps"]
     assert [s["kind"] for s in steps] == ["gate", "llm", "tool", "llm"]
-    assert steps[0]["label"] == "要查记忆"
+    # 门控那一行现在把「查了什么、命中几条」也说了 —— 这一轮库里还是空的，
+    # 所以是 0 条（新库第一条消息就是这条）。
+    assert steps[0]["label"] == "要查记忆 ·「alex」 · 命中 0 条"
+    assert steps[0]["detail"].startswith("asks about alex\n检索词：alex\n")
     assert steps[1]["label"] == "第 1 轮 · 要调用工具"
     assert "tokens" in steps[1]["detail"]
     assert steps[2]["label"] == "save_note"

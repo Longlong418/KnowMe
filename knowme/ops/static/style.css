@@ -815,6 +815,14 @@
   .step-body summary:hover{color:var(--ink)}
   .step-body pre{margin-top:4px;max-height:280px;overflow:auto;white-space:pre-wrap;
                  word-break:break-word;font-size:11px;line-height:1.5}
+  /* The gate table's 命中 cell (trace.js: gateHitsCell). Same disclosure, but it
+     sits inside a <td>: without the width cap a long hit would stretch the
+     whole table and shove the 原因 column off the page. */
+  .gate-hits{margin:0}
+  .gate-hits summary{cursor:pointer;font-size:11px;color:var(--ink2)}
+  .gate-hits summary:hover{color:var(--ink)}
+  .gate-hits pre{margin-top:4px;max-width:360px;max-height:180px;overflow:auto;
+                 white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5}
   /* The stored tool block, folded into the reply card (render.js: toolsBlock).
      Same disclosure as one .step-body, but the body is PREVIEWED: .tt-full is
      the rest of it and stays hidden until 显示全部 — a whole directory listing

@@ -34,7 +34,9 @@ def test_one_tool_turn_footprint(tmp_path):
     meta = json.loads(rows[1]["meta"])
     assert set(meta) == {"gate", "graph", "iterations", "latency_ms", "tools",
                          "steps", "model", "provider"}
-    assert meta["gate"] == {"decision": "skip", "reason": "t"}
+    # 门控这一步的 payload：决策、那句 reason、它打算查什么、以及命中了哪几条。
+    # （skip 也要带 query —— 门控模型是先把词想出来才决定不查的。）
+    assert meta["gate"] == {"decision": "skip", "reason": "t", "query": "", "hits": []}
     assert meta["graph"] is None
     assert meta["tools"] == [{"tool": "save_note", "status": "ok"}]
     assert meta["model"] == app.settings.model

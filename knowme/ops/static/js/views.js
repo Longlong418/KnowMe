@@ -827,9 +827,11 @@ const VIEWS = {
     const decided = d.turns.filter(t => t.gate);
     if (decided.length){
       h += `<div class="meta" style="margin:8px 0">实际决策（跳过或检索），最近的在前：</div>`;
-      h += table(["对话","决策","原因"], decided.slice(0,10).map(t =>
+      h += table(["对话","决策","检索词","命中","原因"], decided.slice(0,10).map(t =>
         `<tr><td>${esc((t.user_message||"").slice(0,44))}</td>
           <td><span class="pill ${t.gate.decision==="skip"?"skip":"pass"}">${esc(statusZh(t.gate.decision))}</span></td>
+          <td class="meta">${esc((t.gate.query||"").slice(0,GATE_QUERY_IN_LABEL)||"—")}</td>
+          ${gateHitsCell(t.gate)}
           <td class="meta">${esc(t.gate.reason||"")}</td></tr>`));
     }
 

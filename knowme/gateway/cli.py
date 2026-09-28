@@ -47,7 +47,11 @@ def _observer(kind: str, event: dict) -> None:
     if kind == "tool":
         console.print(f"  [dim]tool · {event['tool']}({event['args']}) → {event['output'][:80]}[/dim]")
     elif kind == "gate":
-        console.print(f"  [dim]gate · {event['decision']} — {event.get('reason','')}[/dim]")
+        line = f"gate · {event['decision']} — {event.get('reason','')}"
+        if event.get("query") and event["decision"] == "retrieve":
+            line += (f" · 检索词「{str(event['query'])[:40]}」"
+                     f" · 命中 {len(event.get('hits') or [])} 条")
+        console.print(f"  [dim]{line}[/dim]")
     elif kind == "consolidation":
         console.print(f"  [dim]memory · consolidated {event['new_facts']} fact(s) from recent chats[/dim]")
 

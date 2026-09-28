@@ -111,16 +111,41 @@ class Memory:
 
     # ---- retrieval (gated — see retrieval_gate.py for why)
     def gated_retrieve(self, message: str, notify=None) -> str:
+        """What the gate decided, WHAT IT SEARCHED FOR, and what came back.
+
+        The query and the hits used to be computed here and then dropped: the
+        event carried only the decision and a ≤15-character reason, so the page
+        could say "要查记忆" but never what was looked up or whether anything was
+        found — the difference between "the gate works" and "the gate works FOR
+        YOU". Both now ride on the same event (see `hits` below).
+
+        The string returned is unchanged, byte for byte: it is what the model is
+        told, and making the gate transparent must not edit the model's input.
+        """
         retrieve, query, reason = retrieval_gate.should_retrieve(
             self.roles.gate_client, self.roles.gate_model, message
         )
-        if notify:
-            notify("gate", {"decision": "retrieve" if retrieve else "skip", "reason": reason})
         if not retrieve:
+            # Nothing was searched, so there is nothing to report: the decision
+            # goes out as it always did, just as soon as it is made.
+            if notify:
+                notify("gate", {"decision": "skip", "reason": reason, "query": query})
             return ""
-        found = self.facts.search(query, self.settings.retrieval_top_k)
-        found += self.episodes.search(query, top_k=3)
-        return "\n".join(found)
+
+        # Searched BEFORE notifying, because the hits are the point. The two
+        # stores are kept apart so the event can say which one a hit came from
+        # (a durable fact about you vs. something that happened one day) —
+        # their strings have different shapes and guessing from those would be
+        # a guess.
+        facts = self.facts.search(query, self.settings.retrieval_top_k)
+        episodes = self.episodes.search(query, top_k=3)
+        if notify:
+            notify("gate", {
+                "decision": "retrieve", "reason": reason, "query": query,
+                "hits": [{"kind": "事实", "text": h} for h in facts]
+                        + [{"kind": "经历", "text": h} for h in episodes],
+            })
+        return "\n".join(facts + episodes)
 
     # ---- procedural
     # No matching_skills() any more. The harness used to push the "top 2"

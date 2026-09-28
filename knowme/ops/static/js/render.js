@@ -333,8 +333,14 @@ function applyStreamEvent(pending, ev){
   // 服务端存进 meta.steps 的那份是同一套说法 —— 直播看起来是英文、回看变中文
   // 那种事，就是在这里各写各的造成的。
   if (ev.kind === "gate"){
-    pending.gate = {decision: ev.decision, reason: ev.reason};
-    pushStep(pending, "gate", stepLabel("gate", ev), ev.reason, Date.now()-pending.started);
+    // query/hits are carried onto the card, not just into the step: `done`
+    // replaces pending.gate with the server's copy (web/runtime.py) and a
+    // reopened thread rebuilds the same card from meta.steps. Keeping them here
+    // is what makes the live card say the same thing as the stored one.
+    pending.gate = {decision: ev.decision, reason: ev.reason,
+                    query: ev.query, hits: ev.hits};
+    pushStep(pending, "gate", stepLabel("gate", ev), stepDetail("gate", ev),
+             Date.now()-pending.started);
   } else if (ev.kind === "context"){
     pending.context = {
       application_chars: ev.application_chars,

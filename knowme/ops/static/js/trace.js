@@ -49,12 +49,26 @@ const COMPACT_ZH = {
 const zh = (map, key) => map[key] || String(key == null ? "" : key);
 const joinZh = parts => parts.filter(Boolean).join("；");
 
+// 门控查了什么、查到没查到 —— 和 core/runtime.py 的 gate_label/gate_detail 是
+// 同一套写法，**三个数字也必须一样**。那几个数是按 _STEP_DETAIL_MAX（400）凑的：
+// 最坏情况约 347 字，一份完整的命中列表进得去、不会被静默切尾。
+const GATE_QUERY_IN_LABEL = 24;
+const GATE_CLIP = 40;
+const GATE_MAX_HITS = 5;
+
 // 一步的原料 → 那一行 label。每个 kind 只认自己那几个字段，多的忽略；
 // 认不出来的（未知 kind）退回 d.text，永远不会渲染出 "undefined"。
 function stepLabel(kind, d){
   d = d || {};
   switch (kind){
-    case "gate":    return zh(GATE_ZH, d.decision);
+    case "gate": {
+      const base = zh(GATE_ZH, d.decision);
+      // 没有 query 的门控事件（上线之前写下的那些记录）走这一支 ⇒ 渲染出来
+      // 和从前一个字节都不差。
+      if (d.decision !== "retrieve" || !d.query) return base;
+      return `${base} ·「${String(d.query).slice(0, GATE_QUERY_IN_LABEL)}」`
+           + ` · 命中 ${(d.hits || []).length} 条`;
+    }
     case "context": return `历史 ${d.history || 0} 条 → 送出 ${d.sent || 0} 条`;
     case "route":   return `${d.workflow || "graph"} → ${zh(TARGET_ZH, d.target)}`;
     case "graph":   return `工作流 ${d.workflow || ""} · ${(d.path || []).join(" → ")}`;
@@ -69,6 +83,21 @@ function stepLabel(kind, d){
 function stepDetail(kind, d){
   d = d || {};
   switch (kind){
+    case "gate": {
+      const reason = String(d.reason || "");
+      // 同上：没有 query 的旧记录，详情就是那句 reason，和今天一样。
+      if (d.decision !== "retrieve" || !d.query) return reason;
+      const hits = d.hits || [];
+      const lines = [reason, `检索词：${String(d.query).slice(0, GATE_CLIP)}`];
+      if (!hits.length) return [...lines, "没有命中任何记忆"].join("\n");
+      lines.push(`命中 ${hits.length} 条：`);
+      hits.slice(0, GATE_MAX_HITS).forEach((h, i) => {
+        lines.push(`${i + 1}. ${h.kind || ""} · ${String(h.text || "").slice(0, GATE_CLIP)}`);
+      });
+      if (hits.length > GATE_MAX_HITS)
+        lines.push(`…还有 ${hits.length - GATE_MAX_HITS} 条没显示`);
+      return lines.join("\n");
+    }
     case "context": return joinZh([
       `附加上下文 ${d.chars || 0} 字`,
       ...(d.compaction || []).map(c => `压缩：${zh(COMPACT_ZH, c)}`)]);
@@ -79,6 +108,18 @@ function stepDetail(kind, d){
                          + `输出 ${d.out == null ? "?" : d.out} tokens`;
     default:        return String(d.text || "");
   }
+}
+
+// 运维页那张门控表里的一格：条数写在外面，点开是命中列表。
+// 展开的那段直接复用 stepDetail 的输出（掐掉第一行的 reason —— 它旁边那一列
+// 已经有了），所以这张表和时间线永远说同一句话，不可能各写各的。
+function gateHitsCell(g){
+  if (!g || g.decision !== "retrieve" || !g.query)
+    return `<td class="meta">—</td>`;
+  const n = (g.hits || []).length;
+  const body = stepDetail("gate", g).split("\n").slice(1).join("\n");
+  return `<td><details class="gate-hits"><summary>${n} 条</summary>`
+       + `<pre>${esc(body)}</pre></details></td>`;
 }
 
 const stepMs = ms => ms == null ? "" :
@@ -154,7 +195,7 @@ function stepsFromTurn(t){
               ms: null});
   if (t.gate)
     out.push({kind: "gate", label: stepLabel("gate", t.gate),
-              detail: t.gate.reason || "", ms: null});
+              detail: stepDetail("gate", t.gate), ms: null});
   const run = [
     ...(t.llm_calls || []).map(c => ({ts: c.ts, s: {
       kind: "llm", label: stepLabel("llm", c), detail: stepDetail("llm", c.usage || {}),
