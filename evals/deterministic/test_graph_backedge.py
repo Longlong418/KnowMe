@@ -232,6 +232,64 @@ const drive = (workflow, events) => {
          "a loop: the run panel shows each round's own time");
 }
 
+// --- what each node DID, on the card -------------------------------------
+//
+// The engine cannot supply this: node_end carries the KEYS of the dict a node
+// returned and never the values, so a card built from engine events alone can
+// say "plan produced `subquestions message`" and not which sub-questions those
+// were. It rides two events the workflow emits itself, and the branches that
+// read them must be driven HERE — runGraph's frame loop swallows a throw, so a
+// broken branch renders a bare card and says nothing anywhere else.
+{
+  const run = drive("deep_research", [
+    {kind: "graph_start", nodes: ["plan", "research", "synthesize", "save"]},
+    {kind: "node_start", node: "plan", visit: 1},
+    {kind: "plan_ready", node: "plan",
+     subquestions: ["固态电池的能量密度", "固态电池的量产时间"]},
+    {kind: "node_end", node: "plan", ms: 428, keys: ["subquestions", "message"]},
+    {kind: "node_start", node: "research", visit: 1},
+    {kind: "research_round", node: "research", round: 1, agents: [
+      {subquestion: "固态电池的能量密度", searches: 2, reads: 3, iterations: 8,
+       max_iterations: 8, hit_limit: true, error: "", ms: 2100},
+      {subquestion: "固态电池的量产时间", searches: 1, reads: 0, iterations: 2,
+       max_iterations: 8, hit_limit: false, error: "", ms: 640},
+      {subquestion: "固态电池的成本", searches: 0, reads: 0, iterations: 0,
+       max_iterations: 8, hit_limit: false, error: "RuntimeError: boom", ms: 12},
+    ]},
+    {kind: "node_end", node: "research", ms: 2900, keys: ["reply", "sources"]},
+  ]);
+  const planCard = G.graphCol("plan", run.waves[0]);
+  assert(planCard.includes("固态电池的能量密度") && planCard.includes("固态电池的量产时间"),
+         "the plan card says what the topic was split into, not just that it was split");
+  assert((planCard.match(/sa-row/g) || []).length === 2,
+         "the plan card lists one line per sub-question");
+
+  const roundCard = G.graphCol("research", run.waves[1]);
+  assert((roundCard.match(/sa-row/g) || []).length === 3,
+         "the round card lists one line per sub-agent (got "
+         + (roundCard.match(/sa-row/g) || []).length + ")");
+  assert(roundCard.includes("固态电池的量产时间"), "each line names the question it owns");
+  // Counted, not quoted: the numbers come off the tool records and off run_loop's
+  // receipt, never off what an agent said it did.
+  assert(roundCard.includes("找 2 · 读 3 · 往返 8/8") && roundCard.includes("没查完"),
+         "a starved agent's line says so: " + roundCard);
+  assert(roundCard.includes("找 1 · 读 0 · 往返 2/8") && roundCard.includes("0.6s"),
+         "an idle agent's line shows what it actually spent: " + roundCard);
+  assert(roundCard.includes("失败"), "a crashed agent is not dropped off the card");
+  assert(!planCard.includes("没查完"), "the plan card is a plan, not a receipt");
+
+  // A fresh run must not inherit the last one's detail. graphResetRun replaces
+  // the run object wholesale, so a missing `detail: {}` in it would quietly show
+  // the previous topic's sub-questions on a brand new run's cards.
+  const again = drive("deep_research", [
+    {kind: "graph_start", nodes: ["plan"]},
+    {kind: "node_start", node: "plan", visit: 1},
+    {kind: "node_end", node: "plan", ms: 5},
+  ]);
+  assert(!G.graphCol("plan", again.waves[0]).includes("sa-row"),
+         "the previous run's detail leaked into the next run's card");
+}
+
 // --- a route lights the EDGE, never the target node ---------------------
 lit.length = 0;
 G.animateGraphStage({type: "route", workflow: "deep_research",

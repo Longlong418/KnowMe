@@ -35,6 +35,22 @@ ONE SUB-AGENT PER SUB-QUESTION, IN PARALLEL
     across several graph nodes could never run a second round. Keeping it inside
     the node leaves the topology — and the byte-frozen chart — untouched.
 
+TWO KNOBS, AND WHAT THE PAGE CAN SEE
+    A run started from the dashboard carries a `budget` — "how many round-trips
+    may one sub-agent spend" and "how many rounds may the whole thing take" —
+    clamped at the door by _clean_budget, because the browser's copy of a number
+    is a suggestion. The CLI and `/deep_research` send none and get the module
+    defaults, which is why both live here as constants with one reader each.
+
+    The page also gets to see what each node DID, which the engine cannot tell
+    it: `node_end` carries the KEYS of the dict a node returned and never the
+    values, so a card built from engine events alone can say "plan took 428ms and
+    produced `subquestions message`" and not which sub-questions those were. The
+    two facts a reader actually wants — the plan, and what each sub-agent was
+    sent after — therefore travel on this module's OWN events (`plan_ready`,
+    `research_round`), whose payloads stay bounded: a plan, and one receipt line
+    per sub-agent. No model prose, and no tool output, ever rides them.
+
 WHY EACH ROUND TAKES agent_lock
     A model call raises llm events and a tool call raises tool events, and
     data.py files every llm/tool event that arrives while a turn is open under
@@ -55,6 +71,7 @@ WHY EACH ROUND TAKES agent_lock
 from __future__ import annotations
 
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
@@ -65,6 +82,7 @@ from knowme.app import KnowMe
 from knowme.core.loop import run_loop
 from knowme.graph import run_graph
 from knowme.graph.workflows.deep_research import (
+    MAX_ROUNDS,
     PLAN_PROMPT,
     SUBAGENT_PROMPT,
     SYNTH_PROMPT,
@@ -90,6 +108,39 @@ MAX_ITERATIONS = 8
 # them tells the reader what to do next.
 BUDGET_SPENT = ("（这个子问题**没查完**：子 agent 的模型往返预算用尽了，"
                 "下面只是它已经拿到的部分。）")
+
+# What the page's two knobs are allowed to be, clamped on THIS side of the wire.
+# /api/graph/stream is a plain POST endpoint, so the browser's copy of the number
+# is a suggestion: `rounds: 100000` from a hand-made request is real money, and
+# `iterations: 1` is a sub-agent that searches and then stops. The low ends are
+# what a sub-agent needs to do anything at all — one search, one page.
+BUDGET_LIMITS = {"iterations": (2, 20), "rounds": (1, 6)}
+
+
+def _clean_budget(raw) -> dict:
+    """The page's knobs, clamped, with anything unrecognised dropped.
+
+    Returns {} when there is nothing usable, and every reader then falls back to
+    the module default — so a run started from the CLI or from `/deep_research`,
+    which send no budget at all, is exactly the run it was before the knobs
+    existed. Anything not an int (a string, a list, a bool) falls back too; a
+    bool is an int in Python, and `rounds: true` must not mean one round.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for name, (low, high) in BUDGET_LIMITS.items():
+        value = raw.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        out[name] = max(low, min(high, int(value)))
+    return out
+
+
+def _knob(budget, name: str, default: int) -> int:
+    """One clamped knob, or `default` when this run brought none."""
+    value = (budget or {}).get(name)
+    return value if isinstance(value, int) else default
 
 USAGE = ("`/deep_research` needs a topic to research, not just the command.\n\n"
          "Try `/deep_research 固态电池的产业化进度` — it will plan sub-questions, "
@@ -129,7 +180,7 @@ def _one_shot(knowme: KnowMe, model: str, prompt: str, max_tokens: int) -> str:
 
 
 def _one_subagent(*, client, model: str, tools, brief: str, subquestion: str,
-                  round_no: int, notify) -> dict:
+                  round_no: int, max_iterations: int, notify) -> dict:
     """One sub-agent: one sub-question, its own budget, its own loop turn.
 
     THIS FUNCTION NEVER RAISES. Its result is read with `f.result()`, which
@@ -137,6 +188,11 @@ def _one_subagent(*, client, model: str, tools, brief: str, subquestion: str,
     own sub-question and nothing else. The other agents in this wave have already
     paid for their searches, and the round still has to hand the synthesizer
     something — same posture as `_try` in the workflow.
+
+    What it hands back beyond the notes is a RECEIPT — iterations used, whether
+    it ran out, how long it took — because the page draws one line per sub-agent
+    and a round's totals cannot be broken back down into those lines: `_merge`
+    sees one merged reply, not three agents' worth of turns.
     """
     def told(kind: str, ev: dict) -> None:
         # Tag the event with the sub-question it belongs to. Without this every
@@ -148,23 +204,35 @@ def _one_subagent(*, client, model: str, tools, brief: str, subquestion: str,
         if notify:
             notify(kind, {**ev, "subquestion": subquestion, "round": round_no})
 
+    started = time.perf_counter()
     try:
         result = run_loop(
             client=client, model=model, system=SYSTEM,
             messages=[{"role": "user", "content": SUBAGENT_PROMPT.format(
                 brief=brief, subquestion=subquestion)}],
-            tools=tools, max_iterations=MAX_ITERATIONS, max_tokens=2048,
+            tools=tools, max_iterations=max_iterations, max_tokens=2048,
             observer=told)
     except Exception as exc:  # noqa: BLE001 — one agent's failure is not the round's
+        why = f"{type(exc).__name__}: {exc}"
         return {"subquestion": subquestion,
-                "reply": f"(这个子问题失败了：{type(exc).__name__}: {exc})",
-                "tool_calls": [], "hit_limit": False}
+                "reply": f"(这个子问题失败了：{why})", "tool_calls": [],
+                "hit_limit": False, "iterations": 0, "ms": _ms_since(started),
+                "max_iterations": max_iterations, "error": why}
     return {"subquestion": subquestion, "reply": result.reply,
-            "tool_calls": result.tool_calls, "hit_limit": result.hit_limit}
+            "tool_calls": result.tool_calls, "hit_limit": result.hit_limit,
+            "iterations": result.iterations, "ms": _ms_since(started),
+            "max_iterations": max_iterations, "error": ""}
+
+
+def _ms_since(started: float) -> int:
+    """Milliseconds since a perf_counter() reading, as a whole number — the same
+    shape the engine reports a node's `ms` in, so a card can print both."""
+    return int((time.perf_counter() - started) * 1000)
 
 
 def _merge(outs: list[dict]) -> dict:
-    """The round's reply and sources, out of one answer per sub-question.
+    """The round's reply, sources and per-agent receipts, out of one answer per
+    sub-question.
 
     The sources are counted ONCE over the concatenated tool records, so
     `sources_from_tool_calls` stays the single authority on what a round touched
@@ -174,20 +242,50 @@ def _merge(outs: list[dict]) -> dict:
 
     A starved sub-agent gets BUDGET_SPENT in front of its notes: its reply is
     loop.py's canned apology, not a finding, and SYNTH_PROMPT is told to name it.
+
+    `agents` is what the page draws, one line per sub-agent, IN THE ORDER THE
+    PLAN LISTED THEM — `outs` comes straight from the futures list, which the
+    caller built in that order, so the rows do not move around as the workers
+    finish in whatever order they finish in. The two counts come off the tool
+    records, never off the reply (rule 1 again): what a sub-agent SAID it did is
+    not evidence.
     """
-    parts = []
+    parts, agents = [], []
     for out in outs:
         body = (out.get("reply") or "").strip() or "(没有写出任何笔记)"
         if out.get("hit_limit"):
             body = f"{BUDGET_SPENT}\n\n{body}"
         parts.append(f"### {out.get('subquestion', '')}\n\n{body}")
+        calls = out.get("tool_calls") or []
+        agents.append({
+            "subquestion": out.get("subquestion", ""),
+            "searches": sum(1 for c in calls if c.get("tool") == "search_web"),
+            "reads": sum(1 for c in calls if c.get("tool") == "read_webpage"),
+            "iterations": out.get("iterations") or 0,
+            # The ceiling this run gave it, so the page can print "8/8" and mean
+            # it. It travels with the receipt because only the binder knows it —
+            # it comes from the page's knob, and the workflow has no business
+            # knowing what a sub-agent's iteration budget is.
+            "max_iterations": out.get("max_iterations") or 0,
+            "hit_limit": bool(out.get("hit_limit")),
+            "error": out.get("error") or "",
+            "ms": out.get("ms") or 0,
+        })
     return {"reply": "\n\n".join(parts),
             "sources": sources_from_tool_calls(
-                [c for out in outs for c in (out.get("tool_calls") or [])])}
+                [c for out in outs for c in (out.get("tool_calls") or [])]),
+            "agents": agents}
 
 
-def build_bound_graph(knowme: KnowMe):
-    """The pure workflow, wired to this machine."""
+def build_bound_graph(knowme: KnowMe, budget: dict | None = None):
+    """The pure workflow, wired to this machine.
+
+    `budget` is the page's two knobs, ALREADY CLAMPED (run_deep_research does that
+    once, at the door). It reaches the graph in the one place a graph can be
+    configured — the round node's `max_visits`, which must stay one above the
+    round budget the router enforces (the workflow's rule 2). Everything else
+    reads the budget out of the run's own state.
+    """
     plan_model, work_model = _settings_model(knowme)
     settings = knowme.settings
 
@@ -215,6 +313,10 @@ def build_bound_graph(knowme: KnowMe):
         brief = state.get("message") or ""
         round_no = (state.get("round") or 0) + 1
         notify = state.get("_notify")
+        # Each agent's OWN ceiling, from the page's knob (already clamped), or the
+        # module default for a run that brought none. Every agent in the wave gets
+        # the same one — the fan-out is not a shared budget, it is N of them.
+        per_agent = _knob(state.get("budget"), "iterations", MAX_ITERATIONS)
         # ONE lock for the whole wave, never inside a worker: agent_lock is a
         # plain threading.Lock and NOT reentrant, so a child acquiring what its
         # parent holds deadlocks instead of waiting. Same scope as before — per
@@ -225,7 +327,7 @@ def build_bound_graph(knowme: KnowMe):
             futures = [pool.submit(
                 _one_subagent, client=knowme.client, model=work_model,
                 tools=tools, brief=brief, subquestion=q, round_no=round_no,
-                notify=notify) for q in questions]
+                max_iterations=per_agent, notify=notify) for q in questions]
             # Read in sub-question order, so the merged notes read in the order
             # the plan listed them rather than in completion order.
             outs = [f.result() for f in futures]
@@ -256,8 +358,14 @@ def build_bound_graph(knowme: KnowMe):
             out["file_error"] = f"{type(exc).__name__}: {exc}"
         return out
 
-    return build_deep_research_graph(plan_fn=plan_fn, research_fn=research_fn,
-                                     synth_fn=synth_fn, save_fn=save_fn)
+    return build_deep_research_graph(
+        plan_fn=plan_fn, research_fn=research_fn, synth_fn=synth_fn,
+        save_fn=save_fn,
+        # One ABOVE the round budget, never equal to it: a jump target over its
+        # max_visits is dropped from the wave silently, and an empty wave ends the
+        # run before synthesize — which would mean no report at all, only a line
+        # in errors, after the whole thing was paid for (workflow rule 2).
+        max_visits=_knob(budget, "rounds", MAX_ROUNDS) + 1)
 
 
 def _slug(topic: str, limit: int = 40) -> str:
@@ -292,13 +400,18 @@ def _write_report(home: Path, state: dict, report: str) -> str:
 
 
 def run_deep_research(knowme: KnowMe | None = None, observer=None,
-                      message: str = "") -> dict:
+                      message: str = "", budget=None) -> dict:
     """Run one deep research job to completion. Returns the final state.
 
     The `message` parameter name is load-bearing: commands.run inspects the
     signature for it and passes `/deep_research <topic>`'s argument through
     (commands.py:96-108). No argument means no topic, and a research run with no
     topic is a paid round trip to find nothing — so say so instead of starting.
+
+    `budget` is the page's two knobs and comes only from the dashboard:
+    graph_stream passes it when the runner declares the parameter
+    (runtime.py:221-225). The CLI and `/deep_research` never pass one, so they
+    keep the module defaults. It is clamped HERE, once, before anything reads it.
 
     The observer is composed with the tracer, so the run lands in traces/*.jsonl
     like any turn — which is what lights the topology chart: the dashboard's
@@ -307,21 +420,33 @@ def run_deep_research(knowme: KnowMe | None = None, observer=None,
     topic = (message or "").strip()
     if not topic:
         return {"digest": USAGE}
+    clean = _clean_budget(budget)
     own = knowme is None
     knowme = knowme or KnowMe()
     try:
-        # graph_stream's docstring makes a promise: only the engine's own events
-        # go out, and they carry no node OUTPUT, so a payload can never leak into
-        # a frame. A round's llm/tool events DO carry output (tool results, model
-        # text), so they go to the trace and not to the stream.
-        forwarded = {"graph_start", "node_start", "node_end", "route", "graph_end"}
+        # graph_stream's docstring makes a promise, and it is worth keeping
+        # exactly: the ENGINE's events carry no node OUTPUT, so a digest can
+        # never leak into a frame. A round's llm/tool events DO carry output
+        # (tool results, model text), so they go to the trace and not to the
+        # stream — that part is unchanged.
+        #
+        # The last two kinds are this workflow's own, and they are the exception
+        # the promise needs to name: `plan_ready` (the sub-questions the planner
+        # produced) and `research_round` (one row per sub-agent). Both are
+        # BOUNDED — at most 5 short questions and 5 rows of four numbers, no
+        # model prose and no tool output — and neither exists for any other
+        # workflow. They go out because a card cannot show what a node DID from
+        # `node_end`, which carries the keys of a node's output and never values.
+        forwarded = {"graph_start", "node_start", "node_end", "route", "graph_end",
+                     "plan_ready", "research_round"}
 
         def notify(kind: str, ev: dict) -> None:
             knowme.tracer.event(kind, ev)
             if observer and kind in forwarded:
                 observer(kind, ev)
 
-        return run_graph(build_bound_graph(knowme), {"topic": topic}, observer=notify)
+        return run_graph(build_bound_graph(knowme, clean),
+                         {"topic": topic, "budget": clean}, observer=notify)
     finally:
         if own:
             knowme.close()

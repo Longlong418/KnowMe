@@ -57,9 +57,14 @@ def _graph(**overrides):
 
 
 def _run(**overrides) -> tuple[dict, list[str]]:
-    """Run it and hand back (final state, the engine's path of nodes)."""
+    """Run it and hand back (final state, the engine's path of nodes).
+
+    `budget` is the page's pair of knobs. It is not a graph override — it belongs
+    in the initial state, which is exactly where run_deep_research puts it.
+    """
+    budget = overrides.pop("budget", None)
     seen: list[tuple[str, dict]] = []
-    state = run_graph(_graph(**overrides), {"topic": "固态电池"},
+    state = run_graph(_graph(**overrides), {"topic": "固态电池", "budget": budget},
                       observer=lambda kind, ev: seen.append((kind, ev)))
     end = next(ev for kind, ev in seen if kind == "graph_end")
     return state, end["path"]
@@ -119,6 +124,54 @@ def test_the_round_budget_is_one_below_max_visits():
     (describe() does not carry max_visits: it is not a drawing, it is a guard.)"""
     assert MAX_VISITS > MAX_ROUNDS
     assert _graph().nodes["research"].max_visits == MAX_VISITS
+
+
+def test_the_pages_round_knob_lowers_the_ceiling_the_router_reads():
+    """The knob the user asked for, driven where it is actually read. The same
+    scripted round that runs MAX_ROUNDS times by default stops after two, and
+    `errors` being empty is the load-bearing part: the ROUTER stopped it, the
+    guard never fired."""
+    rounds: list[int] = []
+
+    def always_new(state):
+        rounds.append(state.get("round") or 0)
+        return {"reply": "found things",
+                "sources": [f"https://new-{len(rounds)}.example/a"]}
+
+    state, path = _run(research_fn=always_new, budget={"rounds": 2})
+
+    assert len(rounds) == 2, f"expected the page's 2 rounds, got {len(rounds)}"
+    assert path == ["plan", "research", "research", "synthesize", "save"], path
+    assert state["digest"] == "REPORT", "a shortened run still writes a report"
+    assert state["errors"] == {}, state["errors"]
+
+
+def test_a_dirty_round_knob_cannot_take_the_run_down_with_it():
+    """`stop_reason` is called OUTSIDE the engine's try/except (engine.py:189),
+    so anything it raises takes `graph_end` with it and the page never hears the
+    run is over. The budget comes from a POST body: assume nothing about it."""
+    for dirty in ({"rounds": None}, {"rounds": 0}, {"rounds": "3"}, {"rounds": True},
+                  "not a dict", None):
+        state = {"round": 1, "sources_new": 9, "budget": dirty}
+        assert stop_reason(state) == "", dirty          # falls back, keeps going
+        state["round"] = MAX_ROUNDS
+        assert stop_reason(state).startswith("到轮次上限"), dirty
+
+    # And a GOOD one is read, not passed over: "it fell back to the default" and
+    # "it never looked at the field" give the same answer on a dirty value, so
+    # the two directions have to be asserted side by side.
+    assert stop_reason({"round": 2, "sources_new": 9, "budget": {"rounds": 2}}) \
+        .startswith("到轮次上限")
+    assert stop_reason({"round": 2, "sources_new": 9, "budget": {"rounds": 5}}) == ""
+
+
+def test_max_visits_is_a_parameter_and_its_default_has_not_moved():
+    """The binder raises it with the round knob (rounds + 1), so it has to be an
+    argument. The default must stay MAX_VISITS: deep_research_topology() passes
+    no max_visits at all, and test_graph_describe compares that drawing to a live
+    describe() output."""
+    assert _graph().nodes["research"].max_visits == MAX_VISITS
+    assert _graph(max_visits=7).nodes["research"].max_visits == 7
 
 
 # --- 2: stopping still produces a report -------------------------------------

@@ -1,8 +1,13 @@
 // knowme web — 深度研究：给一个主题，它自己查几轮，再写一份带出处的报告。
 //
 // 一页两栏：左边是这张工作流的图 + 它这一趟**实际走过**的波次（一轮一张卡片，
-// 图上同时亮着正在跑的那个），右边是报告。中间那个输入框只干一件事：把主题
-// 交给 runGraph。
+// 图上同时亮着正在跑的那个），右边是报告。上面那一行只干一件事：把主题交给
+// runGraph；下面那两个数字框是这一趟的预算（每个 sub-agent 几次模型往返、整趟
+// 最多几轮），跟主题走同一条路 —— 一起 POST 给服务端。
+//
+// 卡片里的明细（plan 拆出的子问题、每个 sub-agent 那一行）不是这一页画的：它是
+// graph.js 里 graphColDetail() 画的，数据来自工作流自己发的两条事件。理由见那边
+// 的注释 —— 引擎的 node_end 只带节点返回值里的**键名**。
 //
 // 它跑的是 knowme/graph/workflows/deep_research.py，图是 /api/data 现算的
 // describe() 输出 —— 这一页不画图，它只是把那张图放上去。所以"图和实际执行的
@@ -121,6 +126,56 @@ function researchType(value){
   researchTopic = value;   // 只进模块状态；提交时才落 localStorage
 }
 
+// 两个旋钮：每个 sub-agent 最多几次模型往返、整趟最多几轮。默认值和范围都照着后端的
+// 那一份抄（ops/deep_research.py 的 MAX_ITERATIONS / MAX_ROUNDS / BUDGET_LIMITS），
+// 页面不自己发明数。这里夹一次是为了让人在框里打不出离谱的值；**服务端还会再夹一次** ——
+// 它不该相信浏览器发来的任何东西，而 /api/graph/stream 是谁都能 POST 的。
+const RESEARCH_BUDGET = {iterations: [2, 20], rounds: [1, 6]};
+const RESEARCH_BUDGET_DEFAULT = {iterations: 8, rounds: 3};
+// 值可能是数字（默认值）也可能是字符串（用户刚打完），所以一律走 researchBudgetOut() 解析。
+let researchBudget = {...RESEARCH_BUDGET_DEFAULT};
+
+// 发出去之前的那一次夹紧。把输入框清空是很自然的动作，那时 Number("") 是 0 而不是 NaN，
+// 光判 isFinite 会把它当成"要 0 次往返" —— 所以空串直接回落到默认值。
+function researchBudgetOut(){
+  const pick = (name) => {
+    const [low, high] = RESEARCH_BUDGET[name];
+    const raw = String(researchBudget[name] ?? "").trim();
+    const value = Math.round(Number(raw));
+    return raw && Number.isFinite(value)
+      ? Math.min(high, Math.max(low, value))
+      : RESEARCH_BUDGET_DEFAULT[name];
+  };
+  return {iterations: pick("iterations"), rounds: pick("rounds")};
+}
+
+// 两个输入框共用这一个 handler，靠 id 分辨改的是哪一个。改完立刻重画下面那句说明 ——
+// 那句话是照着预算写的（「最多 N 轮」），不重画就还停在旧数字上。这一页在 render() 里
+// 是"跳过重建"的，所以没有别的时机能更新它。
+//
+// 故意**不**把夹紧后的值写回输入框：那会在人打到一半时改他打的字（想打 10，刚敲下 "1"
+// 就被改成 2）。夹紧的结果由下面那句说明写出来，那才是"实际会跑成什么样"。
+function researchSetBudget(input){
+  researchBudget[input.id === "research-iter" ? "iterations" : "rounds"] = input.value;
+  researchBudgetSave();
+  const note = document.getElementById("research-budget-note");
+  if (note) note.innerHTML = researchBudgetNote();
+}
+
+function researchBudgetNote(){
+  const b = researchBudgetOut();
+  return `最多 ${b.rounds} 轮：每一轮给每个子问题各派一个 sub-agent 去搜、去读，然后问
+    "这一轮有没有找到新东西" —— 有就带着已掌握的内容再补一轮，没有就收工写报告。
+    每个 sub-agent 最多 ${b.iterations} 次模型往返，用完了那一行会标成「没查完」，
+    报告里也会点名说这是本轮没查完、不是没有答案。报告同时写进知识库和 <code>outbox/</code>。`;
+}
+
+function researchBudgetSave(){
+  const b = researchBudgetOut();
+  localStorage.setItem("knowme_research_iter", String(b.iterations));
+  localStorage.setItem("knowme_research_rounds", String(b.rounds));
+}
+
 async function startResearch(){
   const el = document.getElementById("research-topic");
   const topic = String((el && el.value) || researchTopic || "").trim();
@@ -130,7 +185,9 @@ async function startResearch(){
   // 这一趟的报告还没落库：清掉上一条笔记的 id，不然报告栏会先显示上一趟的。
   researchNoteId = "";
   researchPainted = null;
-  await runGraph(RESEARCH_WORKFLOW, topic, repaintResearch);
+  // 预算跟着这一趟走，跟主题是同一条路：服务端只把它交给声明了 budget 形参的 runner，
+  // 也就是只有深度研究会收到。
+  await runGraph(RESEARCH_WORKFLOW, topic, repaintResearch, researchBudgetOut());
   if (graphRun.noteId){
     researchNoteId = graphRun.noteId;
     localStorage.setItem("knowme_research_note", graphRun.noteId);
@@ -147,6 +204,12 @@ function researchRestore(){
   researchTopic = localStorage.getItem("knowme_research_topic") || "";
   researchNoteId = localStorage.getItem("knowme_research_note") || "";
   researchPainted = null;
+  // 旋钮也要记住。存进去的一定是夹紧过的值（researchBudgetSave 走的是
+  // researchBudgetOut），所以这里读回来直接用。
+  researchBudget.iterations =
+    localStorage.getItem("knowme_research_iter") || researchBudget.iterations;
+  researchBudget.rounds =
+    localStorage.getItem("knowme_research_rounds") || researchBudget.rounds;
 }
 
 // 这张图有 6 列。以前它和「每一轮」的卡片挤在 .dr-grid 的左半栏里，那一栏
@@ -161,6 +224,7 @@ const DR_CHART = {w: 152, gx: 48};
 
 function deepResearchView(){
   const wf = researchTopology();
+  const budget = researchBudgetOut();
   return `<div class="card">
     <div class="ctc-head"><b>要研究什么</b>
       <span class="meta">给一个主题，不是一个问题 —— 它自己去查。</span></div>
@@ -173,9 +237,16 @@ function deepResearchView(){
       <button id="research-go" class="save" onclick="startResearch()"
               ${graphRun.running ? "disabled" : ""}>${researchButton()}</button>
     </div>
-    <div class="meta">最多三轮：每轮搜索并把页面读进来，然后问"这一轮有没有找到新东西"，
-      有就带着已掌握的内容再补一轮，没有就收工写报告。报告同时写进知识库和
-      <code>outbox/</code>。</div>
+    <div class="dr-budget">
+      <label class="fld-inline">每个子问题最多
+        <input id="research-iter" type="number" min="2" max="20" value="${budget.iterations}"
+               oninput="researchSetBudget(this)">次模型往返</label>
+      <label class="fld-inline">最多
+        <input id="research-rounds" type="number" min="1" max="6" value="${budget.rounds}"
+               oninput="researchSetBudget(this)">轮</label>
+      <span class="meta">实际用掉的数会写在每张卡片的子 agent 那一行上</span>
+    </div>
+    <div class="meta" id="research-budget-note">${researchBudgetNote()}</div>
   </div>
   <section class="dr-chart">
     <h2>它怎么走 <span id="research-live">${researchLive()}</span></h2>

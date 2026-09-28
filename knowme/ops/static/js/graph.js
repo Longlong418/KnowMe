@@ -259,12 +259,22 @@ function graphLive(name){
 // and routes it to a card; the graph engine already tags every event with
 // `node`. Swap the key, reuse .cmp-grid/.cmp-col, and it reads as a sibling
 // because it is one.
+// `detail` is what a node DID, keyed like `nodes` (see graphColDetail). It lives
+// in the run object rather than on the nodes themselves because node_end
+// REPLACES a node's whole record — anything hung on it is wiped the moment the
+// node finishes, which is exactly when a card wants to show it.
 let graphRun = {running: false, workflow: "", nodes: {}, order: [], waves: [],
-                visit: {}, digest: "", draft: "", noteId: "", error: "", ticker: null};
+                visit: {}, detail: {}, digest: "", draft: "", noteId: "",
+                error: "", ticker: null};
 
+// BOTH literals need every field: this function reassigns graphRun wholesale, so
+// a field missing here exists for the first run only and then silently vanishes
+// for the rest of the page's life. (Nothing in evals/ would notice — its harness
+// never sends the detail events — which is why the detail test drives them.)
 function graphResetRun(workflow){
   graphRun = {running: true, workflow, nodes: {}, order: [], waves: [], visit: {},
-              digest: "", draft: "", noteId: "", error: "", ticker: graphRun.ticker};
+              detail: {}, digest: "", draft: "", noteId: "", error: "",
+              ticker: graphRun.ticker};
 }
 
 // A node that runs more than once needs one card PER RUN. deep_research goes
@@ -306,6 +316,17 @@ function graphApplyEvent(ev){
     R.nodes[graphKey(ev.node, R.visit[ev.node])] =
       {status: ev.error ? "error" : "done", name: ev.node, ms: ev.ms,
        keys: ev.keys || [], error: ev.error || ""};
+  } else if (k === "plan_ready"){
+    // What the planner split the topic into. Only the workflow can say this:
+    // node_end carries the KEYS of a node's output and never the values, so
+    // "plan 428ms subquestions message" is all the engine can tell a card.
+    R.detail[graphKey(ev.node, R.visit[ev.node] || 1)] = {subquestions: ev.subquestions || []};
+  } else if (k === "research_round"){
+    // One row per sub-agent, in the order the plan listed them (the server sends
+    // them in that order, and they are NOT in completion order — the agents run
+    // in parallel). Keyed off `R.visit`, the same map node_end keys off, so a
+    // round's detail lands on that round's card by construction.
+    R.detail[graphKey(ev.node, R.visit[ev.node] || 1)] = {agents: ev.agents || []};
   } else if (k === "route"){
     R.route = {target: ev.target, reason: ev.reason};
   } else if (k === "graph_end"){
@@ -323,7 +344,11 @@ function graphApplyEvent(ev){
 // `onFrame` is who repaints: the Graph tab redraws the whole view, the research
 // page repaints only its own panel (and must, or the topic being typed into its
 // input would be wiped every 100ms).
-async function runGraph(workflow, message = "", onFrame = null){
+// `budget` is the same kind of thing as `message`: the research page's two knobs
+// ride along, and the server hands them to a runner that declares a `budget`
+// parameter and to nobody else. Null for every other caller, which is why the
+// graph tab's "run gather" is unaffected.
+async function runGraph(workflow, message = "", onFrame = null, budget = null){
   if (graphRun.running) return;
   const repaint = onFrame || render;
   graphResetRun(workflow);
@@ -335,7 +360,7 @@ async function runGraph(workflow, message = "", onFrame = null){
   try {
     const res = await fetch("/api/graph/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({workflow, message}),
+      body: JSON.stringify({workflow, message, budget}),
     });
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -370,6 +395,7 @@ async function runGraph(workflow, message = "", onFrame = null){
 function graphCol(key, wave){
   const n = graphRun.nodes[key] || {status: "waiting"};
   const name = n.name || key;
+  const detail = graphColDetail(key);
   // Only a repeated node needs its round number on the card; triage and gather
   // never produce a key with one, so their headings are unchanged.
   const label = key.includes("#") ? `${esc(name)} <span class="chip">第 ${key.split("#")[1]} 轮</span>`
@@ -384,7 +410,7 @@ function graphCol(key, wave){
   }
   if (n.status === "error")
     return `<div class="cmp-col err"><div class="cmp-h"><b>${label}</b></div>
-      <div class="meta" style="color:var(--bad)">${esc(n.error)}</div></div>`;
+      <div class="meta" style="color:var(--bad)">${esc(n.error)}</div>${detail}</div>`;
   // The bar is scaled to the SLOWEST node in this node's wave, and every faster
   // node prints what it spent waiting at the barrier. That number is the honest
   // cost of wave execution — printing it teaches more than hiding it would.
@@ -398,8 +424,53 @@ function graphCol(key, wave){
     <div class="meta">${waited > 20 && peers.length > 1
       ? `在同步屏障等待了 ${(waited/1000).toFixed(1)} 秒`
       : (peers.length > 1 ? "决定了本波次的速度" : "")}</div>
-    <div class="meta">${(n.keys || []).map(k => `<span class="chip">${esc(k)}</span>`).join(" ")}</div>
+    <div class="meta">${(n.keys || []).map(k => `<span class="chip">${esc(k)}</span>`).join(" ")}</div>${detail}
   </div>`;
+}
+
+// A node's "what it actually did", as markup — the plan's sub-questions, or one
+// row per sub-agent. The engine cannot supply this: node_end carries the KEYS of
+// the dict a node returned and never the values, so a card built from engine
+// events alone can say "plan took 428ms and produced `subquestions message`" and
+// not which sub-questions those were. It arrives instead on the workflow's own
+// two events (see graphApplyEvent), which is why this reads graphRun.detail.
+//
+// Returns "" when there is nothing, and that "" carries NO whitespace either
+// side: every node with no detail — all of triage and gather, plus
+// deep_research's own synthesize and save — must render the byte-identical card
+// it rendered before, which is what test_graph_backedge.py's frozen CARD_A
+// asserts. Do not make this read defensive (`(graphRun.detail || {})`): the
+// missing-init bug that would then be invisible is a real one (graphResetRun
+// replaces the run object wholesale), and a throw here is caught by runGraph's
+// frame loop and swallowed.
+function graphColDetail(key){
+  const d = graphRun.detail[key];
+  if (!d) return "";
+  const items = d.subquestions || [];
+  const agents = d.agents || [];
+  if (!items.length && !agents.length) return "";
+  const body = items.length
+    ? items.map((q, i) => `<div class="sa-row"><span class="sa-n">${i + 1}</span>`
+        + `<span class="sa-q">${esc(q)}</span></div>`).join("")
+    : agents.map(graphAgentRow).join("");
+  return `\n    <div class="sa-list${items.length ? " plan" : ""}">${body}</div>`;
+}
+
+// One sub-agent's line. Every number is a COUNT of what happened, taken from the
+// tool records and from run_loop's own receipt — never from the agent's prose:
+// how many searches it made, how many pages it read, how many round-trips it
+// spent out of the ceiling this run gave it, and how long it took. "没查完" is
+// what the report calls "预算耗尽", and it is the last token on the line on
+// purpose — it is the one word a reader is looking for.
+function graphAgentRow(a, i){
+  const used = `${a.iterations || 0}/${a.max_iterations || 0}`;
+  const stat = `找 ${a.searches || 0} · 读 ${a.reads || 0} · 往返 ${used}`
+    + ` · ${((a.ms || 0) / 1000).toFixed(1)}s`
+    + (a.error ? " · 失败" : (a.hit_limit ? " · 没查完" : ""));
+  return `<div class="sa-row${a.error || a.hit_limit ? " bad" : ""}">`
+    + `<span class="sa-n">${i + 1}</span>`
+    + `<span class="sa-q" title="${esc(a.subquestion || "")}">${esc(a.subquestion || "")}</span>`
+    + `<span class="sa-stat">${esc(stat)}</span></div>`;
 }
 
 // One wave's row of cards. Split out because two pages draw it — the Graph tab's

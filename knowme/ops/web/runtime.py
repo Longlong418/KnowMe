@@ -197,11 +197,15 @@ def _bounded(text: str, limit: int = 40_000) -> str:
 def graph_stream(payload: dict, emit) -> None:
     """Run a graph workflow, streaming its node events as SSE.
 
-    Only the engine's own events go out — graph_start / node_start / node_end /
-    route / graph_end. They already carry `workflow` and `node`, which is all a
-    card needs, and they carry no node OUTPUT, so a digest can never leak into
-    a frame. Unlike the Arena this needs no lock of its own: run_graph already
-    serialises notify() behind one (engine.py), so events arrive whole.
+    The engine's own events — graph_start / node_start / node_end / route /
+    graph_end — already carry `workflow` and `node`, which is all a card needs,
+    and they carry no node OUTPUT, so a digest can never leak into a frame. A
+    runner may add bounded kinds of its own on top (deep_research's plan_ready
+    and research_round say WHAT a node produced, because node_end carries only
+    the keys of its output and never the values) — that is the runner's decision,
+    made by putting them in its `forwarded` set. Unlike the Arena this needs no
+    lock of its own: run_graph already serialises notify() behind one
+    (engine.py), so events arrive whole.
     """
     name = (payload.get("workflow") or "").strip()
     target = WORKFLOW_RUNNERS().get(name)
@@ -218,11 +222,16 @@ def graph_stream(payload: dict, emit) -> None:
         # payload's topic; one that does not is called exactly as before. Same
         # convention as commands.run (commands.py:104), so `/gather` and the
         # dashboard button stay one story.
-        if "message" in inspect.signature(run).parameters:
-            state = run(observer=lambda kind, ev: emit(kind, ev),
-                        message=payload.get("message") or "")
-        else:
-            state = run(observer=lambda kind, ev: emit(kind, ev))
+        #
+        # Each keyword is gated on the SIGNATURE, never on whether the payload
+        # happens to carry it: gather declares neither, and a stray `budget` in
+        # the body would otherwise reach it as a TypeError — which the handler
+        # below would faithfully report as a failed run.
+        params = inspect.signature(run).parameters
+        kwargs = {"message": payload.get("message") or ""} if "message" in params else {}
+        if "budget" in params:
+            kwargs["budget"] = payload.get("budget")
+        state = run(observer=lambda kind, ev: emit(kind, ev), **kwargs)
         emit("done", {
             "workflow": name,
             # Not truncated to fit a card: a research report is a document, and

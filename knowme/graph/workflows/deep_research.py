@@ -65,9 +65,18 @@ PLAN_PROMPT = """You are preparing a research plan. The topic is:
 
 {topic}
 
-Write {n} to 5 focused sub-questions that together would answer it. Prefer
-questions that a web search can actually answer, and prefer specific over broad.
-Reply with ONLY a JSON array of strings, nothing else:
+Write {n} to 5 sub-questions that together would answer it.
+
+EACH ENTRY MUST BE ANSWERABLE BY ONE SEARCH ON ITS OWN. Every entry gets its own
+agent and its own small budget, so an entry that needs four searches gets cut off
+before it reads a single page — and then it reports a gap that is THIS RUN's
+fault as though the world had no answer. Split anything that:
+- joins two things with 和 / 或 / 以及 / 相比 — that is two entries, write two
+- spans more than one year, country, platform or company
+So "2023-2025 年国内外主流平台的对比" is four entries, not one, while
+"2024 年国内有哪些主流平台" is already one.
+
+Prefer specific over broad. Reply with ONLY a JSON array of strings, nothing else:
 
 ["first sub-question", "second sub-question"]"""
 
@@ -205,6 +214,25 @@ def parse_plan(text: str, topic: str) -> list[str]:
     return questions or [topic]
 
 
+def round_budget(state: dict) -> int:
+    """How many rounds this run may take: the page's knob if it sent one, else
+    MAX_ROUNDS.
+
+    Total on purpose, for the same reason stop_reason is: the engine calls that
+    one OUTSIDE any try/except, so a budget of an unexpected shape — a string
+    from a number input, a list from a hand-made POST — has to fall back to the
+    default rather than raise and take graph_end down with it.
+    """
+    budget = state.get("budget")
+    rounds = budget.get("rounds") if isinstance(budget, dict) else None
+    # `True` is an `int` to isinstance, and would read as "one round" — a budget
+    # nobody asked for that quietly looks obeyed. Same posture as the binder's
+    # _clean_budget, which drops booleans at the door.
+    if isinstance(rounds, bool) or not isinstance(rounds, int) or rounds <= 0:
+        return MAX_ROUNDS
+    return rounds
+
+
 def stop_reason(state: dict) -> str:
     """The router's reason, or "" to keep going. CODE over counts — see rule 1.
 
@@ -212,9 +240,10 @@ def stop_reason(state: dict) -> str:
     try/except (engine.py:189), so a KeyError here would escape run_graph
     entirely and take graph_end down with it.
     """
+    rounds = round_budget(state)
     round_no = state.get("round") or 0
-    if round_no >= MAX_ROUNDS:
-        return f"到轮次上限（{MAX_ROUNDS} 轮）"
+    if round_no >= rounds:
+        return f"到轮次上限（{rounds} 轮）"
     if not (state.get("sources_new") or 0):
         return "这一轮没有找到新的信源"
     return ""
@@ -227,6 +256,12 @@ def _next_prompt(state: dict) -> str:
     The one sub-question each agent owns is added by the binder, not here — this
     module has no idea how many agents there will be, and it should not: the
     fan-out is a runtime decision, and the topology stays one node either way.
+
+    Note what a later round does NOT get: a new plan. The plan is written once,
+    by `_start`, and the binder re-reads the SAME `state["subquestions"]` every
+    round — what changes between rounds is only this brief, which grows by the
+    previous round's findings. So a round card and the plan card show the same
+    questions, and the differences that matter are in the numbers, not the text.
     """
     findings = (state.get("findings") or "").strip()
     covered = COVERED.format(findings=findings[-3000:]) if findings else ""
@@ -243,6 +278,17 @@ def _start(state: dict, plan_fn: Callable[[dict], str]) -> dict:
     """
     text = _try(lambda: {"plan_text": plan_fn(state)}, {"plan_text": ""})["plan_text"]
     plan = parse_plan(text or "", state.get("topic", ""))
+    notify = state.get("_notify")
+    if notify:
+        # Say what was actually split out. A card cannot read it off node_end:
+        # that event carries the KEYS of the dict a node returned and never the
+        # values (test_graph_stream.py pins its key set to exactly
+        # workflow/node/ms/keys/error), so "plan 428ms subquestions message" is
+        # the whole story a page gets from the engine — enough to see that the
+        # planner produced something, and not enough to see WHAT.
+        # Bounded by parse_plan (at most 5 short strings), so this frame stays a
+        # caption rather than a payload.
+        notify("plan_ready", {"subquestions": plan})
     # The plan is DATA (state["subquestions"]) — the binder reads it and fans out
     # one sub-agent per entry. It is not pasted into the brief: the brief is the
     # part all of them share.
@@ -274,6 +320,15 @@ def _round(state: dict, research_fn: Callable[[dict], dict]) -> dict:
         notify("research_round", {
             "round": merged["round"], "sources_new": len(fresh),
             "sources_total": len(seen) + len(fresh),
+            # One row per sub-agent, in sub-question order — the binder gets its
+            # answers from the futures list it built in that order, so this needs
+            # no seq number and no client-side sort even though the workers finish
+            # whenever they finish. Without it a round card can only say how long
+            # the round took, which is not what the node DID.
+            # Bounded by the plan (at most 5 rows, each a question and four
+            # numbers), and a research_fn that reports nothing about its agents
+            # (every scripted one in the tests) simply degrades to no rows.
+            "agents": list(out.get("agents") or []),
             "note": (f"第 {merged['round']} 轮：新增 {len(fresh)} 个信源"
                      f"（累计 {len(seen) + len(fresh)} 个）")})
     return {
@@ -292,10 +347,17 @@ def _round(state: dict, research_fn: Callable[[dict], dict]) -> dict:
 def build_deep_research_graph(*, plan_fn: Callable[[dict], str],
                               research_fn: Callable[[dict], dict],
                               synth_fn: Callable[[dict], str],
-                              save_fn: Callable[[dict], dict]) -> Graph:
+                              save_fn: Callable[[dict], dict],
+                              max_visits: int = MAX_VISITS) -> Graph:
     """Callables injected exactly as gather does it: the tests script them with
     lambdas, deep_research_topology() passes stubs to describe the shape without
     running it, and knowme/ops/deep_research.py binds the real ones.
+
+    `max_visits` is the one thing the page's round knob changes about the shape,
+    and it has to stay one ABOVE that knob (rule 2 in the module docstring): it
+    is the bug detector, not the brake. It is a defaulted keyword for the same
+    reason — every caller with no knob to honour (the CLI, `/deep_research`, the
+    topology stub) gets back exactly the graph it always got.
 
     There is deliberately NO research → synthesize edge. A node carrying a
     router never fires its static out-edges (engine.py:187-200), so that edge
@@ -306,7 +368,7 @@ def build_deep_research_graph(*, plan_fn: Callable[[dict], str],
 
     g.add_node(Node("plan", lambda s: _start(s, plan_fn), kind="llm"))
     g.add_node(Node("research", lambda s: _round(s, research_fn), kind="agent",
-                    max_visits=MAX_VISITS, on_error="synthesize"))
+                    max_visits=max_visits, on_error="synthesize"))
     g.add_node(Node("synthesize", lambda s: {"digest": synth_fn(s)}, kind="llm"))
     # The two writes: a note in the knowledge base and a file in the outbox.
     # Both are wrapped in the binder so a failure leaves the report standing.

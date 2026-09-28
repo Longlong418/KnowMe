@@ -706,6 +706,28 @@
   .dr-row input:focus{border-color:var(--accent)}
   .dr-grid .live-dot{display:inline-block;width:7px;height:7px;border-radius:99px;
     background:var(--accent);margin-right:5px;animation:pulse 1.2s infinite}
+  /* 预算那两个数字框单独一行，不塞进上面的 .dr-row：那里的 input 是 flex:1（数字框会
+     被拉成一整行），而且那一行里唯一那个 button 是「开始研究」—— 让 `.dr-row button`
+     继续只指向一个元素。 */
+  .dr-budget{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px}
+  .dr-budget input[type=number]{width:64px;background:var(--bg);border:1px solid var(--line);
+    border-radius:var(--radius);color:var(--ink);padding:6px 8px;font:inherit;
+    font-size:12.5px;outline:none;font-variant-numeric:tabular-nums}
+  .dr-budget input[type=number]:focus{border-color:var(--accent)}
+  /* 卡片里的明细：plan 拆出来的子问题、每个 sub-agent 那一行。它们是 .cmp-col 的直接
+     子节点，所以 .cmp-col 的 gap 管不到行与行之间 —— 行距在这里自己收窄，并且用一条
+     细线跟上面那排键名 chip 分开。 */
+  .sa-list{display:flex;flex-direction:column;gap:3px;border-top:1px solid var(--line);
+    padding-top:7px;margin-top:2px}
+  .sa-row{display:flex;align-items:baseline;gap:6px;font-size:11.5px;color:var(--ink2)}
+  .sa-n{flex:none;font-family:var(--mono);color:var(--ink3)}
+  /* 子问题在一张 300px 不到的卡片里必须截断，否则每个 agent 都占两行。全文在 title 里。 */
+  .sa-q{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* plan 那五条是这一页最该被读的东西，所以那一列换行显示，不截断。 */
+  .sa-list.plan .sa-q{white-space:normal;overflow:visible}
+  .sa-stat{flex:none;font-variant-numeric:tabular-nums;color:var(--ink3)}
+  /* 「没查完」和「失败」：整行的数字都变成警报色，因为这一行的重点就是它没跑完。 */
+  .sa-row.bad .sa-stat,.sa-row.bad .sa-n{color:var(--bad)}
   @media (max-width:800px){.coding-grid,.dr-grid{grid-template-columns:1fr}}
   /* the composer is sticky, not fixed: the pane's scrollbar stays its own, and
      the pane drops its bottom padding so the bar reaches the bottom edge */
