@@ -263,18 +263,27 @@ function graphLive(name){
 // in the run object rather than on the nodes themselves because node_end
 // REPLACES a node's whole record — anything hung on it is wiped the moment the
 // node finishes, which is exactly when a card wants to show it.
-let graphRun = {running: false, workflow: "", nodes: {}, order: [], waves: [],
-                visit: {}, detail: {}, digest: "", draft: "", noteId: "",
-                error: "", ticker: null};
+let graphRun = {...graphNewRun(""), running: false};
 
-// BOTH literals need every field: this function reassigns graphRun wholesale, so
-// a field missing here exists for the first run only and then silently vanishes
-// for the rest of the page's life. (Nothing in evals/ would notice — its harness
-// never sends the detail events — which is why the detail test drives them.)
+// A run that has seen no events yet, and has every field. ONE definition, used
+// both for the run this page is watching (graphResetRun) and for a run it is
+// only re-reading (the research page replaying a past record's frames).
+//
+// Every field has to be here rather than defaulted at the point of use: assigning
+// graphRun wholesale means a field missing from the object exists for the first
+// run only and then silently vanishes for the rest of the page's life. (Nothing
+// in evals/ would notice — its harness never sends the detail events — which is
+// why the detail test drives them.)
+function graphNewRun(workflow){
+  return {running: true, workflow, nodes: {}, order: [], waves: [], visit: {},
+          detail: {}, digest: "", draft: "", noteId: "", error: "", ticker: null};
+}
+
 function graphResetRun(workflow){
-  graphRun = {running: true, workflow, nodes: {}, order: [], waves: [], visit: {},
-              detail: {}, digest: "", draft: "", noteId: "", error: "",
-              ticker: graphRun.ticker};
+  // The ticker survives: runGraph starts one and clears it by that same
+  // reference, so a run object that dropped it would leave its predecessor's
+  // interval running for the life of the page.
+  graphRun = {...graphNewRun(workflow), ticker: graphRun.ticker};
 }
 
 // A node that runs more than once needs one card PER RUN. deep_research goes
@@ -293,8 +302,12 @@ function graphKey(name, visit){
   return (visit || 1) > 1 ? `${name}#${visit}` : name;
 }
 
-function graphApplyEvent(ev){
-  const R = graphRun;
+// `run` is which run this frame belongs to. The live stream leaves it out and
+// gets graphRun; the research page replays a stored run's frames into a run
+// object of its own, so a past record is drawn by this same function rather than
+// by a second renderer that would slowly stop agreeing with this one.
+function graphApplyEvent(ev, run){
+  const R = run || graphRun;
   const k = ev.kind;
   if (k === "graph_start"){
     R.order = ev.nodes || [];
@@ -337,7 +350,12 @@ function graphApplyEvent(ev){
     // Measured, not guessed — that is exactly what the deep research trip showed.
     // Same selector animateGraphStage uses, and the same 1400ms: `route` frames
     // carry workflow/router/target on both paths (engine.py:191).
-    hot(`[data-edge="g-${ev.workflow || ""}-${ev.router}-${ev.target}"]`, "live", 1400);
+    //
+    // Only for the run being watched. A replay arrives all at once, so the last
+    // route's edge would light up after the fact and darken a second later —
+    // reading as "something is happening now" when nothing is.
+    if (R === graphRun)
+      hot(`[data-edge="g-${ev.workflow || ""}-${ev.router}-${ev.target}"]`, "live", 1400);
   } else if (k === "graph_end"){
     R.running = false; R.totalMs = ev.ms;
   } else if (k === "done"){
@@ -401,10 +419,10 @@ async function runGraph(workflow, message = "", onFrame = null, budget = null){
 // `waves.find(w => w.nodes.includes(name))` — always found the FIRST wave the
 // name appeared in, so once a node could run twice the second round was timed
 // against the first round's peers.
-function graphCol(key, wave){
-  const n = graphRun.nodes[key] || {status: "waiting"};
+function graphCol(key, wave, R = graphRun){
+  const n = R.nodes[key] || {status: "waiting"};
   const name = n.name || key;
-  const detail = graphColDetail(key);
+  const detail = graphColDetail(key, R);
   // Only a repeated node needs its round number on the card; triage and gather
   // never produce a key with one, so their headings are unchanged.
   const label = key.includes("#") ? `${esc(name)} <span class="chip">第 ${key.split("#")[1]} 轮</span>`
@@ -423,7 +441,7 @@ function graphCol(key, wave){
   // The bar is scaled to the SLOWEST node in this node's wave, and every faster
   // node prints what it spent waiting at the barrier. That number is the honest
   // cost of wave execution — printing it teaches more than hiding it would.
-  const peers = (wave ? wave.nodes : [key]).map(x => (graphRun.nodes[x] || {}).ms || 0);
+  const peers = (wave ? wave.nodes : [key]).map(x => (R.nodes[x] || {}).ms || 0);
   const slowest = Math.max(...peers, 1);
   const pct = Math.round((n.ms || 0) / slowest * 100);
   const waited = slowest - (n.ms || 0);
@@ -452,8 +470,8 @@ function graphCol(key, wave){
 // missing-init bug that would then be invisible is a real one (graphResetRun
 // replaces the run object wholesale), and a throw here is caught by runGraph's
 // frame loop and swallowed.
-function graphColDetail(key){
-  const d = graphRun.detail[key];
+function graphColDetail(key, run){
+  const d = (run || graphRun).detail[key];
   if (!d) return "";
   const items = d.subquestions || [];
   const agents = d.agents || [];
@@ -486,20 +504,19 @@ function graphAgentRow(a, i){
 // runner and the research page — and two copies of a bar chart's arithmetic drift.
 // `w.nodes` holds card KEYS (see graphKey), not node names: a wave holds the
 // cards that started together, and one node can contribute several.
-function graphWaveRow(w, i){
-  const R = graphRun;
+function graphWaveRow(w, i, R = graphRun){
   const done = w.nodes.map(k => R.nodes[k] || {}).filter(n => n.ms != null);
   const slowest = done.length ? Math.max(...done.map(n => n.ms)) : 0;
   const sum = done.reduce((a, n) => a + n.ms, 0);
   return `<div class="meta" style="margin:14px 0 6px">波次 ${i + 1} · ${w.nodes.length} 个节点${
     slowest ? ` · ${(slowest/1000).toFixed(1)} 秒`
       + (w.nodes.length > 1 ? `（串行执行需要 ${(sum/1000).toFixed(1)} 秒）` : "") : ""}</div>
-    <div class="cmp-grid">${w.nodes.map(k => graphCol(k, w)).join("")}</div>`;
+    <div class="cmp-grid">${w.nodes.map(k => graphCol(k, w, R)).join("")}</div>`;
 }
 
 // Every wave, for a page that draws the whole run at once.
-function graphWaves(){
-  return graphRun.waves.map((w, i) => graphWaveRow(w, i)).join("");
+function graphWaves(R = graphRun){
+  return R.waves.map((w, i) => graphWaveRow(w, i, R)).join("");
 }
 
 function graphRunPanel(){

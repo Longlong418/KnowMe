@@ -66,7 +66,8 @@ const lit = [];
 // the cards would read an empty state and pass for the wrong reason.
 const source = read("util.js") + "\n" + read("graph.js") + "\n"
   + "module.exports = {graphSVG, graphLayout, graphApplyEvent, graphResetRun,"
-  + " graphRunPanel, graphCol, animateGraphStage, graphState: () => graphRun};";
+  + " graphNewRun, graphWaves, graphRunPanel, graphCol, animateGraphStage,"
+  + " graphState: () => graphRun};";
 const mod = {exports: {}};
 new Function("module", "exports", "document", "performance", "render", "hot", source)(
   mod, mod.exports,
@@ -165,9 +166,15 @@ assert(svg.includes("拆解子问题") && svg.includes("研究一轮") && svg.in
        "deep_research: its nodes carry Chinese labels");
 
 // --- one card per VISIT ---------------------------------------------------
+//
+// `ev => G.graphApplyEvent(ev)` and NOT `forEach(G.graphApplyEvent)`: the second
+// parameter is which run the frame belongs to, and forEach would hand it the
+// ARRAY INDEX — run 0 would fall back to graphRun and run 1 would try to write
+// state onto the number 1. It only reads as the same thing while the function
+// takes one argument.
 const drive = (workflow, events) => {
   G.graphResetRun(workflow);
-  events.forEach(G.graphApplyEvent);
+  events.forEach(ev => G.graphApplyEvent(ev));
   return G.graphState();
 };
 {
@@ -288,6 +295,49 @@ const drive = (workflow, events) => {
   ]);
   assert(!G.graphCol("plan", again.waves[0]).includes("sa-row"),
          "the previous run's detail leaked into the next run's card");
+}
+
+// --- a stored run, replays into the same cards ---------------------------
+//
+// The research page shows what an OLD run did by replaying the frames the
+// server kept for it (ops/deep_research.py:write_frames), into a run object of
+// its own. That is worth exactly as much as this: a replay has to land in the
+// cards the live stream made. The whole reason for keeping raw frames instead
+// of a summary is that there is then no second, thinner renderer to drift.
+{
+  const FRAMES = [
+    {kind: "graph_start", nodes: ["plan", "research", "synthesize", "save"]},
+    {kind: "node_start", node: "plan", visit: 1},
+    {kind: "plan_ready", node: "plan",
+     subquestions: ["固态电池的能量密度", "固态电池的量产时间"]},
+    {kind: "node_end", node: "plan", ms: 428, keys: ["subquestions", "message"]},
+    {kind: "node_start", node: "research", visit: 1},
+    {kind: "research_round", node: "research", round: 1, agents: [
+      {subquestion: "固态电池的能量密度", searches: 2, reads: 3, iterations: 8,
+       max_iterations: 8, hit_limit: true, error: "", ms: 2100}]},
+    {kind: "node_end", node: "research", ms: 2900, keys: ["reply", "sources"]},
+    {kind: "route", workflow: "deep_research", router: "research",
+     target: "synthesize", reason: "查完了"},
+    {kind: "graph_end", ms: 4200},
+  ];
+  const live = drive("deep_research", FRAMES);
+  const past = G.graphNewRun("deep_research");
+  lit.length = 0;
+  FRAMES.forEach(ev => G.graphApplyEvent(ev, past));
+  const now = G.graphWaves(past), was = G.graphWaves(live);
+  assert(now === was,
+         "a stored run replays into exactly the cards the live stream made"
+         + (now === was ? "" : "\n    live: " + JSON.stringify(was)
+            + "\n    past: " + JSON.stringify(now)));
+  assert(now.includes("sa-row") && now.includes("找 2 · 读 3 · 往返 8/8"),
+         "…including what each node did, which is the reason the frames are kept");
+  assert(past.running === false, "a replay is a finished run — graph_end says so");
+  assert(lit.length === 0,
+         "a replay lights no edge: it lands all at once, so the flash would come"
+         + " after the fact and read as \"something is happening now\" — lit: "
+         + JSON.stringify(lit));
+  assert(G.graphState() === live && live.workflow === "deep_research",
+         "and replaying leaves the run the page is watching alone");
 }
 
 // --- the RUN's own stream lights the edge, not just the replay -----------

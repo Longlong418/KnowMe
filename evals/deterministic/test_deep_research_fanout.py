@@ -53,12 +53,15 @@ class _FakeTools:
 
 class _FakeKnowme:
     """Only the attributes build_bound_graph touches. `client` is read but never
-    used — `run_loop` is what would call it, and that is patched out.
-    `tracer.event` is what run_deep_research writes EVERY event to (the page only
-    gets the forwarded kinds), so a run driven through that entry point needs it."""
+    used — `run_loop` is what would call it, and that is patched out; `conn` is
+    read by save_fn and handed straight to a patched `create_note`, so its value
+    is never used either. `tracer.event` is what run_deep_research writes EVERY
+    event to (the page only gets the forwarded kinds), so a run driven through
+    that entry point needs it."""
 
     def __init__(self, home):
         self.client = object()
+        self.conn = object()
         self.settings = SimpleNamespace(small_model="small", model="big", home=home)
         self.tools = _FakeTools()
         self.tracer = SimpleNamespace(event=lambda kind, ev: None)
@@ -88,7 +91,7 @@ def _call(url: str) -> dict:
 
 
 def _run(monkeypatch, tmp_path, answer, plan: str = PLAN_JSON, budget=None,
-         via_page: bool = False):
+         via_page: bool = False, note_id: str = "n1"):
     """Run the real bound graph and hand back (final state, records, fake).
 
     `answer(**kwargs) -> LoopResult` stands in for one sub-agent's whole turn. It
@@ -117,8 +120,10 @@ def _run(monkeypatch, tmp_path, answer, plan: str = PLAN_JSON, budget=None,
                         plan if "research plan" in prompt else "REPORT")
     monkeypatch.setattr(binder, "agent_lock", records["lock"])
     # save_fn's note write needs a live sqlite connection. The report file goes
-    # to tmp_path for real; the note is not what these tests are about.
-    monkeypatch.setattr(binder, "create_note", lambda *a, **k: {"id": "n1"})
+    # to tmp_path for real; the note is not what these tests are about — except
+    # for the one that checks what the run kept UNDER the note id it wrote, which
+    # is why the id is a parameter.
+    monkeypatch.setattr(binder, "create_note", lambda *a, **k: {"id": note_id})
 
     knowme = _FakeKnowme(tmp_path)
     if via_page:
@@ -403,3 +408,84 @@ def test_the_budget_is_clamped_at_the_door():
         {"iterations": 20, "rounds": 1}
     assert binder._clean_budget({"iterations": 2.7, "rounds": True}) == {"iterations": 2}
     assert binder._clean_budget({"iterations": None, "rounds": "4"}) == {}
+
+
+# --- the frames, kept so a finished run can be read again --------------------
+#
+# The report of an old run is reachable (it is a note in the knowledge base),
+# but what that run DID is not: the round cards are built from the frames the
+# browser received, and by the time you look back the browser has moved on. So
+# the run keeps its own frames, next to the note id it wrote them for, and the
+# page replays them through the same graphApplyEvent the live stream uses.
+
+# `str(uuid4())` is what create_note makes, and the shape the id guard expects.
+UUID = "5f2b1c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d"
+
+
+def test_a_run_keeps_exactly_the_frames_the_page_was_sent(monkeypatch, tmp_path):
+    """Driven through the real door, so this is the forwarded set as it is
+    actually collected. Storing `{"kind": kind, **ev}` is storing the SSE frame
+    byte for byte (server.py's emit writes exactly that), which is what lets the
+    page replay them into cards rather than re-describe the run in a second,
+    thinner renderer that would drift.
+
+    And the frames the page never saw are NOT in there: a round's llm/tool
+    events carry tool output and model prose, which is the one thing
+    graph_stream promises never to put on that stream."""
+    state, records, _ = _run(monkeypatch, tmp_path, _notes, via_page=True, note_id=UUID)
+
+    assert state["note_id"] == UUID
+    frames = binder.read_frames(tmp_path, UUID)
+    assert [f["kind"] for f in frames] == [k for k, _ in records["events"]], \
+        "the kept frames are the frames the observer was handed, in order"
+    assert {f["kind"] for f in frames} == {
+        "graph_start", "node_start", "node_end", "route", "graph_end",
+        "plan_ready", "research_round"}
+    assert "plan_ready" in [f["kind"] for f in frames]
+    assert (tmp_path / binder.FRAMES_DIR / f"{UUID}.json").is_file()
+
+
+def test_the_frames_come_back_the_way_they_went_in(tmp_path):
+    frames = [{"kind": "node_start", "node": "plan", "visit": 1},
+              {"kind": "plan_ready", "node": "plan", "subquestions": ["固态电池的能量密度"]}]
+    assert binder.write_frames(tmp_path, UUID, frames) != ""
+    assert binder.read_frames(tmp_path, UUID) == frames
+    # Nothing to look at is not a file to write: a run that produced no frames
+    # must not leave an empty receipt behind for the page to find and distrust.
+    assert binder.write_frames(tmp_path, UUID, []) == ""
+
+
+def test_a_report_from_before_this_existed_has_no_process(tmp_path):
+    """An empty list is the ordinary answer, not a failure, and the page says
+    which of the two things it is looking at: a run from before this was
+    recorded, or one whose note write failed. Both are "nothing here"."""
+    assert binder.read_frames(tmp_path, UUID) == []
+
+
+def test_the_note_id_is_checked_before_it_is_joined_onto_a_path(tmp_path):
+    """It arrives from the browser in a URL, so it is matched against the shape
+    create_note actually produces before it is ever a path — the same guard
+    coding_runs uses for the filename it is handed."""
+    assert binder.write_frames(tmp_path, "../../etc/passwd", [{"kind": "x"}]) == ""
+    assert binder.read_frames(tmp_path, "../../etc/passwd") == []
+    assert binder.read_frames(tmp_path, "n1") == []      # what the other tests stub
+    assert binder.read_frames(tmp_path, "") == []
+    assert not list(tmp_path.glob("**/passwd"))
+
+
+def test_a_broken_receipt_is_not_a_broken_page(tmp_path):
+    """Never raises: the report is already paid for, and looking back is a
+    convenience — never a reason for a finished run to report failure."""
+    out = tmp_path / binder.FRAMES_DIR
+    out.mkdir(parents=True)
+    (out / f"{UUID}.json").write_text("{not json", encoding="utf-8")
+    assert binder.read_frames(tmp_path, UUID) == []
+    # Contents of the wrong shape is the same class of answer.
+    (out / f"{UUID}.json").write_text('{"frames": "nope"}', encoding="utf-8")
+    assert binder.read_frames(tmp_path, UUID) == []
+    # A home that cannot hold the directory is a "" and not a raise. (A file
+    # where the directory should be: NotADirectoryError, which is an OSError.)
+    blocked = tmp_path / "blocked"
+    blocked.write_text("", encoding="utf-8")
+    assert binder.write_frames(blocked, UUID, [{"kind": "x"}]) == ""
+    assert binder.read_frames(blocked, UUID) == []

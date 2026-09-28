@@ -35,6 +35,30 @@ decision itself is pinned here, against the real files.
      including the mid-run silence, because a note picked by hand was not
      "the newest", it was asked for.
 
+     The list is FOLDED by default, because it only ever grows: ten runs in, an
+     open list is a wall of rows above the report it exists to help you reach.
+
+  4. deepresearch.js's researchCardsRun decides which run the round cards belong
+     to. A report and a process that describe different runs is the failure mode
+     here, in both directions: the report on the right can be an old one you
+     picked, and it can be the one a run that just finished wrote -- and the
+     cards have to follow the REPORT, not the click.
+
+     The process of an old run is not in this page's memory (the browser moved
+     on) and not in /api/data (that is polled by every open tab), so it is asked
+     for by note id and replayed. What a replay RENDERS is
+     test_graph_backedge.py's business -- it loads the real graph.js and asserts
+     a replay lands in byte-identical cards. Here the two are stubs: this file is
+     about the decision, not the markup.
+
+     The report the page found by itself gets its process the same way, from
+     researchAutoLoad: an empty cards column next to a report reads as "that run
+     kept nothing". Two things about it are asserted here and nowhere else —
+     that it asks ONCE (it runs out of repaintResearch, which every 5-second
+     poll calls), and that it does NOT count as a pick: a pick outranks "newest"
+     by rule 2, so a page that auto-loaded through researchPickNote would pin
+     itself to whichever report it happened to find first.
+
 The real files run against stubs in node, same as test_graph_backedge.py.
 node is a hard requirement of this file.
 """
@@ -79,20 +103,47 @@ const CHAT = [];
 // graphRun.nodes to put the "running" highlight back on a rebuilt chart.
 let graphRun = {running: false, digest: "", waves: [], nodes: {}, noteId: ""};
 
+// What the server kept for a past run, by note id (ops/deep_research.py's
+// write_frames). Empty means "a run from before that existed, or one whose note
+// write failed" — which is an ordinary answer, not a failure.
+const RECEIPTS = {};
+const fetched = [];
+let held = null, release = null;
+const fetch = async url => {
+  fetched.push(url);
+  const id = decodeURIComponent(String(url).split("note_id=")[1] || "");
+  if (held === id) await new Promise(r => { release = r; });   // see the "in flight" assertion
+  return {json: async () => ({note_id: id, frames: RECEIPTS[id] || []})};
+};
+// graph.js is deliberately NOT loaded here: what a replay RENDERS is
+// test_graph_backedge.py's business (it loads the real graph.js). What this file
+// is about is the page's DECISION — which record's process belongs next to the
+// report on screen — so the two functions are stubs that record what they were
+// handed rather than draw it.
+const graphNewRun = wf => ({workflow: wf, running: true, waves: [], nodes: {},
+                            visit: {}, detail: {}, replayed: []});
+const graphApplyEvent = (ev, run) => { run.replayed.push(ev.kind); };
+
 const source = read("util.js") + "\n" + read("chat.js") + "\n" + read("deepresearch.js") + "\n"
   + "module.exports = {threadIsBehind, researchNote, researchReportText,"
-  + " researchHistory, researchPickNote,"
-  + " setD: v => { D = v; }, setRunning: v => { graphRun = Object.assign({}, graphRun, v); }};";
+  + " researchHistory, researchHistToggle, researchPickNote, researchCards,"
+  + " researchCardsRun, researchPastLoading, repaintResearch,"
+  + " setD: v => { D = v; }, setRunning: v => { graphRun = Object.assign({}, graphRun, v); },"
+  + " liveRun: () => graphRun, pick: () => researchPick};";
 const mod = {exports: {}};
 // Every getElementById in repaintResearch returns null: the assertions below are
 // about what the page DECIDES to show, not about the DOM it writes it into.
-new Function("module", "exports", "document", "localStorage", "VIEWS", "CHAT", "graphRun", source)(
+new Function("module", "exports", "document", "localStorage", "VIEWS", "CHAT", "graphRun",
+             "fetch", "graphNewRun", "graphApplyEvent", source)(
   mod, mod.exports,
   {addEventListener: () => {}, querySelectorAll: () => [], querySelector: () => null,
    getElementById: () => null},
-  localStorage, VIEWS, CHAT, graphRun);
+  localStorage, VIEWS, CHAT, graphRun, fetch, graphNewRun, graphApplyEvent);
 const G = mod.exports;
 const setChat = n => { CHAT.length = 0; for (let i = 0; i < n; i++) CHAT.push({role: "user"}); };
+
+// researchPickNote goes to the network, so the whole body is async.
+(async () => {
 
 // --- 1: the poll may only ever move the page FORWARD ----------------------
 G.setD({sessions_by_agent: {default: [{id: "s1", messages: 4}]}});
@@ -154,41 +205,98 @@ assert(G.researchNote() === null && G.researchReportText() === "",
        "no research report stored: show nothing rather than someone else's note");
 assert(G.researchHistory() === "", "no research report stored: no history either");
 
-G.setD({knowledge_info: {notes: NOTES}});
+const OLD = {id: "n0", title: "深度研究：钠离子电池 · 2026-09-15", content: "更早的一趟"};
+G.setD({knowledge_info: {notes: [NOTES[0]]}});
+assert(G.researchHistory() === "",
+       "one report is not a history either: its only row would name the report"
+       + " already on screen");
+
+G.setD({knowledge_info: {notes: [NOTES[0], NOTES[1], OLD]}});
+// Folded up by default. The list only ever grows, so a list that is open is a
+// wall of rows sitting above the report it is supposed to help you reach — and
+// the report is the thing the page is for.
+const folded = G.researchHistory();
+const rows = h => [...h.matchAll(
+  /class="dr-hist-row[^"]*"[^>]*>([^<]*)<\/button>/g)].map(m => m[1]);
+assert(rows(folded).length === 0 && !folded.includes("dr-hist-list"),
+       "the records start folded: nothing is listed until you ask");
+assert(folded.includes("研究记录") && folded.includes("3 份"),
+       "the folded line says how many records there are");
+assert(folded.includes("当前：固态电池 · 2026-09-28"),
+       "…and which one is on screen, so the line is not just a count");
+
+G.researchHistToggle();
 const hist = G.researchHistory();
-assert(hist.includes("固态电池 · 2026-09-28"), "the history lists the newest report");
-assert(hist.includes("半固态 · 2026-09-20"),
-       "…and the ones from earlier runs, which this page could not reach before");
-const labels = [...hist.matchAll(/>([^<]*)<\/button>/g)].map(m => m[1]);
-assert(labels.length === 2 && !labels.some(l => l.includes("深度研究")),
-       "each row reads as its own topic and date; the page's prefix is dropped from"
-       + " the label (it survives in the tooltip)");
+assert(rows(hist).join("|") === "固态电池 · 2026-09-28|半固态 · 2026-09-20|钠离子电池 · 2026-09-15",
+       "…and expands to one row per report, newest first — the order the server"
+       + " hands them over in (updated_at DESC) — each reading as its own topic and"
+       + " date, with the page's own 「深度研究：」 prefix dropped from the label");
 assert(hist.includes('title="深度研究：固态电池 · 2026-09-28"'),
-       "…and the full title is still there to hover over — including a topic that"
-       + " got cut to 60 characters by the workflow");
-assert(hist.indexOf("固态电池") < hist.indexOf("半固态"),
-       "newest first, the order the server hands them over in");
+       "…while the full title stays for hovering, including a topic the workflow"
+       + " cut to 60 characters");
 // Exactly one row is marked as the one on screen, and it is the newest.
-const marked = () => (G.researchHistory().match(/dr-hist-row on"/g) || []).length;
-assert(marked() === 1 && /dr-hist-row on"[^>]*researchPickNote\('n3'\)/.test(hist),
+const marked = () => (G.researchHistory().match(/class="dr-hist-row on"/g) || []).length;
+assert(marked() === 1 && /class="dr-hist-row on"[^>]*researchPickNote\('n3'\)/.test(hist),
        "the row on screen is marked, and it is the newest one");
 
-G.researchPickNote("n2");
+// --- the process behind an old report --------------------------------------
+// The report of an old run is a note, so the page always had it. What that run
+// DID is not: the round cards were built from frames the browser received, and
+// the browser moved on. The server kept them under the note id; the page asks
+// for them when you pick that record, and replays them into a finished run.
+RECEIPTS["n2"] = [{kind: "node_start", node: "plan", visit: 1},
+                  {kind: "plan_ready", node: "plan", subquestions: ["半固态的界面"]},
+                  {kind: "node_end", node: "plan", ms: 20}];
+held = "n2";
+const pending = G.researchPickNote("n2");
+assert(G.researchPastLoading() === true && G.researchCards().includes("正在取"),
+       "while the record's process is in flight the column says it is being fetched");
+held = null; release();
+await pending;
 assert(G.researchNote() && G.researchNote().id === "n2"
        && G.researchReportText() === "上一趟的",
        "picking an older row shows that report instead");
-assert(/dr-hist-row on"[^>]*researchPickNote\('n2'\)/.test(G.researchHistory()),
+assert(/class="dr-hist-row on"[^>]*researchPickNote\('n2'\)/.test(G.researchHistory()),
        "…and the mark follows the pick");
-G.researchPickNote("n2");
+assert(fetched.some(u => u.includes("note_id=n2")),
+       "…and its process was asked for by note id — it is not in this page's memory"
+       + " after a reload, and /api/data is polled so it cannot carry every past run");
+assert(G.researchPastLoading() === false, "the fetch is over");
+assert(G.researchCardsRun().replayed.join() === "node_start,plan_ready,node_end",
+       "…into cards built from exactly the frames the server kept, in order");
+assert(G.researchCardsRun().workflow === "deep_research"
+       && G.researchCardsRun().running === false
+       && G.researchCardsRun() !== G.liveRun(),
+       "…as a finished run of its own, not the one this page is watching");
+
+// The cards follow the REPORT, not the click. A run that just finished is what
+// the report column shows, and if the cards stayed on the old record it would
+// read as "this run kept no process".
+G.setRunning({digest: "刚跑完的这一份", waves: [1]});
+assert(G.researchNote().id === "n3" && G.researchCardsRun() === G.liveRun(),
+       "a finished run's own report takes the cards back with it");
+G.setRunning({digest: "", waves: []});
+
+await G.researchPickNote("n2");
 assert(G.researchNote().id === "n3", "clicking the same row again goes back to the newest");
+assert(G.researchCardsRun() === G.liveRun(), "…and so do the cards");
+
+// A record with nothing kept: a run from before the frames were stored, or one
+// whose note write failed. The page says which of the two it is looking at
+// rather than drawing an empty column that reads as "this run did nothing".
+await G.researchPickNote("n0");
+assert(G.researchPastLoading() === false
+       && G.researchCards().includes("没有留下过程记录"),
+       "a record with no kept process says so: " + G.researchCards());
+await G.researchPickNote("n0");
 
 // A pick outlives the mid-run rule above: that rule is about what "newest"
 // silently means, and a report someone asked for by hand is not that.
 G.setRunning({running: true});
-G.researchPickNote("n2");
+await G.researchPickNote("n2");
 assert(G.researchNote() && G.researchNote().id === "n2",
        "a picked report stays on screen while a run is in flight");
-G.researchPickNote("n2");
+await G.researchPickNote("n2");
 assert(G.researchNote() === null,
        "…but with nothing picked, a run in flight still shows nothing: the stored"
        + " report is the previous run's, and that is what the rule protects");
@@ -202,8 +310,85 @@ assert(G.researchNote().id === "n3" && G.researchReportText() === "刚跑完的�
        + " titled underneath it");
 G.setRunning({digest: ""});
 
+// --- 5: the record the report column picked up by itself -------------------
+// Refresh the page and the report is found in the knowledge base (rule 2), but
+// the process behind it is not: the browser that watched the run is gone. The
+// left column is that same record's process, so it goes and gets it — an empty
+// column next to a report reads as "that run kept nothing".
+const flush = () => new Promise(r => setTimeout(r, 0));
+RECEIPTS["n3"] = [{kind: "node_start", node: "plan", visit: 1},
+                  {kind: "node_end", node: "plan", ms: 5}];
+fetched.length = 0;
+G.setRunning({running: false, digest: ""});
+// Driven through repaintResearch, not researchAutoLoad: the poll is what calls
+// this in the app, so a version that decided correctly and was never wired in
+// would pass every other assertion here and fetch nothing on a real page.
+G.repaintResearch();
+await flush();
+assert(G.researchCardsRun().replayed.join() === "node_start,node_end",
+       "the report the page found by itself brings its own process with it");
+assert(G.pick() === "",
+       "…without counting as a pick: a report that arrives later still takes over");
+const asked = fetched.length;
+G.repaintResearch();
+await flush();
+assert(fetched.length === asked,
+       "…and it asks ONCE. This runs out of repaintResearch, which every 5-second"
+       + " poll calls — an unguarded version asks again forever (asked "
+       + asked + " then " + fetched.length + ")");
+
+// The window that this cost a browser trip to find: a run has finished, the note
+// it wrote has NOT reached the page yet (the poll is 5 seconds), and the frames
+// that carry `done` have not arrived either. So `notes[0]` is still the previous
+// report — and researchPast is holding exactly that report's process, because
+// the auto-load fetched it on the way in. Both columns then describe a different
+// run: the previous one's rounds beside this one's report.
+// Measured on a real page: the cards still read /5 (the previous run's marker)
+// at the moment the run ended, and only /7 (this run's) after a reload.
+G.setRunning({digest: "刚跑完的这一份", waves: [1]});
+assert(G.researchCardsRun() === G.liveRun(),
+       "a run that just finished owns the cards even while the note it wrote is"
+       + " still missing from the page — the frames arrive before the poll does");
+// Same window, the other way round: the `done` frame is still in flight while
+// the poll has already moved notes[0] to a newer report.
+G.setD({knowledge_info: {notes: [
+  {id: "n8", title: "深度研究：又一份 · 2026-09-30", content: "轮询刚送到的"},
+].concat(NOTES)}});
+G.setRunning({digest: "", waves: [1]});
+const afterRun = fetched.length;
+G.repaintResearch();
+await flush();
+assert(fetched.length === afterRun,
+       "…and with a run of this page's own on screen it fetches nothing: the"
+       + " process it would get is the one for a report it is not showing (asked "
+       + afterRun + " then " + fetched.length + ")");
+G.setRunning({waves: []});
+
+G.setRunning({running: true});
+const quiet = fetched.length;
+G.repaintResearch();
+await flush();
+assert(fetched.length === quiet && G.researchCardsRun() === G.liveRun(),
+       "a run in flight draws its own process — nothing to fetch for it");
+G.setRunning({running: false});
+
+// A report that lands later is the newest, and the cards follow it. The
+// auto-load must not behave like a pick: a pick outranks "newest" (rule 2), so
+// an auto-load that set one would pin the page to the report it happened to
+// find first.
+RECEIPTS["n9"] = [{kind: "graph_start", nodes: []}, {kind: "route"}];
+G.setD({knowledge_info: {notes: [
+  {id: "n9", title: "深度研究：更新的一份 · 2026-09-29", content: "后来的"},
+].concat(NOTES)}});
+G.repaintResearch();
+await flush();
+assert(G.researchNote().id === "n9"
+       && G.researchCardsRun().replayed.join() === "graph_start,route",
+       "a newer report takes the cards with it, process and all");
+
 if (failures) console.log("\n" + failures + " FAILED");
 process.exit(failures ? 1 : 0);   // without this, a FAILED run still exits 0
+})();
 """
 
 
@@ -229,7 +414,7 @@ def catchup_run(tmp_path_factory) -> str:
 def test_every_assertion_in_the_harness_ran_and_passed(catchup_run: str):
     """Both halves matter: a harness that checked nothing passes for free."""
     assert "FAIL" not in catchup_run, catchup_run
-    assert catchup_run.count("PASS") >= 10, catchup_run
+    assert catchup_run.count("PASS") >= 35, catchup_run
 
 
 def test_the_prefix_the_page_matches_on_is_the_one_the_workflow_writes():

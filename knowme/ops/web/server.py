@@ -105,6 +105,15 @@ class Handler(BaseHTTPRequestHandler):
                        "application/json")
         elif self.path == "/api/coding":
             self._send(json.dumps(coding_info(), default=str).encode(), "application/json")
+        elif self.path.startswith("/api/research"):
+            # One past run's process, fetched when someone picks that record off
+            # the research page. Not part of /api/data: it is per-record and only
+            # wanted on a click (see data.py:research_info).
+            from urllib.parse import parse_qs, urlparse
+
+            note_id = parse_qs(urlparse(self.path).query).get("note_id", [""])[0]
+            self._send(json.dumps(research_info(note_id), default=str).encode(),
+                       "application/json")
         elif self.path.startswith("/api/reveal"):
             from urllib.parse import parse_qs, unquote, urlparse
 

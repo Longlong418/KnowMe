@@ -714,14 +714,26 @@
     border-radius:var(--radius);color:var(--ink);padding:6px 8px;font:inherit;
     font-size:12.5px;outline:none;font-variant-numeric:tabular-nums}
   .dr-budget input[type=number]:focus{border-color:var(--accent)}
-  /* 报告记录：一行一份，点了就把下面那份报告换成它的。选中的那份只染边和字
-     （报告栏里摆一列实心彩色按钮会把正文的注意力抢走）。标题按 60 字截断，
-     所以这里必须能省略号收尾，否则一行长标题会把整栏撑破。 */
-  .dr-hist{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  /* 报告记录：折起来的一行 + 展开后的滚动框。
+     折起来是因为记录只会越攒越多 —— 以前这里摊着一片小圆片，十趟之后报告栏上面
+     就是一堵墙，还把下面真正要读的报告挤下去。折起来之后多少趟都只占一行。
+     展开那一框有 max-height，所以展开也不会把报告顶走。 */
+  .dr-hist{margin-bottom:10px}
+  .dr-hist-toggle{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+    background:none;border:1px solid var(--line2);border-radius:var(--radius);
+    color:var(--ink);font:inherit;font-size:12.5px;padding:5px 10px;cursor:pointer}
+  .dr-hist-toggle:hover{border-color:var(--accent)}
+  .dr-hist-toggle .meta{margin-left:auto;min-width:0;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .dr-hist-caret{color:var(--ink3);font-size:10px;flex:none}
+  /* 选中的那一行只染边和字：报告栏里摆一列实心彩色按钮会把正文的注意力抢走。
+     标题按 60 字截断，所以这里必须能省略号收尾，否则一行长标题会把整栏撑破。 */
+  .dr-hist-list{display:flex;flex-direction:column;gap:4px;max-height:180px;
+    overflow-y:auto;margin-top:6px;padding-right:4px}
   .dr-hist-row{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    background:none;border:1px solid var(--line2);border-radius:99px;color:var(--ink2);
-    font:inherit;font-size:11.5px;padding:2px 10px;cursor:pointer}
-  .dr-hist-row:hover{border-color:var(--accent);color:var(--ink)}
+    text-align:left;background:none;border:1px solid transparent;border-radius:var(--radius);
+    color:var(--ink2);font:inherit;font-size:11.5px;padding:3px 10px;cursor:pointer}
+  .dr-hist-row:hover{border-color:var(--line2);color:var(--ink)}
   .dr-hist-row.on{border-color:var(--accent);color:var(--accent);
     background:var(--accent-soft);font-weight:600}
   /* 卡片里的明细：plan 拆出来的子问题、每个 sub-agent 那一行。它们是 .cmp-col 的直接

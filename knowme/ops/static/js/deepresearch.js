@@ -21,6 +21,10 @@ let researchTopic = "";        // 输到一半的主题，切走再切回来不�
 let researchPainted = null;    // 已经画过的报告原文，免得每 100ms 重渲染一遍
 let researchHistPainted = null; // 同上，已经画过的那份记录列表
 let researchPick = "";         // 你在记录列表上点的那一份；空 = 跟着最新那份走
+let researchHistOpen = false;  // 记录列表展开着没有
+let researchPast = null;       // 取回来的那一趟的过程：{noteId, run}，run 是回放出来的
+let researchPastErr = "";      // 那一趟的过程取不回来时，说一句人话
+let researchPastWant = "";     // 正在为哪一份取过程（也是"这一份取过了"的记号）
 
 const RESEARCH_WORKFLOW = "deep_research";
 
@@ -63,29 +67,117 @@ function researchNote(){
   return notes[0] || null;
 }
 
+// 一条记录的写法：把标题里的「深度研究：」去掉。标题是 ops/deep_research.py 的
+// _note_title 写的「深度研究：主题 · 日期」，而这一页已经待在深度研究页里了，
+// 再把那个前缀带一遍是重复的。全文留在 title 属性里（主题超过 60 字会被那边截断，
+// 那是它自己的事，这一行只负责照原样写出来）。
+function researchLabel(note){
+  return String(note.title || "").slice(RESEARCH_NOTE_PREFIX.length + 1);
+}
+
 // 以前的报告，一行一份（最新的在最前面）。在这之前这一页只认最新那份，想回头看
 // 上周那一趟得去知识库里翻。
+//
+// **折起来的一行**，不是一整片小圆片：记录只会越攒越多，摊开来的话十趟之后报告栏
+// 上面就是一堵墙，而且挡住了下面真正要读的那份报告。折起来之后无论多少趟都只占
+// 一行，展开看到的是个有上限的滚动框。
 //
 // 只有一份的时候不画：那时候"之前的记录"没有意义，一行孤零零的按钮只是噪音。
 function researchHistory(){
   const notes = researchNotes();
   if (notes.length < 2) return "";
   const shown = researchNote();
-  return `<div class="dr-hist">${notes.map(n => {
-    // 标题是 ops/deep_research.py 的 _note_title 写的「深度研究：主题 · 日期」。
-    // 这一行已经待在深度研究页里了，再把那个前缀带一遍是重复的。
-    const label = String(n.title || "").slice(RESEARCH_NOTE_PREFIX.length + 1);
+  const caret = researchHistOpen ? "▾" : "▸";
+  const head = `<button class="dr-hist-toggle" onclick="researchHistToggle()">
+    <span class="dr-hist-caret">${caret}</span><b>研究记录</b>
+    <span class="chip">${notes.length} 份</span>
+    <span class="meta">当前：${esc(shown ? researchLabel(shown) : "正在跑的这一趟")}</span>
+  </button>`;
+  if (!researchHistOpen) return head;
+  return head + `<div class="dr-hist-list">${notes.map(n => {
     const on = shown && shown.id === n.id ? " on" : "";
     return `<button class="dr-hist-row${on}" title="${esc(n.title)}"
-      onclick="researchPickNote('${esc(n.id)}')">${esc(label)}</button>`;
+      onclick="researchPickNote('${esc(n.id)}')">${esc(researchLabel(n))}</button>`;
   }).join("")}</div>`;
 }
 
-// 点一下记录：报告换成那一份；再点一下取消，回到跟着最新那份走。
-// 这一页在 render() 里是**跳过重建**的（见文件头），所以换完得自己重画一次。
-function researchPickNote(id){
-  researchPick = (researchPick === id) ? "" : id;
+function researchHistToggle(){
+  researchHistOpen = !researchHistOpen;
   repaintResearch();
+}
+
+// 点一下记录：报告换成那一份，左边那一栏也换成它的过程；再点一下取消，回到跟着
+// 最新那份走。这一页在 render() 里是**跳过重建**的（见文件头），所以换完得自己重画。
+async function researchPickNote(id){
+  researchPick = (researchPick === id) ? "" : id;
+  researchPastErr = "";
+  const want = researchPick;
+  // 手上已经有这一份的过程了就不再去取（点开、点走、再点回来）。
+  if (!want || (researchPast && researchPast.noteId === want)){
+    repaintResearch();
+    return;
+  }
+  researchPast = null;
+  researchPastWant = want;
+  repaintResearch();                 // 先把"正在取"画出来，再等网络
+  await researchLoadRun(want);
+}
+
+// 一趟的过程要跟服务端要一次：它不在这一页的内存里 —— 那是这一趟跑着的时候 SSE
+// 推来的。服务端按笔记 id 存着当时的帧（就是这一页当时收到的那些帧，一条不多一条
+// 不少），所以回放出来的卡片和当时看到的逐字一样：回放走的还是 graphApplyEvent。
+//
+// 「点开一份记录」和「报告栏认出来的那份自己回头去取」都走这里，所以两边的说法不会
+// 分家（比如一处会说"正在取"、另一处不会）。
+async function researchLoadRun(noteId){
+  try {
+    const res = await fetch(`/api/research?note_id=${encodeURIComponent(noteId)}`);
+    const data = await res.json();
+    if (researchPastWant !== noteId) return;        // 这中间你又点了别的
+    const frames = ((data || {}).frames) || [];
+    if (!frames.length){
+      // 两种情况长得一样：这一趟是这个功能上线之前跑的，或者它那条笔记没存成。
+      researchPastErr = "这一趟没有留下过程记录。";
+    } else {
+      const run = graphNewRun(RESEARCH_WORKFLOW);
+      frames.forEach(f => graphApplyEvent(f, run));
+      run.running = false;
+      researchPast = {noteId, run};
+    }
+  } catch (err){
+    if (researchPastWant === noteId) researchPastErr = "过程取不回来：" + String(err);
+  }
+  repaintResearch();
+}
+
+// 报告栏显示哪一份，左边那一栏就该是哪一趟的过程 —— 这是这一页的规矩，刷新回来也
+// 一样。刷新之后报告是知识库里认出来的（最新那份），过程却还没取，左边于是空着，
+// 读起来像"这一趟没留下记录"。
+//
+// 只认报告栏认出来的那一份，不碰 researchPick：你点开的那一份是"我要看这个"，
+// 而认出来的那份只是默认值，一旦来了新报告它该被让位（researchNote 的第三条）。
+//
+// 这一份取过就不再问：这个函数在 5 秒一次的轮询里，没有这道闸门它每轮都要发一次
+// 请求。判据是 researchPastWant —— 它在你点开时由 researchPickNote 更新。
+function researchAutoLoad(){
+  // 这一页自己就有一趟在屏幕上：正在跑（SSE 推着画），或者刚跑完（正文在 digest 里，
+  // 卡片也在）。waves 这一条挡的是"刚跑完"和"digest 到手"之间那几帧：那时候 running
+  // 已经落了、digest 还没来，回头去取就会取到**上一份**报告的过程（notes[0] 还是它）。
+  if (graphRun.running || graphRun.digest || graphRun.waves.length || researchPick) return;
+  const note = researchNote();
+  if (!note || researchPastWant === note.id) return;
+  researchPastWant = note.id;
+  researchPastErr = "";
+  researchLoadRun(note.id);
+}
+
+// 过程还没到手（正在取）。报告栏显示的那一份和你点的那一份，是同一个答案：
+// researchNote 已经把"点开的优先、否则最新"定完了。
+function researchPastLoading(){
+  const note = researchNote();
+  const want = researchPick || (note && note.id) || "";
+  return !!want && !researchPastErr
+    && !(researchPast && researchPast.noteId === want);
 }
 
 function researchReportText(){
@@ -108,16 +200,38 @@ function researchReport(){
       ${note ? `· <a href="#knowledge">去知识库看</a>` : ""}</div>` : ""}`;
 }
 
+// 左边那一栏画的是**报告栏正显示的那一份**的过程：报告是你点开的那份旧记录时，
+// 卡片也换成那一趟的；报告是这一趟刚跑完的正文时，卡片就是这一页自己在跑的这一趟。
+//
+// 跟着报告走，而不是跟着"点没点"走：两栏说的必须是同一趟。刚跑完的那一趟会压过
+// 你点的那份旧记录（researchNote 的第一条），要是卡片还停在旧记录上，右边写着新
+// 报告、左边画着上一趟的过程，看着就是这一趟的过程没记下来。
+//
+// digest 这一条**必须问在最前面**，不能只靠"note 和 researchPast 是不是同一份"：
+// 一趟跑完的头几秒，它写的那条笔记还没被 5 秒一次的轮询送到这一页，notes[0] 还是
+// **上一份**报告 —— 而 researchPast 手里那份正是上一份的过程（自动取的时候取的
+// 就是它），两边一对就"对上了"，左边于是画着上一趟、右边写着这一趟。实测到的就
+// 是这个：跑完那一刻左边还是 /5（上一趟的记号），刷新之后才是 /7（这一趟的）。
+function researchCardsRun(){
+  if (graphRun.digest) return graphRun;   // 这一趟的正文就在这儿，过程也是它
+  const note = researchNote();
+  return (note && researchPast && researchPast.noteId === note.id)
+    ? researchPast.run : graphRun;
+}
+
 function researchCards(){
-  if (!graphRun.waves.length)
+  const R = researchCardsRun();
+  if (!R.waves.length){
+    if (researchPastErr) return `<div class="card empty">${esc(researchPastErr)}</div>`;
+    if (researchPastLoading()) return `<div class="card empty">正在取这一趟的过程…</div>`;
     return `<div class="card empty">点「开始研究」后，每一轮会在这里出现一张卡片。</div>`;
-  const R = graphRun;
+  }
   const tail = R.running ? `<div class="meta" style="margin-top:12px">
       <span class="live-dot"></span>跑着呢，卡片会一张一张长出来…</div>`
     : (R.totalMs ? `<div class="meta" style="margin-top:12px">跑完一共
         ${(R.totalMs/1000).toFixed(1)} 秒 · ${R.waves.length} 个波次</div>` : "");
   const bad = R.error ? `<div class="meta" style="color:var(--bad);margin-top:8px">${esc(R.error)}</div>` : "";
-  return `<div class="card">${graphWaves()}${tail}${bad}</div>`;
+  return `<div class="card">${graphWaves(R)}${tail}${bad}</div>`;
 }
 
 // 按钮和"正在运行"那个小灯。这一页是**跳过重建**的（见文件头），所以它们不会
@@ -145,6 +259,7 @@ function researchLive(){
 // 这一页，那时候正文已经是新的了，只比正文的话那句名字会一直停在**上一条**报告
 // 上，再也不重画。
 function repaintResearch(){
+  researchAutoLoad();   // 认出来的那份报告，它那一趟的过程自己回头去取（见上）
   const cards = document.getElementById("research-cards");
   if (cards) cards.innerHTML = researchCards();
   // 记录列表和报告各自判各自的重画。拿整段 HTML 当签名：多了一条记录、或者换了
@@ -242,8 +357,11 @@ async function startResearch(){
   researchTopic = topic;
   localStorage.setItem("knowme_research_topic", topic);
   // 新的一趟开跑，报告栏回到"这一趟还没有报告"：记录列表里那些是以前的，选的还
-  // 停在上一份上就会看着像这一趟已经出结果了。
+  // 停在上一份上就会看着像这一趟已经出结果了。左边那一栏也跟着回到这一趟。
   researchPick = "";
+  researchPast = null;
+  researchPastErr = "";
+  researchPastWant = "";
   // 预算跟着这一趟走，跟主题是同一条路：服务端只把它交给声明了 budget 形参的 runner，
   // 也就是只有深度研究会收到。
   await runGraph(RESEARCH_WORKFLOW, topic, repaintResearch, researchBudgetOut());

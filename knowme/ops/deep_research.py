@@ -70,6 +70,7 @@ WHY EACH ROUND TAKES agent_lock
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -95,6 +96,15 @@ from knowme.tools.knowledge import create_note
 # The allowlist. An invariant a reviewer can check by eye, and one the tests
 # assert against this file's source.
 SUBAGENT_TOOLS = frozenset({"search_web", "read_webpage"})
+
+# Where a run's frames are kept: one small JSON per report, named by the id of
+# the note that report was written into. See write_frames.
+FRAMES_DIR = "research_runs"
+# A note id is `str(uuid4())` (tools/knowledge.py:create_note). It arrives from
+# the browser as part of a URL, so it is matched against this before it is ever
+# joined onto a path — the same guard coding_runs uses for the filename it is
+# handed (coding_runs.py:_ID_RE).
+_NOTE_ID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
 # PER SUB-AGENT, not per round. Each agent owns exactly one sub-question, so this
 # is roughly two or three searches plus the four or five pages they lead to —
 # which is what it was always meant to be. The window in read_webpage is what
@@ -399,6 +409,53 @@ def _write_report(home: Path, state: dict, report: str) -> str:
     return str(dest)
 
 
+def write_frames(home: Path, note_id: str, frames: list[dict]) -> str:
+    """Keep this run's frames, under the id of the note it wrote.
+
+    The key is the note id because that is the one thing the page is holding when
+    you pick a record out of the list — the report and its process arrive
+    together, and either can be missing without the other (a failed note write
+    means there is nothing to hang the frames on, so there are none).
+
+    NOT in traces/*.jsonl: a trace line says which node it came from and never
+    which RUN, and one file holds a whole day of them, so a line cannot be
+    attributed back to a report. This file can.
+
+    Never raises, and returns "" instead: a run that produced a report has
+    nothing left to prove, and a convenience for looking back must not be the
+    reason a finished run reports failure.
+    """
+    if not _NOTE_ID_RE.match(note_id or "") or not frames:
+        return ""
+    try:
+        out = home / FRAMES_DIR
+        out.mkdir(parents=True, exist_ok=True)
+        dest = out / f"{note_id}.json"
+        dest.write_text(json.dumps({"note_id": note_id, "frames": frames},
+                                   ensure_ascii=False), encoding="utf-8")
+        return str(dest)
+    except OSError:
+        return ""
+
+
+def read_frames(home: Path, note_id: str) -> list[dict]:
+    """The frames write_frames kept for this note, or [] if there are none.
+
+    An empty list is the ordinary answer, not a failure: a run from before this
+    was recorded has a report and no process, and so does a run whose note write
+    failed. The page says which of the two it is looking at.
+    """
+    if not _NOTE_ID_RE.match(note_id or ""):
+        return []
+    path = home / FRAMES_DIR / f"{note_id}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    frames = data.get("frames") if isinstance(data, dict) else None
+    return [f for f in frames if isinstance(f, dict)] if isinstance(frames, list) else []
+
+
 def run_deep_research(knowme: KnowMe | None = None, observer=None,
                       message: str = "", budget=None) -> dict:
     """Run one deep research job to completion. Returns the final state.
@@ -440,13 +497,31 @@ def run_deep_research(knowme: KnowMe | None = None, observer=None,
         forwarded = {"graph_start", "node_start", "node_end", "route", "graph_end",
                      "plan_ready", "research_round"}
 
+        # Every frame this run sends to the page, kept so the run can be read
+        # again later. The page draws its cards from these; storing the same list
+        # and replaying it through the same code is what makes a past run's
+        # rounds look exactly like they did live — no second, thinner summary to
+        # drift out of step.
+        frames: list[dict] = []
+
         def notify(kind: str, ev: dict) -> None:
             knowme.tracer.event(kind, ev)
-            if observer and kind in forwarded:
+            if kind not in forwarded:
+                return
+            # `{"kind": kind, **ev}` is the SSE frame, byte for byte
+            # (server.py's emit writes exactly this), so what is stored here is
+            # what the browser received rather than a re-description of it.
+            frames.append({"kind": kind, **ev})
+            if observer:
                 observer(kind, ev)
 
-        return run_graph(build_bound_graph(knowme, clean),
-                         {"topic": topic, "budget": clean}, observer=notify)
+        state = run_graph(build_bound_graph(knowme, clean),
+                          {"topic": topic, "budget": clean}, observer=notify)
+        # Attach the frames to the note this run wrote. Deliberately after the
+        # run and outside its graph: the report is already paid for, and this is
+        # a convenience for looking back, never a reason for a run to fail.
+        write_frames(knowme.settings.home, state.get("note_id") or "", frames)
+        return state
     finally:
         if own:
             knowme.close()

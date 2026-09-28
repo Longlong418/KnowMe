@@ -529,6 +529,24 @@ def coding_runs_info(conn) -> list[dict]:
     return recent_runs(conn, project_root())
 
 
+def research_info(note_id: str) -> dict:
+    """One research run's process, as the page saw it happen.
+
+    Fetched per record rather than carried in /api/data: these are the run's
+    event frames, and /api/data is polled every 5 seconds by every open tab —
+    shipping every past run's process in every poll would pay for the whole
+    history on every tick to show, at most, the one record someone clicked.
+
+    The reader (and the id guard, and the directory) lives in
+    ops/deep_research.py, next to the writer: one module owns this format, the
+    same way applications/coding_runs.py owns its receipts.
+    """
+    from knowme.ops.deep_research import read_frames
+
+    settings = load_settings()
+    return {"note_id": note_id, "frames": read_frames(settings.home, note_id)}
+
+
 def coding_info() -> dict:
     """Return non-secret Coding Workspace backend status."""
     from knowme.applications.coding_verify import detect_command
