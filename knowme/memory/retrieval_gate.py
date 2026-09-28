@@ -27,6 +27,10 @@ memories (facts about people, projects, preferences, or past events).
 Reply with ONLY this JSON, nothing else:
 {{"retrieve": true/false, "query": "<search keywords if true, else empty>", "reason": "<一句中文，给用户看，不超过 15 字>"}}
 
+For Chinese, separate important search terms with ASCII spaces.
+Use 3-8 high-signal keywords.
+Never return an array.
+
 General knowledge, math, small talk, or self-contained requests → false.
 Anything referencing the user's life, people, plans, or history → true.
 
