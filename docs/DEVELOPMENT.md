@@ -1,5 +1,91 @@
 # KnowMe 开发文档
 
+## Phase 43：跑到一半刷新页面，这一轮还算不算数（2026-09-28）
+
+### 一、你问的
+
+> 当前网站没有持久化是不是？比方说我正在进行深度研究或者对话还没返回，我就刷新页面，
+> 那么这次请求就没有了是吗？
+
+**答案分两层，而且第一层的答案和我一开始以为的正好相反。**
+
+### 二、量出来的第一层：刷新会**把这一轮弄死**（已修）
+
+我用一个探针量了这件事（`.claude/probe_disconnect.py`：临时 home、随机端口、假模型，
+假模型每问先睡 4 秒 —— 这样我能在它跑到一半时把连接掐掉，那正是浏览器 F5 时服务端看到的样子）。
+修之前的结果：
+
+| | 修之前 | 修之后 |
+|---|---|---|
+| 深度研究这一趟 | 轨迹里只有 `graph_start / node_start / node_end(plan) / plan_ready`，**没有 `graph_end`**，知识库里没有笔记，`outbox/` 里没有文件 | **20 秒后跑完**，笔记 1066 字进了知识库，`outbox/research-….md` 写出来了 |
+| 对话这一轮 | `chat_log` 里**什么都没有** —— 你问的那句话自己也不见了 | 这一问一答两行都落了库（8 秒） |
+
+也就是说：**不是"页面不显示"，是这一趟真的死在了你按 F5 的那一刻。** 已经花掉的模型钱白花，
+报告一个字都不剩。
+
+### 三、根因：异常类名是分平台的，而我们只写了两个
+
+`server.py` 里的 `emit` 本来就是这个意思 —— 它的注释写着"浏览器中途走开了，没关系"：
+
+```python
+except (BrokenPipeError, ConnectionResetError):
+    pass  # the browser navigated away mid-stream — fine
+```
+
+问题出在这个异常在 Windows 上不叫这两个名字。同样一件事：
+
+* macOS / Linux：`BrokenPipeError` 或 `ConnectionResetError` —— 被吞掉，一切正常
+* **Windows：`ConnectionAbortedError`（WinError 10053，"你的主机中的软件中止了一个已建立的连接"）** —— 没被吞掉
+
+没被吞掉的后果，比"少吞一个异常"严重得多：它从 `emit` 一路往上跑，
+**穿过正在干活的那一层**（探针的服务端日志抓到了完整调用栈）：
+
+* 深度研究：`server.emit` → `runtime.graph_stream` → `run_deep_research` → `run_graph` →
+  引擎里的 `notify("node_end")` —— 引擎那层在跑，于是整趟死在半路。
+* 对话：`server.emit` → `core/loop.py` 的 `notify("llm")` —— 这一轮还没走到
+  `session.record()`，所以"写进对话记录"这一步根本没发生。
+
+修法就是把基类写上，一行：
+
+```python
+except ConnectionError:   # BrokenPipe 和 ConnectionAborted 都是它的子类
+```
+
+两个流（`/api/chat/stream`、`/api/graph/stream`）都改了。
+
+### 四、量出来的第二层：数据在库里，但页面不会自己回头去取（**这两个还没补**）
+
+修完之后"东西不丢"了，但还有两处"看不见"，我把它们分清楚，因为它们的性质不同：
+
+**① 对话页：跑完的那一轮不会自己出现。** 我让真 Chrome 发一条消息、2 秒后 reload，
+再等 40 秒 —— 页面上还是空的那一轮。但 `chat_log` 里两行都在。
+根因不在数据，在页面：对话页只在**载入时**拉一次线程（`restoreThread()`），之后只有
+"从 Gateway 收件箱点进来的那条会话"才会跟着轮询刷新（`syncLiveView()` 要求 `liveView` 有值）。
+普通对话页的 `liveView` 是空的，所以它**永远不会**回头再取一次。
+**再刷一次（第二次 F5）就看得见了** —— 探针里这条是 PASS，也就是"数据在库里"的证明。
+
+**② 深度研究页：报告不会自己回来。** 那一页靠 `localStorage` 里记的 note id 找回报告，
+而那个 id 是"上一趟在这台浏览器里跑完之后"才写进去的。中途刷新 → 这一趟的 id 谁都不知道 →
+页面就一直空着，直到你去知识库翻。（这次探针验到了 `/api/data` 能把它取回来，所以是页面的事。）
+
+### 五、验证
+
+* **探针**（`.claude/probe_disconnect.py`，真服务器 + 真 socket 掐断 + 假模型 + 真 Chrome）：
+  上面那张表里的每一格都是它跑出来的，修前 5 条红、修后 6 条全绿。
+* **离线回归**：`evals/deterministic/test_stream_disconnect.py` —— 构造真的
+  `Handler`，用一个"写第 N 笔之后开始报错"的假 socket 驱动它。**反向验证**：
+  `git stash` 掉 `server.py` → **恰好 3 条红**（三个 `ConnectionAbortedError` 场景），
+  两个 Linux 异常名的场景仍然是绿的 —— 这正好把这个 bug 的形状钉住了：
+  "不是没兜住异常，是兜错了名字"。
+* 全量 **816 passed / 62 skipped**（比上一步多 5 条，就是新加的这个文件），
+  `ruff check knowme evals` 干净。
+
+### 六、一句话总结
+
+修之前：**刷新 = 这一轮没了**（连你问的那句话都没了）。
+修之后：**刷新 = 这一轮照样跑完、照样存下来**，但页面上要你自己再刷一下才看得见 ——
+第四节的①②就是把这个"要你自己再刷一下"去掉的两处改动，还没做。
+
 ## Phase 42：让每个节点自己说它干了什么，顺便把预算交给用户（2026-09-28）
 
 ### 一、你说的是两件事，其实是三件
