@@ -35,10 +35,11 @@ class KnowMe:
         self.conn = conn or connect(self.settings.home)
         self.client = client or get_client(self.settings)
         self.spec = spec
-        # One name per agent — it scopes facts, episodes and chat_log rows so
-        # two agents never read each other's memory without meaning to. The
-        # default agent keeps the historical "default" tag, so existing databases
-        # see no behavioral change.
+        # One name per agent — it tags facts, episodes and chat_log rows with the
+        # agent that created them. The memory pool itself is shared across agents;
+        # this name is not an isolation boundary, so agents can read each other's
+        # rows. The default agent keeps the historical "default" tag, so existing
+        # databases see no behavioral change.
         self.agent_id = spec.name
 
         # Memory first: the memory-management tools need it.
