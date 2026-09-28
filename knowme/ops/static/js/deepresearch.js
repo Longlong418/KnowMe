@@ -48,9 +48,7 @@ function researchReportText(){
 function researchReport(){
   const text = researchReportText();
   if (!text)
-    return `<div class="card empty">还没有报告。<br>
-      上面填一个主题、点「开始研究」——它会拆子问题、上网搜、把页面读进来，
-      看这一轮有没有新东西，再决定要不要补一轮。</div>`;
+    return `<div class="card empty">还没有报告。填一个主题，点「开始研究」。</div>`;
   const note = researchNote();
   const where = [
     graphRun.draft ? `文件 <code>${esc(graphRun.draft)}</code>` : "",
@@ -63,9 +61,7 @@ function researchReport(){
 
 function researchCards(){
   if (!graphRun.waves.length)
-    return `<div class="card empty">点「开始研究」之后，这里会一行一行长出它实际跑过的
-      波次：一轮一张卡片，各自的耗时分开算。图上的方框同时会亮起来 —— 包括回头
-      再跑一轮时那个自环。</div>`;
+    return `<div class="card empty">点「开始研究」后，每一轮会在这里出现一张卡片。</div>`;
   const R = graphRun;
   const tail = R.running ? `<div class="meta" style="margin-top:12px">
       <span class="live-dot"></span>跑着呢，卡片会一张一张长出来…</div>`
@@ -82,10 +78,11 @@ function researchButton(){
   return graphRun.running ? "研究中…" : "开始研究";
 }
 
+// 跑起来才写点什么；没跑的时候那个位置留空 —— 标题旁边不需要一句介绍。
 function researchLive(){
   return graphRun.running
     ? `<span class="meta"><span class="live-dot"></span>正在运行 · 第 ${graphRun.waves.length + 1} 步</span>`
-    : `<span class="meta">一轮一张卡片</span>`;
+    : "";
 }
 
 // 报告只在正文真的变了的时候重画。ticker 每 100ms 叫一次这一步，而这里有
@@ -162,12 +159,11 @@ function researchSetBudget(input){
   if (note) note.innerHTML = researchBudgetNote();
 }
 
+// 只写"会跑成什么样"这一句。它怎么拆、怎么决定要不要再来一轮、没查完的子问题
+// 在报告里怎么称呼 —— 那些是它跑起来之后卡片和报告自己会讲清楚的事，不摆在旋钮下面。
 function researchBudgetNote(){
   const b = researchBudgetOut();
-  return `最多 ${b.rounds} 轮：每一轮给每个子问题各派一个 sub-agent 去搜、去读，然后问
-    "这一轮有没有找到新东西" —— 有就带着已掌握的内容再补一轮，没有就收工写报告。
-    每个 sub-agent 最多 ${b.iterations} 次模型往返，用完了那一行会标成「没查完」，
-    报告里也会点名说这是本轮没查完、不是没有答案。报告同时写进知识库和 <code>outbox/</code>。`;
+  return `最多 ${b.rounds} 轮，每个子问题每轮最多 ${b.iterations} 次模型往返。`;
 }
 
 function researchBudgetSave(){
@@ -227,7 +223,7 @@ function deepResearchView(){
   const budget = researchBudgetOut();
   return `<div class="card">
     <div class="ctc-head"><b>要研究什么</b>
-      <span class="meta">给一个主题，不是一个问题 —— 它自己去查。</span></div>
+      <span class="meta">给一个主题，它自己去查。</span></div>
     <div class="dr-row">
       <input id="research-topic" type="text" spellcheck="false"
              placeholder="例如：固态电池的产业化进度"
@@ -244,7 +240,6 @@ function deepResearchView(){
       <label class="fld-inline">最多
         <input id="research-rounds" type="number" min="1" max="6" value="${budget.rounds}"
                oninput="researchSetBudget(this)">轮</label>
-      <span class="meta">实际用掉的数会写在每张卡片的子 agent 那一行上</span>
     </div>
     <div class="meta" id="research-budget-note">${researchBudgetNote()}</div>
   </div>
