@@ -18,10 +18,14 @@
 // 报告一起抹掉，而这一页没有任何东西是轮询喂的 —— 卡片和报告都由 SSE 推着走。
 
 let researchTopic = "";        // 输到一半的主题，切走再切回来不丢
-let researchNoteId = "";       // 上一次研究落进知识库的那条笔记
 let researchPainted = null;    // 已经画过的报告原文，免得每 100ms 重渲染一遍
 
 const RESEARCH_WORKFLOW = "deep_research";
+
+// 这个工作流写进知识库的那条笔记长什么样：和 ops/deep_research.py 的 _note_title
+// 是同一句话（那边 `f"深度研究：{topic[:60]} · {date}"`）。这里只用来认"哪条笔记是
+// 深度研究留下的"，改标题要两边一起改 —— test_page_catchup.py 会把这两处对一遍。
+const RESEARCH_NOTE_PREFIX = "深度研究";
 
 // 那个工作流的拓扑，从服务端现算的列表里找。找不到就返回 null（比如工作流被
 // 改名了），页面照样能用，只是没有图。
@@ -32,11 +36,18 @@ function researchTopology(){
 
 // 刷新页面之后 SSE 那条流早就没了，而 /api/data 里的图工作流 runs 只有元数据
 // （没有正文）。真正留着全文的是知识库那条笔记 —— knowledge_info() 每次轮询都
-// 带全文。所以记住 note_id，回来按 id 把正文捞回来。
+// 带全文。所以这一页只需要认得**最新那份深度研究报告**。
+//
+// 不按记下来的 note_id 找：那个 id 是**跑完之后**才写进浏览器的，跑到一半刷新、
+// 或者换台机器打开，手里就什么都没有 —— 而报告明明躺在知识库里。列表本身就是
+// updated_at 倒序（tools/knowledge.py 的 list_notes），所以第一个匹配的就是最新的
+// 那一趟；这一趟跑完了，它自然就成了新的第一个。
 function researchNote(){
-  if (!researchNoteId) return null;
+  // 正在跑的这一趟还没落库：这时候"最新"是上一趟的报告，画出来会像是这一趟已经
+  // 跑完了。报告栏那句"还没有报告"才是实话。
+  if (graphRun.running) return null;
   const notes = ((D || {}).knowledge_info || {}).notes || [];
-  return notes.find(n => n.id === researchNoteId) || null;
+  return notes.find(n => String(n.title || "").startsWith(RESEARCH_NOTE_PREFIX)) || null;
 }
 
 function researchReportText(){
@@ -178,16 +189,9 @@ async function startResearch(){
   if (!topic) return;
   researchTopic = topic;
   localStorage.setItem("knowme_research_topic", topic);
-  // 这一趟的报告还没落库：清掉上一条笔记的 id，不然报告栏会先显示上一趟的。
-  researchNoteId = "";
-  researchPainted = null;
   // 预算跟着这一趟走，跟主题是同一条路：服务端只把它交给声明了 budget 形参的 runner，
   // 也就是只有深度研究会收到。
   await runGraph(RESEARCH_WORKFLOW, topic, repaintResearch, researchBudgetOut());
-  if (graphRun.noteId){
-    researchNoteId = graphRun.noteId;
-    localStorage.setItem("knowme_research_note", graphRun.noteId);
-  }
   repaintResearch();
 }
 
@@ -198,7 +202,6 @@ async function startResearch(){
 // 上次的主题，而在 render() 里补的话第一次是空的，得等下一次重建才填上。
 function researchRestore(){
   researchTopic = localStorage.getItem("knowme_research_topic") || "";
-  researchNoteId = localStorage.getItem("knowme_research_note") || "";
   researchPainted = null;
   // 旋钮也要记住。存进去的一定是夹紧过的值（researchBudgetSave 走的是
   // researchBudgetOut），所以这里读回来直接用。

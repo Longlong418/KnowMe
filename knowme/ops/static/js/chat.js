@@ -170,11 +170,34 @@ async function deleteConversation(id){
   }
   await refresh();           // the History list loses the row
 }
-// Re-pull the opened conversation each refresh so CLI messages show up live —
-// unless a turn is mid-stream.
+// Does the server hold rows for this thread that this page has not got?
+//
+// The poll already carries a message count per conversation (sessions_by_agent),
+// so the answer costs nothing. That check is what lets the caller below pull a
+// thread every 5 seconds without ASKING for it every 5 seconds.
+//
+// "More", not "different": a turn that failed is shown locally and never reaches
+// chat_log, so it makes the page AHEAD of the server — and a two-way comparison
+// would let the poll delete the error card the user is still reading.
+function threadIsBehind(sessionId){
+  const rows = ((D && D.sessions_by_agent && D.sessions_by_agent[ACTIVE_AGENT]) || []);
+  const row = rows.find(s => s.id === sessionId);
+  return (row ? row.messages : 0) > CHAT.length;
+}
+
+// Keep the conversation on screen in step with the stored one — unless a turn is
+// mid-stream (then this page's own stream is the truth).
+//
+// The thread in view, not only the one opened from the inbox: a refresh in the
+// middle of a turn used to leave the page showing a thread that would never
+// catch up. The server finishes the turn regardless (server.py's emit swallows
+// the dead socket), so the row that has the answer lands in chat_log, and this
+// is what comes and gets it.
 async function syncLiveView(){
-  if (!liveView || CHAT.some(m => m.pending)) return;
-  await loadThreadInto(liveView, {guard: true});   // guard: repaint only if changed
+  if (CHAT.some(m => m.pending)) return;
+  const sid = liveView || SESSION;
+  if (!sid || !threadIsBehind(sid)) return;
+  await loadThreadInto(sid, {guard: true});   // guard: repaint only if changed
 }
 function closeSessMenu(){ const m=document.getElementById("sessmenu"); if(m) m.remove(); }
 function toggleSessMenu(ev){
