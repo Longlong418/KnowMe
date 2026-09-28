@@ -10,7 +10,7 @@ PY := $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 
 .PHONY: run brief web trace eval eval-judge gate lint
 
-run:            ## chat with KnowMe in the terminal
+run:            ## open the local web client (the same thing `make web` does)
 	$(PY) -m knowme
 
 brief:          ## morning briefing from calendar + mail + memory (as a LOOP)
@@ -37,5 +37,7 @@ eval-judge:     ## LLM-as-judge evals (scored %, needs an API key)
 gate:           ## the release gate: deterministic must pass, judge must clear threshold
 	$(PY) -m knowme.ops.release_gate
 
+# No `scripts`: an empty directory cannot be tracked by git, so a fresh clone has
+# no such path and ruff exits with E902 "cannot find the file".
 lint:
-	$(PY) -m ruff check knowme evals scripts
+	$(PY) -m ruff check knowme evals

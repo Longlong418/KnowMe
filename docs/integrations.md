@@ -59,11 +59,5 @@ pip install -e '.[mcp]'
   "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]}]}
 ```
 
-**免 Node 的演示** —— 仓库里带了一个极小的、自包含的 Python MCP 服务器:
-
-```bash
-cp examples/mcp.demo.json .knowme/mcp.json   # 指向 examples/mcp_demo_server.py
-make web                               # demo_word_count / demo_reverse_text 出现在 Tools 里
-```
-
 同样的模式可以扩展到任何服务器,你自己写的或厂商提供的 —— **不需要改 KnowMe 一行代码**。
+写好 `.knowme/mcp.json` 之后重开网页,它的工具就会出现在「工具」页上。
