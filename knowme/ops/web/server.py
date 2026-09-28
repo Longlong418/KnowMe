@@ -197,8 +197,19 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     self.wfile.write(f"data: {json.dumps({'kind': kind, **ev}, default=str)}\n\n".encode())
                     self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass  # the browser navigated away mid-stream — fine
+                except ConnectionError:
+                    # The browser navigated away mid-stream — fine, the turn keeps
+                    # going and the reply still lands in chat_log.
+                    #
+                    # ConnectionError, not (BrokenPipeError, ConnectionResetError):
+                    # on Windows the same situation raises ConnectionAbortedError
+                    # ([WinError 10053]), and the narrower pair let it through. What
+                    # came next was the whole turn unwinding out of run_loop's
+                    # notify() — measured with .claude/probe_disconnect.py, which
+                    # closes the socket mid-turn: chat_log stayed empty and the
+                    # research workflow died before graph_end, so an F5 threw away
+                    # the work AND the money already spent on it.
+                    pass
 
             # A picture with no words is a complete question ("what is this?"),
             # so the empty check is on the turn, not on the text.
@@ -220,8 +231,8 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     self.wfile.write(f"data: {json.dumps({'kind': kind, **ev}, default=str)}\n\n".encode())
                     self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
+                except ConnectionError:
+                    pass  # same as the chat stream above — see the note there
             graph_stream(payload, emit)
             return
         routes = {"/api/chat": None, "/api/memory": memory_action, "/api/settings": apply_settings,
