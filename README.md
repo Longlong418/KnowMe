@@ -2,7 +2,7 @@
 
 **一个无框架、可扩展的 Personal Agent Platform。**
 
-KnowMe是一个原生 Python 实现 Agent Loop、会话管理、上下文管理、记忆、工具调度和运行轨迹，再把这些能力组合成不同的 Agent 与 Application。
+KnowMe是一个原生 Python 实现 Agent Loop、会话管理、上下文管理、记忆、工具调度和运行轨迹，再把这些能力组合成不同的 Agent 与 Application的平台。
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![uv](https://img.shields.io/badge/package%20manager-uv-DE5FE9)](https://docs.astral.sh/uv/)
