@@ -188,9 +188,6 @@ uv run python -m pytest -q evals/deterministic
 - [`docs/CODING_WORKSPACE.md`](docs/CODING_WORKSPACE.md)：Coding Workspace 的权限与验收流程
 - [`SECURITY.md`](SECURITY.md)：本地数据、模型请求和工具权限边界
 
-## 参与贡献
-
-欢迎提交 Issue 和 Pull Request。请保持改动小而可读，并在提交前运行 lint 和确定性测试。
 
 ## License
 

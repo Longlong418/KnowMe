@@ -188,9 +188,6 @@ The deterministic suite uses a scripted client instead of a real model, so it re
 - [`docs/CODING_WORKSPACE.md`](docs/CODING_WORKSPACE.md): Coding Workspace permissions and verification flow
 - [`SECURITY.md`](SECURITY.md): local data, model requests, and tool permission boundaries
 
-## Contributing
-
-Issues and pull requests are welcome. Keep changes small and readable, and run lint plus the deterministic suite before submitting.
 
 ## License
 
