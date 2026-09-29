@@ -186,9 +186,7 @@ uv run python -m pytest -q evals/deterministic
 
 - [`docs/DEVELOPMENT_GUIDE.md`](docs/DEVELOPMENT_GUIDE.md)：代码入口和扩展 Agent、Application、Tool 的方法
 - [`docs/CODING_WORKSPACE.md`](docs/CODING_WORKSPACE.md)：Coding Workspace 的权限与验收流程
-- [`docs/loop-vs-graph.md`](docs/loop-vs-graph.md)：Agent Loop 和 Graph Workflow 的边界
-- [`docs/integrations.md`](docs/integrations.md)：可选集成及所需配置
-- [`docs/memory-backends-playbook.md`](docs/memory-backends-playbook.md)：替换默认记忆后端
+- [`SECURITY.md`](SECURITY.md)：本地数据、模型请求和工具权限边界
 
 ## 参与贡献
 

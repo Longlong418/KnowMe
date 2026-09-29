@@ -186,9 +186,7 @@ The deterministic suite uses a scripted client instead of a real model, so it re
 
 - [`docs/DEVELOPMENT_GUIDE.md`](docs/DEVELOPMENT_GUIDE.md): code map and how to extend Agents, Applications, and Tools
 - [`docs/CODING_WORKSPACE.md`](docs/CODING_WORKSPACE.md): Coding Workspace permissions and verification flow
-- [`docs/loop-vs-graph.md`](docs/loop-vs-graph.md): the boundary between the Agent Loop and Graph Workflows
-- [`docs/integrations.md`](docs/integrations.md): optional integrations and configuration
-- [`docs/memory-backends-playbook.md`](docs/memory-backends-playbook.md): replacing the default memory backend
+- [`SECURITY.md`](SECURITY.md): local data, model requests, and tool permission boundaries
 
 ## Contributing
 

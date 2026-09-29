@@ -1,6 +1,4 @@
-"""Whiteboard: loop vs graph engineering.
-
-The companion picture to docs/loop-vs-graph.md.
+"""Build the loop-versus-graph engineering whiteboard.
 
 COMPOSITION — two mirrored FLOWS on top, their measured timelines underneath.
 
@@ -207,7 +205,7 @@ def build() -> list:
     e.append(S.text(1190, 1552, "Old shape. New contents.", size=S.FS_HEADER,
                     color=S.PAL["red"][1]))
 
-    e.append(S.source_label(70, 1600, "measured on knowme-agent, 2026-07-31 — docs/loop-vs-graph.md"))
+    e.append(S.source_label(70, 1600, "measured on knowme-agent, 2026-07-31"))
     e += S.socials_block(1980, 44)
     e.append(S.watermark(70, 1640))
     return e

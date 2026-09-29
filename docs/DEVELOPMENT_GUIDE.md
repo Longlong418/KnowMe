@@ -73,7 +73,7 @@ Application 的持久数据应该进入自己的存储；Context Bridge 只保�
 2. 在 `knowme/tools/__init__.py` 中注册 `Tool` 和参数 Schema。
 3. 如果工具只属于某些 Agent，把名称加入对应的工具白名单。
 4. 给成功、失败和权限边界补确定性测试。
-5. 如果工具会访问外部服务，在 `docs/integrations.md` 或 `SECURITY.md` 中说明配置和数据流向。
+5. 如果工具会访问外部服务，在 `SECURITY.md` 中说明配置和数据流向。
 
 ## 前端约定
 
