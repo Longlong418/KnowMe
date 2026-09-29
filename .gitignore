@@ -1,59 +1,44 @@
+# Python caches and local environments
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
-.env
-state.db
-traces/
-*.ics
-.DS_Store
-dist/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Local configuration and runtime data
+.env
+.env.*
+!.env.example
 .knowme/
+.knowme-*/
 .knowme.bak-*/
 .knowme.prerename-bak/
-# Any alternate agent home, not just the default one. KNOWME_HOME can point anywhere.
-# Without this glob only `.knowme/` was covered, so a second home's SOUL.md,
-# usage.jsonl and outbox/ were tracked — the exact files you least want pushed.
-.knowme-*/
-.env.prerename-bak
-
-# Delegated coding deliverables (dated run folders + auto-run logs)
+state.db
+traces/
 knowme_workspace/
+*.ics
 
-# Google OAuth: the client file you download from Cloud Console, and any token
-# it produces. Nothing here should ever be committed — belt and braces, because
-# the docs used to tell people to drop credentials.json in the repo root.
+# Credentials created by optional integrations
 credentials.json
 client_secret*.json
 *token*.json
 .gcp/
 
-.knowme
-.knowme-arena
-
-scripts
-read.md
-examples/*
-.claude
-Claude.md
+# Local-only project notes and helper files
+.claude/
 AGENTS.md
-
-# 只匹配仓库根目录那个 images/。以前这里是裸的 `images`，**任意层级**同名都匹配，
-# 于是 docs/images/ 也被一起吃掉了——README 里的截图放进去、`git add` 一声不响地跳过，
-# 网页上就是一个裂图。根目录那个 images/ 是**另一个产品**的截图，本来就不该进库。
-/images/
-
-# evals/ 现在整个进库。以前这里有一行 `evals/*`，结果是硬盘上 100 个文件里
-# 只有 46 个被 -f 强制加进来：别人 clone 下来 `make eval` 连 conftest.py 都找不到，
-# 一半测试根本不存在。（sql/ 同理：Supabase 的建表 SQL 得进库，升级路才是通的。）
-# 注意 `__pycache__/` 在第一行已经挡住了，不用管。
-
-# ---- 开发过程产物：本地留着，但不进公开仓库 ----------------------------
-# 这些回答的是"当时怎么想、怎么一步步做出来的"，是过程不是产品，
-# 公开仓库里不该出现。用 `git rm --cached` 移出去不会删本地文件。
+Claude.md
 CURRENT_PROGRESS.md
 IMPLEMENTATION_COMPLETE.md
+read.md
+scripts/
+examples/
 docs/DEVELOPMENT.md
 docs/MVP_GUIDE.md
 docs/CODING_WORKSPACE_MVP.md
@@ -65,3 +50,10 @@ docs/README.md
 docs/kimi-k3-explained.md
 docs/architecture-whiteboard.png
 knowme/ops/README.md
+
+# A separate local screenshot set; published screenshots live in docs/images/
+/images/
+
+# OS files
+.DS_Store
+Thumbs.db

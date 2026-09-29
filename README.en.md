@@ -1,220 +1,168 @@
 # KnowMe
 
-**A personal AI assistant that runs on your own machine. Four pillars — Harness · Loop · Memory · Eval — in Python you can read in an afternoon.**
+KnowMe is a local-first personal AI assistant: chat, memory, tools, and run history are managed on your own machine. It is a small Python project you can read end to end, not a black-box agent framework.
 
-[简体中文](README.md) | [English](README.en.md)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Offline tests](https://img.shields.io/badge/tests-offline%20suite-2f855a)](evals/deterministic)
 
-[![Python](https://img.shields.io/badge/python-3.11%2B-2b4a6f)](pyproject.toml)
-[![No framework](https://img.shields.io/badge/runtime-stdlib%20%2B%20official%20SDKs-4a5a4a)](knowme/core/loop.py)
-[![Memory](https://img.shields.io/badge/memory-one%20SQLite%20file-8a6a2f)](knowme/db.py)
-[![Tests](https://img.shields.io/badge/offline%20tests-855%20passed-2e6b3a)](evals/deterministic)
+[简体中文](README.md)
 
-![The chat page — your message on the right, every step it took on the left](docs/images/chat.jpg)
+> Local-first does not mean fully offline: model requests go to the provider selected in `.env`; state and run data stay on your machine by default.
 
-## What this is
-
-KnowMe is a **local-first** personal assistant: it runs a loop on your own machine, remembers
-things about you, calls tools, and shows you — step by step — what it actually did on a turn.
-
-It is not a framework and there is no plugin marketplace. The whole project is four things:
-
-| Pillar | What it does | Where to start reading |
-|---|---|---|
-| **Harness** | The shell around one run: assemble context, attach tools, emit each step | `knowme/core/runtime.py` |
-| **Loop** | The skeleton of a turn: model → tools → model, until it can answer | `knowme/core/loop.py` |
-| **Memory** | Three kinds of memory plus a gate that decides **whether** to retrieve, and what | `knowme/memory/` |
-| **Eval / Ops** | Offline tests, LLM-as-judge, traces, the release gate | `evals/`, `knowme/ops/` |
+![KnowMe chat page](docs/images/chat.jpg)
 
 ## What it does
 
-**Memory comes in three kinds, and it decides for itself when to use them.** A gate asks
-whether this turn needs memory at all and what to search for, then reports how many entries
-matched and which ones — **all of that is written on the page**, not hidden in a log:
-
-- **Semantic**: durable facts ("I don't take meetings on Friday afternoons")
-- **Episodic**: what happened on a given day, distilled into one line
-- **Procedural**: `SKILL.md` skills. A skill's body enters the prompt **only when it matches**;
-  otherwise it costs nothing but a one-line entry in the catalog
-
-**Chat.** Every agent is a page in the local web app (`#agent/<id>`). Three roles — General /
-Coding / Research — sharing one set of memory and one SQLite file.
-
-**Graph workflows.** When the shape of the work is known in advance, give it a name:
-
-| Slash command | What it does |
-|---|---|
-| `/gather` | Morning briefing: four sources in parallel (GitHub / web / calendar / memory), then one digest |
-| `/deep_research <topic>` | Split into sub-questions → one sub-agent per question, in parallel → one report with sources |
-| `/triage <message>` | The router. It also runs on every message when graph workflows are on; calling it by name lets you watch it choose |
-| `/graphs` | List the graph workflows you can run |
-
-**Applications.** Reader + document library (bring in a PDF or a URL, highlight and ask about it),
-knowledge base (notes with Chinese word-segmented search), Coding Workspace (it edits code, then
-runs your acceptance command itself), deep research.
-
-**Bring your own model.** 11 providers ship (Anthropic / OpenAI / OpenRouter / Gemini / DeepSeek /
-MiniMax / Kimi / GLM / xAI / OpenCode Zen / OpenCode Go), one key each. Or add your own: write it
-into `.knowme/providers.json` and it shows up on the Model page.
-
-**Tools.** Web search and fetch, GitHub reads, calendars (Google / Apple), the document library,
-notes, memory administration, file read/write and command execution, delegating a subtask, MCP
-servers — 36 in all, called by the model as needed.
-
-**Every step is visible.** What the gate searched for, which reasoning round it is on, which tool
-it called, where a graph is — live, and again when you look back at an old conversation.
+- Runs General, Coding, and Research agents in a local web app. The Reader brings the current document into a conversation.
+- Stores semantic memory, episodic memory, and on-demand `SKILL.md` procedures in SQLite.
+- Connects tools for web search, GitHub, calendars, documents, notes, files, and MCP servers.
+- Runs repeatable workflows for briefings, gathering, and deep research, with a replayable view of each step.
+- Switches model providers from the UI. Built-in providers use their official SDKs; custom OpenAI- and Anthropic-compatible endpoints are supported.
 
 ## Quickstart
 
-**You need:** Python 3.11+, and an API key from one model provider (pick the cheapest one).
+You need Python 3.11+ and an API key from one model provider.
 
 ```bash
-git clone https://github.com/<your-username>/knowme-agent
+git clone <your-repository-url>
 cd knowme-agent
 python -m venv .venv
 ```
 
+Activate the environment:
+
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+```
+
 ```bash
-# Windows
-.venv\Scripts\activate
 # macOS / Linux
 source .venv/bin/activate
 ```
 
+Install the project and create your local configuration:
+
 ```bash
-pip install -e .
+python -m pip install -e .
+```
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+```bash
+# macOS / Linux
 cp .env.example .env
 ```
 
-Open `.env` and fill in two lines (DeepSeek here; `.env.example` shows all 11 providers):
+Edit `.env` with a provider and its key. For example:
 
 ```ini
 KNOWME_PROVIDER=deepseek
-DEEPSEEK_API_KEY=your-key
+DEEPSEEK_API_KEY=your-api-key
 ```
+
+Start the web app:
 
 ```bash
 knowme
 ```
 
-That opens the local web app: **http://localhost:8888 on Windows, http://localhost:7777
-elsewhere**. No key yet? It won't white-screen — it tells you which line is missing and which
-file to put it in.
+KnowMe prints the actual URL in the terminal. The default port is `8888` on Windows and `7777` elsewhere. If the port is busy, it tries the next ports; set `KNOWME_WEB_PORT` to choose the starting port.
 
-**Try it:** *"Remember that I don't take meetings on Friday afternoons."* → quit → start again →
-*"Am I free on Friday afternoon?"*
+Try this on the first run:
 
-> Your memory is one SQLite file: `.knowme/state.db`. Open it, read it, delete it — it's yours.
+1. Send “Remember that I usually avoid meetings on Friday afternoons.”
+2. Restart KnowMe.
+3. Ask “Am I free on Friday afternoon?”
 
-### Other entry points
+Local data is stored under `.knowme/`; `state.db` is a SQLite database. These files are ignored by Git and are never part of a source checkout.
 
-| Command | What it does |
-|---|---|
-| `knowme` | Open the local web app (this is the default) |
-| `knowme web` | The same thing (spelled out for scripts) |
-| `knowme connections` | Which integrations are configured, and whether they work |
-| `knowme brief` | Morning briefing: calendar + mail + memory, **as a loop** |
-| `knowme gather` | The same job, **as a graph**: four sources in parallel, then one digest |
-| `knowme deep_research <topic>` | One deep-research run; the report lands in `.knowme/outbox/` and the knowledge base |
-| `knowme skill install <url>` | Install a skill into your own `.knowme/skills/` |
+## Common commands
 
-`make run / web / brief / gather / eval / eval-judge / gate / lint` are shortcuts for the above.
+| Command | Purpose |
+| --- | --- |
+| `knowme` or `knowme web` | Start the local web app |
+| `knowme connections` | Check integration configuration and health |
+| `knowme brief` | Generate a calendar, mail, and memory briefing |
+| `knowme gather` | Gather several sources in parallel and summarize them |
+| `knowme deep_research <topic>` | Run a deep-research workflow and save its report |
+| `knowme skill install <url>` | Install a skill into `.knowme/skills/` |
 
-## What's in the web app
+## Screenshots
 
-The sidebar holds 10 pages plus 3 agent chat pages. Five runtime pages are deliberately
-not listed — you reach them from links elsewhere:
+The overview page shows the current runtime and its statistics:
 
-| Group | Pages |
-|---|---|
-| Agents | General · Coding · Research (3 chat pages) |
-| Applications | Reader · Document library / Knowledge base / Coding Workspace / Deep research |
-| Management | Overview / Ops / Memory / Behaviour / Models / Connections |
-| Runtime (not in the sidebar) | Gateway / Loop / Graph / Tools / Database |
+![KnowMe overview](docs/images/overview.jpg)
 
-**Overview** draws the architecture as a clickable diagram, with real numbers from this machine:
+The memory page lets you edit, merge, and delete facts:
 
-![Overview — the architecture diagram plus real stats](docs/images/overview.jpg)
+![KnowMe memory management](docs/images/memory.jpg)
 
-**Memory** lets you edit, merge and delete facts directly; the Ops page shows every gate decision:
+## Project layout
 
-![Memory management](docs/images/memory.jpg)
-
-**Deep research** — each round of the run on the left, the report it wrote on the right (and you can
-go back to earlier runs):
-
-![Deep research](docs/images/deepresearch.jpg)
-
-> The conversation in the screenshots is **a real turn**; the memory, notes and report are demo
-> data — that report was written straight into the knowledge base rather than produced by a run,
-> so the left column says "this run left no process record". A run you start yourself keeps every
-> round, and you can replay it frame by frame after closing the page.
-
-## How it works
-
-One run looks like this:
-
-```
-your message → gate (does this turn need memory? what to search for?) → assemble working memory
-            → model reasons → if it wants a tool, call it and feed the result back → reply → save to memory
-```
-
-A few places worth reading on their own:
-
-- **The gate** (`knowme/memory/retrieval_gate.py`): one cheap model call decides whether memory is
-  needed, and what to search for. Its decision, the query, and the entries it hit are shown verbatim
-  on the page.
-- **Skills are loaded on demand**: a `SKILL.md` body enters the prompt only when it matches; the
-  rest of the time all the model sees is a one-line catalog.
-- **Loop vs graph**: fixed shapes get a graph, open-ended ones get the loop. Why it's split that way
-  is in [`docs/loop-vs-graph.md`](docs/loop-vs-graph.md).
-- **Fan-out happens inside a node**: deep research runs its sub-agents in parallel within one node
-  rather than splitting into many nodes — otherwise the "go round again" edge gets lost.
-- **No framework at runtime**: HTTP is `http.server`, storage is `sqlite3`, models go through each
-  vendor's official SDK. The frontend has no build step — 14 JS files are concatenated in a fixed
-  order into a single scope.
-
-## Layout
-
-```
+```text
 knowme/
-  core/         runtime: the loop skeleton, orchestration, sessions, tool registry, context compression
-  memory/       three kinds of memory + the gate + consolidation (chats distilled into facts)
-  tools/        what the model can call: search, calendar, notes, documents, coding, MCP…
-  graph/        the graph engine + workflows (gather / triage / deep_research)
-  agents/       the three role definitions
-  applications/ reader, knowledge base, Coding Workspace, deep research
-  ops/          operations surface: web app, tracing, CLI, release gate
-    static/js/  the frontend (no build step; concatenated in order)
-evals/
-  deterministic/  offline pass/fail tests, no API key needed
-  judge/          LLM-as-judge, scored
-skills/           skills that ship with the package
-sql/              the Supabase backend's schema
-docs/             documentation for humans
+  core/          runtime, sessions, tool registration, and context management
+  memory/        semantic / episodic / procedural memory and retrieval gating
+  tools/         search, calendar, documents, notes, coding, and MCP tools
+  graph/         gather, triage, and deep-research workflows
+  agents/        agent roles and tool scopes
+  applications/  Reader, knowledge base, Coding Workspace, and other apps
+  ops/           local web app, CLI, traces, and release checks
+evals/           deterministic tests and model-judged tests
+skills/          skills shipped with the project
+sql/             Supabase schema
+docs/            user and contributor documentation
 ```
 
-## Tests
+The main turn looks like this:
+
+```text
+message → memory gate → build context → model → optional tool calls → reply → save memory
+```
+
+For a guided code reading order, start with `knowme/core/runtime.py`, `knowme/core/loop.py`, and `knowme/memory/`. The loop/graph boundary is explained in [`docs/loop-vs-graph.md`](docs/loop-vs-graph.md).
+
+## Tests and development
+
+Install development dependencies:
 
 ```bash
-make lint    # ruff
-make eval    # offline deterministic tests: no key, no network
-make gate    # the release gate: deterministic must pass, the scored suite must clear its threshold
+python -m pip install -e ".[dev]"
 ```
 
-`make eval` drives the real code paths with a fake client (`ScriptedClient`) standing in for the
-model, so it is fast, deterministic and free. Anything that depends on the model's judgement
-(for example how accurate the gate is) lives in `evals/judge/` instead.
+Run the usual checks:
 
-## Docs
+```bash
+make lint
+make eval
+```
 
-- [`docs/loop-vs-graph.md`](docs/loop-vs-graph.md) — loops and graphs, and which one to reach for
-- [`docs/CODING_WORKSPACE.md`](docs/CODING_WORKSPACE.md) — letting it edit code, and how far it's allowed to reach
-- [`docs/integrations.md`](docs/integrations.md) — wiring up calendar, mail, Notion, MCP
-- [`docs/memory-backends-playbook.md`](docs/memory-backends-playbook.md) — what changes if you move to Supabase / mem0 / Zep
-- [`docs/agent-book/agent_context_management_guide.md`](docs/agent-book/agent_context_management_guide.md) — how the context management grew, one step at a time
-- [`SECURITY.md`](SECURITY.md) — what it can and cannot do out of the box
+Without `make`:
 
-## Feedback
+```bash
+python -m ruff check knowme evals
+python -m pytest -q evals/deterministic
+```
 
-Issues and PRs are welcome. This repository is **one person's, and small enough to read** —
-please keep changes that size.
+The deterministic suite uses a scripted client instead of a real model, so it needs no API key or network access. See [`docs/DEVELOPMENT_GUIDE.md`](docs/DEVELOPMENT_GUIDE.md) for the code map, test conventions, and how to add a tool.
+
+## Documentation
+
+- [`docs/integrations.md`](docs/integrations.md): optional calendar, mail, Notion, and MCP integrations
+- [`docs/CODING_WORKSPACE.md`](docs/CODING_WORKSPACE.md): Coding Workspace permissions and boundaries
+- [`docs/memory-backends-playbook.md`](docs/memory-backends-playbook.md): switching to Supabase, mem0, or Zep
+- [`docs/loop-vs-graph.md`](docs/loop-vs-graph.md): choosing between loops and graph workflows
+- [`SECURITY.md`](SECURITY.md): default permissions, data locations, and security notes
+
+## Contributing
+
+Issues and pull requests are welcome. Please read [`docs/DEVELOPMENT_GUIDE.md`](docs/DEVELOPMENT_GUIDE.md) first, and run lint plus the deterministic tests before opening a PR.
+
+## License
+
+KnowMe is released under the [MIT License](LICENSE).
