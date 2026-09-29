@@ -1,12 +1,12 @@
 [project]
 name = "knowme-agent"
 version = "0.1.4"
-description = "A minimal, transparent, local-first KnowMe: harness + loop + memory + eval, in code you can read in an afternoon."
+description = "A framework-free, local-first personal agent platform with a native agent runtime."
 readme = "README.md"
 license = { text = "MIT" }
 authors = []
 requires-python = ">=3.11"
-keywords = ["ai-agent", "llm", "agent-framework", "local-first", "llmops", "memory", "eval"]
+keywords = ["ai-agent", "personal-agent", "agent-platform", "llm", "local-first", "llmops", "memory", "eval"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

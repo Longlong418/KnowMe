@@ -1,168 +1,199 @@
 # KnowMe
 
-KnowMe is a local-first personal AI assistant: chat, memory, tools, and run history are managed on your own machine. It is a small Python project you can read end to end, not a black-box agent framework.
+**A framework-free, extensible personal agent platform.**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Offline tests](https://img.shields.io/badge/tests-offline%20suite-2f855a)](evals/deterministic)
+KnowMe is not a chat UI wrapped around an existing agent framework. It implements the agent loop, sessions, context management, memory, tool execution, and run tracing directly in Python, then composes those capabilities into different Agents and Applications.
+
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![uv](https://img.shields.io/badge/package%20manager-uv-DE5FE9)](https://docs.astral.sh/uv/)
+[![MIT License](https://img.shields.io/badge/license-MIT-2f855a)](LICENSE)
 
 [简体中文](README.md)
 
-> Local-first does not mean fully offline: model requests go to the provider selected in `.env`; state and run data stay on your machine by default.
+![KnowMe Web workspace](docs/images/chat.jpg)
 
-![KnowMe chat page](docs/images/chat.jpg)
+## Why it is a platform
 
-## What it does
+The core of KnowMe is not one fixed assistant. It is a reusable personal-agent runtime:
 
-- Runs General, Coding, and Research agents in a local web app. The Reader brings the current document into a conversation.
-- Stores semantic memory, episodic memory, and on-demand `SKILL.md` procedures in SQLite.
-- Connects tools for web search, GitHub, calendars, documents, notes, files, and MCP servers.
-- Runs repeatable workflows for briefings, gathering, and deep research, with a replayable view of each step.
-- Switches model providers from the UI. Built-in providers use their official SDKs; custom OpenAI- and Anthropic-compatible endpoints are supported.
+- **An Agent is configuration, not another runtime.** Each Agent declares its prompt, tool scope, model, context policy, and run budget, then executes on the shared `AgentRuntime`.
+- **An Application is more than a chat page.** Applications keep domain state such as a document, selection, or project file, then pass that working context to an Agent through the Context Bridge.
+- **Execution is observable by default.** Memory gating, context compaction, model iterations, tool calls, workflow nodes, latency, and token usage appear in the Web timeline.
+- **The orchestration core does not depend on an agent framework.** Loop, Session, Context Policy, Tool Registry, and Graph Engine are implemented in this repository; provider SDKs handle model transport.
 
-## Quickstart
+“Framework-free” refers to the orchestration layer: the core does not depend on LangChain, LangGraph, CrewAI, or a similar agent framework. It does not mean zero third-party dependencies. The Web server uses the Python standard library, SQLite is the default store, and the frontend is plain HTML, CSS, and JavaScript with no build step.
 
-You need Python 3.11+ and an API key from one model provider.
+## Web workspace
 
-```bash
-git clone <your-repository-url>
-cd knowme-agent
-python -m venv .venv
-```
+KnowMe organizes the same runtime into three product layers:
 
-Activate the environment:
+| Layer | Built-in today | Purpose |
+| --- | --- | --- |
+| **Agents** | General, Coding, Research | Different prompts and tool scopes for everyday, coding, and research work |
+| **Applications** | Reader and document library, Knowledge Base, Coding Workspace, Deep Research | Stateful work surfaces that give an Agent a concrete task environment |
+| **Management** | Overview, Ops, Memory, Behaviour, Models, Connections | Inspect runtime state and manage models, memory, and integrations |
 
-```powershell
-# Windows PowerShell
-.\.venv\Scripts\Activate.ps1
-```
-
-```bash
-# macOS / Linux
-source .venv/bin/activate
-```
-
-Install the project and create your local configuration:
-
-```bash
-python -m pip install -e .
-```
-
-```powershell
-# Windows PowerShell
-Copy-Item .env.example .env
-```
-
-```bash
-# macOS / Linux
-cp .env.example .env
-```
-
-Edit `.env` with a provider and its key. For example:
-
-```ini
-KNOWME_PROVIDER=deepseek
-DEEPSEEK_API_KEY=your-api-key
-```
-
-Start the web app:
-
-```bash
-knowme
-```
-
-KnowMe prints the actual URL in the terminal. The default port is `8888` on Windows and `7777` elsewhere. If the port is busy, it tries the next ports; set `KNOWME_WEB_PORT` to choose the starting port.
-
-Try this on the first run:
-
-1. Send “Remember that I usually avoid meetings on Friday afternoons.”
-2. Restart KnowMe.
-3. Ask “Am I free on Friday afternoon?”
-
-Local data is stored under `.knowme/`; `state.db` is a SQLite database. These files are ignored by Git and are never part of a source checkout.
-
-## Common commands
-
-| Command | Purpose |
-| --- | --- |
-| `knowme` or `knowme web` | Start the local web app |
-| `knowme connections` | Check integration configuration and health |
-| `knowme brief` | Generate a calendar, mail, and memory briefing |
-| `knowme gather` | Gather several sources in parallel and summarize them |
-| `knowme deep_research <topic>` | Run a deep-research workflow and save its report |
-| `knowme skill install <url>` | Install a skill into `.knowme/skills/` |
-
-## Screenshots
-
-The overview page shows the current runtime and its statistics:
+The Reader also has a dedicated embedded Agent. It receives the open document and current selection instead of answering independently from the material.
 
 ![KnowMe overview](docs/images/overview.jpg)
 
-The memory page lets you edit, merge, and delete facts:
+### Platform capabilities
 
-![KnowMe memory management](docs/images/memory.jpg)
+- Multi-Agent conversations with separate threads, history restoration, and idle-session rotation.
+- A native Agent Loop with model calls, tool execution, result feedback, and an iteration guardrail.
+- Context management with tool-result budgets, long-result pointers, conversation trimming, and state summaries.
+- Semantic, episodic, and procedural memory, with `SKILL.md` loaded on demand.
+- A retrieval gate that decides whether memory is needed, generates the query, and reports its hits.
+- A unified tool system with schemas, per-Agent allowlists, safe execution, and MCP support.
+- An Application Context Bridge for injecting the current resource, content, selection, and UI state into a turn.
+- Live and historical observability through step timelines, JSONL traces, token usage, latency, and cost.
+- A Web model workbench for providers, API keys, main/gate/summary models, and custom OpenAI- or Anthropic-compatible endpoints.
 
-## Project layout
+## Architecture
 
-```text
-knowme/
-  core/          runtime, sessions, tool registration, and context management
-  memory/        semantic / episodic / procedural memory and retrieval gating
-  tools/         search, calendar, documents, notes, coding, and MCP tools
-  graph/         gather, triage, and deep-research workflows
-  agents/        agent roles and tool scopes
-  applications/  Reader, knowledge base, Coding Workspace, and other apps
-  ops/           local web app, CLI, traces, and release checks
-evals/           deterministic tests and model-judged tests
-skills/          skills shipped with the project
-sql/             Supabase schema
-docs/            user and contributor documentation
+```mermaid
+flowchart LR
+    Web[Web Workspace] --> Agents[Agent Profiles]
+    Web --> Apps[Applications]
+    Agents --> Runtime[AgentRuntime]
+    Apps --> Bridge[Application Context Bridge]
+    Bridge --> Runtime
+    Runtime --> Session[Session & Context Policy]
+    Runtime --> Memory[Memory]
+    Runtime --> Loop[Native Agent Loop]
+    Loop --> Tools[Tool Registry & MCP]
+    Memory --> Store[(SQLite / Optional Backends)]
+    Runtime --> Trace[Events, Trace & Evals]
 ```
 
-The main turn looks like this:
+A normal turn follows this path:
 
 ```text
-message → memory gate → build context → model → optional tool calls → reply → save memory
+Web message
+  → resolve AgentSpec
+  → restore Session and Application Context
+  → memory gate
+  → fit the request through Context Policy
+  → Agent Loop: model ↔ tools until a reply is ready
+  → persist the conversation, memory, and trace
 ```
 
-For a guided code reading order, start with `knowme/core/runtime.py`, `knowme/core/loop.py`, and `knowme/memory/`. The loop/graph boundary is explained in [`docs/loop-vs-graph.md`](docs/loop-vs-graph.md).
+The core is intentionally explicit:
 
-## Tests and development
+| Module | Responsibility |
+| --- | --- |
+| `knowme/core/loop.py` | Native observe → reason → act loop |
+| `knowme/core/runtime.py` | Assembly of one complete Agent turn |
+| `knowme/core/session.py` | Conversation history, restoration, and persistence |
+| `knowme/core/context/` | Context budgets, compaction, and summary policies |
+| `knowme/core/spec.py` | Reusable `AgentSpec` declarations |
+| `knowme/core/tools.py` | Tool schemas, allowlists, and execution boundary |
+| `knowme/memory/` | Retrieval gating, stores, consolidation, and skills |
+| `knowme/applications/` | Application backends and the Context Bridge |
+| `knowme/graph/` | The project's own graph runner and workflows |
+| `knowme/ops/web/` | Local Web API and SSE event streaming |
+
+## Quickstart
+
+Requirements:
+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- An API key for a model provider that supports tool calling
+
+After cloning the repository, run:
+
+```bash
+uv sync
+uv run knowme
+```
+
+The terminal prints the actual URL. Defaults are:
+
+- Windows: `http://localhost:8888`
+- macOS / Linux: `http://localhost:7777`
+
+If the port is unavailable, KnowMe automatically tries the following ports.
+
+On the first launch:
+
+1. Open **Models** in the sidebar.
+2. Select a provider and enter its API key.
+3. Fetch or enter a model ID, save it, and make the provider current.
+4. Return to **General** and start the first conversation.
+
+Provider settings are written to the local `.env`; custom provider definitions live in `.knowme/providers.json`. Both locations are ignored by Git.
+
+## Extend with your own Agent
+
+Every Agent runs on the same `AgentRuntime`. Adding one mainly means declaring an `AgentProfile`:
+
+```python
+AgentProfile(
+    id="planner",
+    name="Planner",
+    icon="◇",
+    description="Turn complex goals into executable plans.",
+    spec=AgentSpec(
+        name="planner",
+        system_prompt="You are a planning agent...",
+        tools=frozenset({"search_web", "save_note"}),
+    ),
+)
+```
+
+The runtime continues to own sessions, context, memory, tool execution, and tracing. An Agent only declares what makes it different.
+
+## Extend with your own Application
+
+An Application is a stateful work surface, not a second Agent Core. A new Application normally needs to:
+
+1. Implement domain data and actions under `knowme/applications/`.
+2. Add its Web API and frontend view.
+3. Publish the current resource, content, selection, or UI state through `ApplicationContextBridge`.
+4. Pass the rendered Application Context into the target Agent's next turn.
+
+This makes it possible to add mail, project management, data analysis, or other workspaces without copying the Agent Loop. See [`docs/DEVELOPMENT_GUIDE.md`](docs/DEVELOPMENT_GUIDE.md) for the relevant code paths.
+
+## Data and security boundaries
+
+- The Web server only binds to `127.0.0.1`.
+- Local data lives under `.knowme/`; the primary store is SQLite `state.db`.
+- API keys live in the local `.env`. The Web UI reports whether a key is configured but does not return the full value.
+- Conversations and tool context are sent to the selected model provider. Calendar, Notion, search, or MCP integrations make their corresponding external requests.
+- Coding Workspace file writes and command execution are disabled by default and must be enabled explicitly in the Web UI.
+
+See [`SECURITY.md`](SECURITY.md) for the full security model.
+
+## Development and verification
 
 Install development dependencies:
 
 ```bash
-python -m pip install -e ".[dev]"
+uv sync --extra dev
 ```
 
-Run the usual checks:
+Run lint and the offline deterministic suite:
 
 ```bash
-make lint
-make eval
+uv run ruff check knowme evals
+uv run python -m pytest -q evals/deterministic
 ```
 
-Without `make`:
-
-```bash
-python -m ruff check knowme evals
-python -m pytest -q evals/deterministic
-```
-
-The deterministic suite uses a scripted client instead of a real model, so it needs no API key or network access. See [`docs/DEVELOPMENT_GUIDE.md`](docs/DEVELOPMENT_GUIDE.md) for the code map, test conventions, and how to add a tool.
+The deterministic suite uses a scripted client instead of a real model, so it requires no API key or network access.
 
 ## Documentation
 
-- [`docs/integrations.md`](docs/integrations.md): optional calendar, mail, Notion, and MCP integrations
-- [`docs/CODING_WORKSPACE.md`](docs/CODING_WORKSPACE.md): Coding Workspace permissions and boundaries
-- [`docs/memory-backends-playbook.md`](docs/memory-backends-playbook.md): switching to Supabase, mem0, or Zep
-- [`docs/loop-vs-graph.md`](docs/loop-vs-graph.md): choosing between loops and graph workflows
-- [`SECURITY.md`](SECURITY.md): default permissions, data locations, and security notes
+- [`docs/DEVELOPMENT_GUIDE.md`](docs/DEVELOPMENT_GUIDE.md): code map and how to extend Agents, Applications, and Tools
+- [`docs/CODING_WORKSPACE.md`](docs/CODING_WORKSPACE.md): Coding Workspace permissions and verification flow
+- [`docs/loop-vs-graph.md`](docs/loop-vs-graph.md): the boundary between the Agent Loop and Graph Workflows
+- [`docs/integrations.md`](docs/integrations.md): optional integrations and configuration
+- [`docs/memory-backends-playbook.md`](docs/memory-backends-playbook.md): replacing the default memory backend
 
 ## Contributing
 
-Issues and pull requests are welcome. Please read [`docs/DEVELOPMENT_GUIDE.md`](docs/DEVELOPMENT_GUIDE.md) first, and run lint plus the deterministic tests before opening a PR.
+Issues and pull requests are welcome. Keep changes small and readable, and run lint plus the deterministic suite before submitting.
 
 ## License
 
-KnowMe is released under the [MIT License](LICENSE).
+[MIT](LICENSE)
