@@ -245,6 +245,31 @@ function wireResizer(id, cssVar, key, fromRight, min, max){
     document.addEventListener("mouseup", up);
   };
 }
+// --- 亮 / 暗 -----------------------------------------------------------------
+// 主题只有三档：跟系统（默认，什么都没写）、手动亮、手动暗。切换做的唯一一件
+// 事是往 <html> 写一个 data-theme —— CSS 里 :root[data-theme=…] 把它翻成
+// color-scheme，剩下的颜色全由 light-dark() 现算。所以这里一个色值都不碰，
+// 也不可能出现"两套配色各自漂移"。
+// 首次绘制之前也得定下来，否则会先闪一下亮色再翻暗；那一段在 index.html 的
+// <head> 里，比样式表还早。
+const THEME_KEY = "knowme_theme";
+function currentTheme(){
+  return document.documentElement.dataset.theme
+      || (matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light");
+}
+function paintThemeButton(){
+  const b = document.getElementById("theme-toggle");
+  if (!b) return;
+  const dark = currentTheme() === "dark";
+  b.textContent = dark ? "☀" : "☽";   // 显示点了会变成什么，不是现在是什么
+  b.title = dark ? "切到亮色" : "切到暗色";
+}
+function toggleTheme(){
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(THEME_KEY, next); } catch(e){}
+  paintThemeButton();
+}
 function wireChrome(){
   // restore saved widths
   const nw = localStorage.getItem("navW"); if (nw) document.documentElement.style.setProperty("--nav-w", nw+"px");
@@ -255,6 +280,12 @@ function wireChrome(){
   if (nt) nt.onclick = () => setNav(true);
   if (nr) nr.onclick = () => setNav(false);
   setNav(localStorage.getItem("navHidden") === "1");
+  // 亮 / 暗。按钮和收侧栏那个一样长在静态 shell 里，所以这里直接挂 onclick，
+  // 不走 bootstrap.js 那套"从生成的 onclick 里扫函数名"的白名单 —— 静态 shell
+  // 里的按钮本来就扫不到。
+  const tt = document.getElementById("theme-toggle");
+  if (tt) tt.onclick = toggleTheme;
+  paintThemeButton();
 }
 
 window.addEventListener("hashchange", render);

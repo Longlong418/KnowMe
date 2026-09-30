@@ -1,10 +1,18 @@
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>KnowMe</title>
+<!-- 主题得在**第一次绘制之前**定下来，否则会先闪一下亮色再翻成暗色。
+     这一小段只做这一件事：把上次选的那一档写回 <html> 上的 data-theme。
+     切换本身在 main.js 的 toggleTheme 里，样式在 style.css 的 :root。 -->
+<script>try{var t=localStorage.getItem("knowme_theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="/static/style.css"></head><body>
 <nav id="nav">
   <div class="brand">KnowMe<small id="model" style="cursor:pointer" title="点击切换模型" data-route="models"></small>
-    <button id="nav-toggle" title="隐藏侧栏">&#10094;</button></div>
+    <!-- 两个按钮都 float:right，**先出现的贴最右边**，所以 nav-toggle 写在前面。
+         theme-toggle 的图标由 main.js 的 paintThemeButton 按当前档位改写，
+         这里先给一个默认值，免得脚本还没跑到时按钮是空的、宽度跳一下。 -->
+    <button id="nav-toggle" title="隐藏侧栏">&#10094;</button>
+    <button id="theme-toggle" title="切换亮/暗">&#9789;</button></div>
   <div class="grp">Agents</div>
   <!-- Clicking an agent NAVIGATES to #agent/<id> (openAgent), it no longer just
        swaps the contents of a side column. Back button works because of that. -->

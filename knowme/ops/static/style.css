@@ -1,73 +1,71 @@
 /* ===========================================================================
-   主题：牛皮纸档案盒
+   主题：仪表盘（instrument panel）
    ---------------------------------------------------------------------------
-   底色是档案盒的硬纸板，面板是从盒子里抽出来的索引卡。所以 --panel 必须比
-   --bg 亮，而且两者是同一个暖色系里的一深一浅 —— 白配灰那套是"屏幕上的
-   卡片"，纸配纸才是"放在盒子里的卡片"。这条决定了下面几乎每一个色值。
+   底色是冷灰的地，面板是白的板。分区靠 1px 格线，**不靠投影** —— 投影让面板
+   "浮起来"，那是卡片语言；仪表盘是嵌在板子里的，线才是它的分隔方式。所以
+   --lift 是 none，只有真正盖住页面的东西（弹窗、下拉、提示框）才用 --lift-2。
 
-   三档墨色是打字机色带的颜色，不是纯黑：纯黑在纸上看着像刚印的，不像档案。
+   四个语义色的分工是硬的，而且四者互不相近：
+     --accent 深青 = 可交互的（按钮、链接、选中、当前）
+     --good   深绿 = 正常
+     --warn   琥珀 = 要注意（待配置、陈旧、部分完成）—— **不是故障**
+     --bad    正红 = 出事了
+   主色之所以不是琥珀，正是因为琥珀是"注意"的颜色：连接页上「已配置但未验证」
+   只是还没测过、不是出错（见 .connstatus.configured 的注释），主色一变成琥珀，
+   那一条就被读成警报了。老主题用墨蓝、新主题用深青，是同一条理由 ——
+   换皮时这条不能丢。
 
-   两个强调色分工是硬的：
-     --accent 墨蓝  = 可交互的（链接、选中、主按钮），像用钢笔写的
-     --bad     朱砂  = **只给警报**。全站唯一的红，所以它一冒出来你就知道
-                       出事了 —— 这就是主色不能也用红的原因。老主题的
-                       --accent 是靛蓝、--bad 是砖红，两者本来就分得开，
-                       换皮时这条不能丢。
+   两种模式**只声明一次**：每个值是 light-dark(亮, 暗)，由 :root 上的
+   color-scheme 决定用哪个。所以这里没有第二份 token 列表，也不存在两套
+   配色各自漂移的可能；手动切换只是去改 color-scheme 一个属性。
+
+   字体分两路，不许混：中文正文走 --sans（雅黑）。--mono 只给**机器产出的
+   东西** —— 数字、模型名、耗时、ID。中文字符根本不吃 --mono（Consolas 没有
+   汉字，浏览器会回落到系统默认的雅黑，等于没换），所以正文一律 sans。
    =========================================================================== */
 :root{
-    /* let native UI (scrollbars, form controls) follow the active scheme,
-       otherwise they stay light even in dark mode */
-    color-scheme:light dark;
+    /* 亮色是默认。原生控件（滚动条、下拉）跟着这个走。 */
+    color-scheme:light;
 
-    --bg:#e0d6bf;          /* 档案盒硬纸板 */
-    --panel:#f8f3e5;       /* 索引卡 */
-    --card:var(--bg);      /* 嵌在卡片里的控件：比卡片深一档 = 凹进去 */
-    --line:#cabd9c;        /* 卡片的格子线 */
-    --line2:#ac9d7a;       /* 更重的一笔：外框、分隔 */
+    --bg:light-dark(#eceef1,#15181b);      /* 冷灰地 */
+    --panel:light-dark(#fff,#1d2126);      /* 面板 */
+    --card:light-dark(#f6f7f9,#191d21);    /* 凹槽：输入框、代码块、工具结果 */
 
-    --ink:#2e2820;--ink2:#5a5140;--ink3:#786c55;
-    /* --ink3 是 11.5px 的说明文字，压在 --panel 上是 4.7:1，过 AA。
-       压在 --bg 上只有 3.6:1 —— 纸板本身就深，这是这套配色换来的代价，
-       所以说明文字尽量待在卡片里（.meta 绝大多数本来就在卡片里）。 */
+    --line:light-dark(#d9dee3,#2a3037);    /* 格线 */
+    --line2:light-dark(#b7c0c9,#3d454e);   /* 重一档：表头线、控件描边 */
 
-    --accent:#2f4361;--accent-soft:#dde1e5;
-    --bad:#a8341f;--bad-soft:#f0dbd3;
-    /* 想让主色更贴"朱砂印"那个味道，把上面 --accent 换成 #b23a2e 即可 ——
-       代价是它和 --bad(#a8341f) 只差一点明度，警报就不再一眼跳出来了。
-       这就是为什么默认选墨蓝：档案盒上最像印章的那点红，得留给出事的时候。 */
-    --good:#3f6b3a;--good-soft:#dde5d5;
-    --warn:#8f6410;--warn-soft:#efe2c6;
-    --on-accent:#fdfaf0;   /* 压在 --accent 上的字：纸白，不是纯白 */
+    --ink:light-dark(#141a1f,#e3e8ed);
+    --ink2:light-dark(#5b6672,#a2adb8);
+    /* --ink3 是 11.5px 的说明文字：压在 --panel 上是 4.6:1，过 AA；
+       压在 --bg（冷灰地）上只有 4.0:1 —— 地比板深，这是浅色方案换来的代价，
+       所以说明文字尽量待在面板里（.meta 绝大多数本来就在面板里）。 */
+    --ink3:light-dark(#6b7681,#78848f);
 
-    /* 纸面阴影：短、紧、偏暖。大而软的灰影是"浮起来的卡片"，那是另一套
-       设计语言；纸是**放**在纸上的，阴影只说明边缘压住了下面那张。 */
-    --lift:0 1px 0 rgba(72,58,32,.07),0 1px 3px rgba(72,58,32,.12);
-    --lift-2:0 2px 0 rgba(72,58,32,.09),0 12px 30px rgba(72,58,32,.18);
-    --radius:3px;          /* 纸是裁开的，不是倒过来的角 */
+    --accent:light-dark(#0f6f80,#5cc4d6);
+    --accent-soft:light-dark(#e3f0f2,#14343a);
+    --on-accent:light-dark(#fff,#062024);  /* 压在 --accent 上的字 */
+    --good:light-dark(#15803d,#4cc06a);--good-soft:light-dark(#e8f5ec,#16251a);
+    --warn:light-dark(#a16207,#e0b245);--warn-soft:light-dark(#fbf1dc,#2e2513);
+    --bad:light-dark(#b91c1c,#f0715f);--bad-soft:light-dark(#fdecec,#2b1815);
 
-    /* 等宽。Consolas 排在 Courier New 前面是**为可读性让路**：Courier New
-       在 11px 上太细，而这个应用满屏 11px 的等宽标签。想要更纯的打字机味，
-       把 'Courier New' 提到最前面即可 —— 这一行就是那个开关。 */
-    --mono:ui-monospace,Consolas,'Courier New',Courier,monospace;
-    /* 纸面上的正文字体：衬线。中文落到**宋体** —— 这是换皮里最要紧的一步，
-       因为界面 80% 是中文，而中文字符根本不吃 --mono（Consolas 没有汉字，
-       浏览器会回落到系统默认的雅黑，等于没换）。宋体才是"印刷品"的信号，
-       也正因为它，这次换皮不靠字体宽度取胜，靠的是字面本身。
-       SimSun 必须排在任何一个无衬线字体前面，否则雅黑会赢。 */
-    --serif:Georgia,'Songti SC','Source Han Serif SC','Noto Serif CJK SC',
-            SimSun,'宋体',serif;
+    --lift:none;          /* 面板嵌在板上，不浮起来 */
+    --lift-2:0 10px 28px light-dark(rgba(16,30,45,.20),rgba(0,0,0,.55));
+    --radius:3px;
+
+    /* 正文。中文落到微软雅黑 —— 界面 80% 是中文，这一行决定整页的字面。 */
+    --sans:"Microsoft YaHei","微软雅黑",system-ui,-apple-system,sans-serif;
+    /* 机器产出。Consolas 排在 Courier New 前面是**为可读性让路**：Courier New
+       在 11px 上太细，而这个应用满屏 11px 的等宽标签。 */
+    --mono:"Cascadia Mono",Consolas,'Courier New',Courier,monospace;
   }
-  @media (prefers-color-scheme:dark){:root{
-    --bg:#17150f;--panel:#211d15;--card:#12100c;
-    --line:#39332a;--line2:#4a4237;
-    --ink:#e9e1cf;--ink2:#a99e88;--ink3:#948a71;
-    --accent:#8aa9d0;--accent-soft:#242b33;
-    --good:#7aa86a;--good-soft:#1c2718;--bad:#e0705a;--bad-soft:#331a14;
-    --warn:#cf9f47;--warn-soft:#2e2617;
-    --on-accent:#12100c;
-    --lift:0 1px 0 rgba(0,0,0,.35),0 1px 3px rgba(0,0,0,.45);
-    --lift-2:0 2px 0 rgba(0,0,0,.4),0 12px 30px rgba(0,0,0,.55);
-  }}
+  /* 亮暗三态：跟系统（默认）/ 手动亮 / 手动暗。三者只差 color-scheme 一个
+     属性，上面那串 token 一个字都不用重写。data-theme 由聊天页右上角那个
+     按钮写（main.js 的 toggleTheme），首次绘制前的那一下在 index.html 里。 */
+  :root[data-theme=light]{color-scheme:light}
+  :root[data-theme=dark]{color-scheme:dark}
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme=light]){color-scheme:dark}
+  }
   *{box-sizing:border-box;margin:0}
   /* thin theme-colored scrollbars (like the old chat dock's), instead of the
      chunky native ones */
@@ -81,26 +79,19 @@
      380px of every page, including the ones that need width most (a document, a
      file). A conversation is a route now, so it gets the whole pane. */
   body{background:var(--bg);color:var(--ink);
-       font:14px/1.55 var(--serif);
+       font:13.5px/1.7 var(--sans);
        display:flex;height:100vh;overflow:hidden}
-  /* --- 纸感：两层固定的覆盖物，都不参与交互 -------------------------------
-     两个伪元素都停在 z-index:1，**故意压在模态框(z-index:60)下面**：弹窗是
-     拿在手里看的一张纸，不该跟着背后的盒子一起起毛。.pagehead 是 z-index:6，
-     所以页头也不起毛 —— 那是一块压在所有东西上面的卡纸。
+  /* --- 顶端那条断续的色带：整页唯一的装饰 --------------------------------
+     以前这里是两层固定的纸感覆盖物（压暗的四边 + feTurbulence 纸纤维）。
+     仪表盘不用纸纹：地是干净的冷灰，装饰只留顶端这一条 —— 它属于"面板在
+     通电"的语言，也顺手给窗口画出一条上边界。
 
-     ::before 是盒壁。视口四边压暗一点，中间那块"纸"才像是**放进**盒子里的，
-     而不是铺满整个屏幕的。
-     ::after 是纸纤维。feTurbulence 现算的噪点，铺成 180px 的重复贴图，不
-     联网、不加构建步骤。深色下换 screen —— multiply 在近黑底上什么也看不见。 */
-  body::before{content:"";position:fixed;inset:0;z-index:1;pointer-events:none;
-    background:radial-gradient(125% 88% at 50% 42%,transparent 52%,rgba(72,58,32,.14))}
-  body::after{content:"";position:fixed;inset:0;z-index:1;pointer-events:none;
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)'/%3E%3C/svg%3E");
-    mix-blend-mode:multiply;opacity:.20}
-  @media (prefers-color-scheme:dark){
-    body::before{background:radial-gradient(125% 88% at 50% 42%,transparent 45%,rgba(0,0,0,.5))}
-    body::after{mix-blend-mode:screen;opacity:.07}
-  }
+     z-index:7 是**故意**的：压在 .pagehead(6) 上面，但远低于模态框(60)，
+     弹窗是拿在手里看的一块板，不该被背后那条带子穿过。
+     pointer-events:none 保证它不吃点击。 */
+  body::before{content:"";position:fixed;top:0;left:0;right:0;height:3px;z-index:7;
+    pointer-events:none;opacity:.5;
+    background:repeating-linear-gradient(90deg,var(--accent) 0 30px,transparent 30px 60px)}
   nav{width:var(--nav-w,208px);flex-shrink:0;border-right:1px solid var(--line);padding:20px 12px;
       height:100vh;overflow-y:auto}
   /* drag handle between the sidebar and the pane + elegant hide/show */
@@ -109,6 +100,11 @@
   body.resizing{cursor:col-resize;user-select:none}
   #nav-toggle{float:right;background:none;border:none;color:var(--ink3);cursor:pointer;font-size:12px;padding:2px 4px;line-height:1}
   #nav-toggle:hover{color:var(--ink)}
+  /* 亮/暗切换。和收侧栏那个按钮并排，样式同源但多一圈描边 —— 它是"开关"，
+     不是"收起"，描边说明它可点。 */
+  #theme-toggle{float:right;background:none;border:1px solid var(--line2);border-radius:var(--radius);
+    color:var(--ink3);cursor:pointer;font-size:11px;line-height:1;padding:2px 6px;margin-left:6px}
+  #theme-toggle:hover{color:var(--accent);border-color:var(--accent)}
   #nav-reopen{display:none;position:fixed;top:12px;left:12px;z-index:25;background:var(--panel);
     border:1px solid var(--line2);border-radius:var(--radius);color:var(--ink2);width:34px;height:30px;cursor:pointer;font-size:14px}
   body.nav-hidden #nav,body.nav-hidden #nav-resizer{display:none}
@@ -123,8 +119,8 @@
   nav a{display:flex;justify-content:space-between;align-items:center;color:var(--ink2);
         text-decoration:none;padding:6px 10px 6px 20px;border-radius:6px;font-size:13.5px;margin-top:2px}
   nav a:hover{background:var(--panel);color:var(--ink)}
-  /* 选中项做成"抽出来的一张"：卡片底色 + 左边一道墨条。比一整块淡色底更
-     像档案盒里立起来的那张分隔卡，也不会在长列表里糊成一片。 */
+  /* 选中项左边一道主色条 —— 和顶端那条色带同一套语言：位置靠一条边来报，
+     不靠整块底色。淡底 + 色条在长列表里也认得出，糊不成一片。 */
   nav a.on{background:var(--panel);color:var(--accent);font-weight:600;
            box-shadow:inset 3px 0 0 var(--accent)}
   .agent-link{width:100%;display:flex;align-items:center;gap:9px;border:0;background:transparent;
@@ -172,13 +168,20 @@
      （线在 .pagehead 上）。宋体的横细竖粗在 20px 上才出得来。 */
   h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin-bottom:3px}
   .sub{color:var(--ink3);font-size:12px;font-family:var(--mono)}
-  /* 小节标题是**标签**，不是标题：打字机、大写、拉开字距。同样是 11px 的
-     大写字母，衬线体和等宽体读起来是两件事 —— 后者是"这张卡上印的"。 */
+  /* 小节标题是**标签**，不是标题：打字机、大写、拉开字距，前面加一个小方灯
+     —— 和 .pill 的圆点同一套语言：一小块颜色先说"这一节是什么"。
+     那个方块用 inline-block 而不是 flex 布局：全站二十多处 h2 里带着一段
+     <span class="meta"> 说明文字，h2 一旦变成 flex 容器，说明文字会各自
+     成为 flex item 被挤成窄条换行。inline-block 不动布局模式，长短都吃得下。 */
   h2{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--ink2);
      font-family:var(--mono);font-weight:600;margin:28px 0 10px}
+  h2::before{content:"";display:inline-block;width:6px;height:6px;border-radius:1px;
+             background:var(--accent);margin-right:9px;vertical-align:1px}
   .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:10px}
   .tile{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
-  .tile b{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums;display:block}
+  /* 数字是机器写的，走等宽 + 等宽数字：位数对得齐，扫一眼能比大小。 */
+  .tile b{font-family:var(--mono);font-size:21px;font-weight:600;
+          font-variant-numeric:tabular-nums;display:block}
   .tile span{color:var(--ink2);font-size:11.5px}
   .map{display:flex;flex-direction:column;gap:10px;margin-top:6px}
   .lane{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
@@ -190,9 +193,9 @@
   .box b{font-size:13px;font-weight:550;display:block}
   .box span{color:var(--ink2);font-size:11.5px}
   .arrow{align-self:center;color:var(--ink3);padding:0 8px;font-size:13px}
-  /* 索引卡。纸是**裁**开的，所以没有 8px 的倒角，只有 --radius 那一下裁口；
-     顶上那条略重的横线是卡片的印刷头，也是"这一沓里的一张"的信号。 */
-  .card{background:var(--panel);border:1px solid var(--line);border-top-color:var(--line2);
+  /* 一块面板。四条边一样重（不靠加粗顶边做"印刷头"），分区交给格线和 h2
+     那条通栏细线；--lift 是 none，所以它**嵌**在冷灰的地上，不浮起来。 */
+  .card{background:var(--panel);border:1px solid var(--line);
         border-radius:var(--radius);
         padding:14px 16px;margin-bottom:10px;position:relative;box-shadow:var(--lift)}
   .badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;
@@ -286,7 +289,9 @@
              text-size-adjust:none;forced-color-adjust:none;transform-origin:0 0;caret-color:CanvasText}
   .textLayer span,.textLayer br{color:transparent;position:absolute;white-space:pre;
              cursor:text;transform-origin:0% 0%}
-  .textLayer ::selection{background:rgba(79,90,220,.32)}
+  /* PDF 页永远是白纸（.pdf-page 是 #fff），所以这层选区不跟着主题变 —— 它压
+     的是纸，不是界面。 */
+  .textLayer ::selection{background:rgba(15,111,128,.28)}
   .reader-selection{position:sticky;bottom:0;margin-top:12px;padding:10px 14px;background:var(--accent-soft);
       border:1px solid var(--accent);border-radius:var(--radius);display:none;z-index:4}
   .reader-selection #rc-text{margin:6px 0;color:var(--accent);word-break:break-word;
@@ -318,13 +323,13 @@
   .r .mdtable{border-collapse:collapse;margin:8px 0;font-size:12.5px;width:100%;display:block;overflow-x:auto}
   .r .mdtable th,.r .mdtable td{border:1px solid var(--line2);padding:5px 8px;text-align:left;white-space:nowrap}
   .r .mdtable th{background:var(--bg);font-weight:600;color:var(--ink)}
-  /* fenced code blocks */
+  /* fenced code blocks. 底色用 --card（凹槽），条的底色用 --bg —— 两者都比
+     所在的回复气泡深一档，所以代码块是"嵌进去的"。以前这里是两段写死的
+     rgba + 一条 @media 覆盖，手动切主题时它们不会跟着变；现在交给 token。 */
   .mdcode{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin:10px 0;
-          background:rgba(72,58,32,.055)}
-  @media(prefers-color-scheme:dark){.mdcode{background:rgba(0,0,0,0.40)}}
+          background:var(--card)}
   .mdcode-head{display:flex;align-items:center;justify-content:space-between;padding:5px 12px;
-               border-bottom:1px solid var(--line);background:rgba(72,58,32,.04)}
-  @media(prefers-color-scheme:dark){.mdcode-head{background:rgba(255,255,255,0.04)}}
+               border-bottom:1px solid var(--line);background:var(--bg)}
   .mdcode-lang{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;
                letter-spacing:.08em;color:var(--ink3);font-weight:600}
   .mdcode-copy{background:none;border:1px solid var(--line2);border-radius:6px;color:var(--ink3);
@@ -352,6 +357,8 @@
  .kb-note-agent{color:var(--ink3);border:1px solid var(--line);border-radius:6px;padding:0 4px;font:10px var(--mono)}
  .kb-note-preview{grid-column:1/3;color:var(--ink3);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .kb-editor{padding:22px;min-width:0}
+ /* 这两个是"整页第一眼"的引导标题，不是小节标签 —— 不要小方灯。 */
+ .kb-empty-editor h2::before,.kb-create-editor h2::before{display:none}
  .kb-empty-editor,.kb-create-editor{max-width:760px;margin:10vh auto 0;text-align:center}
  .kb-empty-editor p{color:var(--ink2);max-width:480px;margin:8px auto 18px}
  .kb-empty-icon{font-size:32px;color:var(--accent);margin-bottom:8px}
@@ -426,8 +433,8 @@
   /* 拓扑图坐在一块**凹进去的纸板**上。这不是装饰：节点框填的是 --panel，
      而图外面那张 .card 也是 --panel —— 同色，方框就只剩一根细线可看，暗色
      下几乎整个消失。垫一层 --bg，方框就重新立起来了，两种配色下都成立。
-     图的标签换成 --serif，跟页面其余的字一套。 */
-  .arch{width:100%;min-width:760px;height:auto;font-family:var(--serif);
+     图的标签换成 --sans，跟页面其余的字一套。 */
+  .arch{width:100%;min-width:760px;height:auto;font-family:var(--sans);
         background:var(--bg);border-radius:var(--radius)}
   .arch .container{fill:none;stroke:var(--line2);stroke-dasharray:5 4}
   /* LLM Ops is a SEPARATE system (offline, improves the agent) — a solid
@@ -498,9 +505,11 @@
   .srcpill.mcp{background:var(--good-soft);color:var(--good)}
   .srcpill.apple{background:#0000;border:1px solid var(--line2);color:var(--ink2)}
   /* read-only SQL console (the Supabase-editor idea, scoped down) */
-  .sqlbox{width:100%;min-height:70px;background:#0b0b0d;color:#d6d7de;border:1px solid var(--line2);
+  /* 这个"黑"是刻意的：SQL 控制台就该像终端。所以它**不跟**主题走，两种模式下
+     都是深色 —— 只写一次 light-dark 就够，不必再留一条 @media 覆盖。 */
+  .sqlbox{width:100%;min-height:70px;border:1px solid var(--line2);
+          background:light-dark(#1c1c20,#0b0b0d);color:light-dark(#e6e6ea,#d6d7de);
           border-radius:var(--radius);padding:11px 13px;font:12.5px/1.5 var(--mono);resize:vertical;outline:none}
-  @media (prefers-color-scheme:light){.sqlbox{background:#1c1c20;color:#e6e6ea}}
   .sqlbox:focus{border-color:var(--accent)}
   .qexample{font-family:var(--mono);font-size:11.5px;color:var(--accent);cursor:pointer;border-bottom:1px dashed var(--accent)}
   /* session picker in the chat surfaces */
@@ -838,7 +847,10 @@
   table{width:100%;border-collapse:collapse;font-size:13px}
   td,th{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
   tr:last-child td{border-bottom:none}
-  th{color:var(--ink3);font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+  /* 表头是列名标签，走等宽 —— 和 h2、.sub、.tile b 同一套"机器写的东西"。
+     底下那条线用 --line2（重一档）：表头和数据之间的分界，比行与行之间重。 */
+  th{color:var(--ink3);font-family:var(--mono);font-size:10.5px;text-transform:uppercase;
+     letter-spacing:.07em;font-weight:600;border-bottom-color:var(--line2)}
   .empty{color:var(--ink3);font-style:normal;font-size:13px}
   code{font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--line);
        padding:1px 5px;border-radius:4px}
@@ -1105,7 +1117,7 @@ details.subterm > summary.subterm-h::-webkit-details-marker{ display:none; }
 .conncard .conndesc{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
   overflow:hidden;min-height:36px}
 .connactions{margin-top:auto}
-.connmodal-back{position:fixed;inset:0;z-index:60;background:rgba(40,30,15,.5);
+.connmodal-back{position:fixed;inset:0;z-index:60;background:rgba(12,20,26,.5);
   display:flex;align-items:center;justify-content:center;padding:24px}
 .connmodal{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
   box-shadow:var(--lift-2);width:min(560px,100%);max-height:88vh;
