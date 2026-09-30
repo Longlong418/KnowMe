@@ -35,7 +35,7 @@ KnowMe 把同一套运行时组织成三个层次：
 
 Reader 还有一个嵌在阅读器中的专用 Agent。它会收到当前文档和选区，而不是脱离材料自由回答。
 
-![KnowMe 总览页](docs/images/reader.png)
+![KnowMe 总览页](docs/images/overview.jpg)
 
 ### 平台当前提供的能力
 
